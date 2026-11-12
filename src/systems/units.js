@@ -1587,6 +1587,18 @@ function updateEngine(state, engine, dt) {
 
   refillEngine(state, engine, dt);
 
+  // A tank that has run dry is no use at a fire: drive back to the station to
+  // refill (once; the order can be overridden, and it re-arms after a refill). Beside
+  // a hydrant it stays: connect the line (G) instead.
+  if (engine.water > engine.capacity * 0.5) engine.dryHome = false;
+  if (engine.water <= 0 && engine.capacity > 0 && engine.capacity < 50000 && !engine.dryHome
+    && !engine.refilling && !engine.supply && isFirefighter(engine) && !engine.spec.boat
+    && !hydrantInReach(state, engine)) {
+    engine.dryHome = true;
+    addEvent(state, `${engine.name} is out of water — returning to the station to refill`, 'warn');
+    sendEngineHome(state, engine);
+  }
+
   if (engine.water < engine.capacity * 0.2 && !engine.lowWarned) {
     engine.lowWarned = true;
     addEvent(state, `${engine.name} water low — find a hydrant`, 'warn');

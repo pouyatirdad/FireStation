@@ -12,7 +12,7 @@ import {
   selectPatient, selectBlockade, selectVictim, commandDispatchVictim,
   commandBuyStation, commandLoan, commandRepay, commandInsurance,
   commandTrain, commandAcceptContract, commandEquip,
-  commandDispatchAll, selectUnitByKey, commandBindKey,
+  commandDispatchAll, commandReturnAll, selectUnitByKey, commandBindKey,
   selectWildfire, getSelected, serialize, loadState,
 } from './systems/game.js';
 import { createAudio } from './systems/audio.js';
@@ -514,6 +514,7 @@ function onAction(action, data = {}) {
     case 'hospital': commandHospital(state); break;
     case 'dispatch': commandDispatch(state); break;
     case 'dispatch-all': if (commandDispatchAll(state)) audio.play('radio'); break;
+    case 'back-all': if (commandReturnAll(state)) audio.play('radio'); break;
     case 'rebind-key': {
       const engine = engineForUnit(state, getSelected(state));
       if (engine) setRebind(rebindId === engine.id ? null : engine.id);
@@ -729,7 +730,7 @@ window.addEventListener('keydown', (ev) => {
     }
     if (!engine || ev.repeat) return;
     if (!isUnitKey(key)) {
-      addEvent(state, 'That key is already used by the game — pick a digit or one of Q W S Z I J L N O Y', 'warn');
+      addEvent(state, 'That key is already used by the game — pick a digit or one of Q W S I J L N O Y', 'warn');
       return;
     }
     commandBindKey(state, engine.id, key);
@@ -794,6 +795,7 @@ window.addEventListener('keydown', (ev) => {
   switch (key) {
     case 'd': commandDispatch(state); break;
     case 'a': if (commandDispatchAll(state)) audio.play('radio'); break;
+    case 'z': if (commandReturnAll(state)) audio.play('radio'); break;
     case 'e': commandDeploy(state); break;
     case 'r': commandRecall(state); break;
     case 'h': commandReturnHome(state); break;

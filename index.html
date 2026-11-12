@@ -2007,6 +2007,7 @@ body {
       <section class="panel panel--incidents" id="incidents" aria-label="Incidents">
         <h2 class="panel__title">Incidents <span class="count" id="incident-count" data-on="">0</span>
           <button type="button" class="btn btn--small btn--alert panel__action" data-action="dispatch-all" title="Send every free vehicle to an incident of its own (A)">Dispatch all<kbd>A</kbd></button>
+          <button type="button" class="btn btn--small" data-action="back-all" title="Send every vehicle back to its station (Z)">Back all<kbd>Z</kbd></button>
         </h2>
         <ol class="incident-list" id="incident-list"></ol>
       </section>
@@ -2020,6 +2021,7 @@ body {
       <div class="roster__actions">
         <button type="button" class="btn btn--small" data-action="dispatch">Dispatch<kbd>D</kbd></button>
         <button type="button" class="btn btn--small btn--alert" data-action="dispatch-all" title="Send every free vehicle to an incident of its own">All<kbd>A</kbd></button>
+        <button type="button" class="btn btn--small" data-action="back-all" title="Send every vehicle back to its station">Back all<kbd>Z</kbd></button>
         <button type="button" class="btn btn--small" data-action="deploy">Deploy<kbd>E</kbd></button>
         <button type="button" class="btn btn--small" data-action="recall">Pack up<kbd>R</kbd></button>
         <button type="button" class="btn btn--small" data-action="home">Station<kbd>H</kbd></button>
@@ -2036,6 +2038,7 @@ body {
       <span><b>Right-click</b> order</span>
       <span><kbd>D</kbd> dispatch</span>
       <span><kbd>A</kbd> dispatch all</span>
+      <span><kbd>Z</kbd> back all</span>
       <span><kbd>E</kbd> deploy</span>
       <span><kbd>G</kbd> hydrant</span>
       <span><kbd>Tab</kbd> next incident</span>
@@ -2099,7 +2102,7 @@ body {
           <dt>Drag</dt><dd>Pan the map</dd>
           <dt>Scroll</dt><dd>Zoom around the pointer</dd>
           <dt>Arrow keys</dt><dd>Pan the map</dd>
-          <dt>1 – 9, 0, Q W S Z I J L N O Y</dt><dd>Select a vehicle. Every vehicle has its own key; select one and press <b>Shortcut</b> on its card to give it a different key (Backspace clears it)</dd>
+          <dt>1 – 9, 0, Q W S I J L N O Y</dt><dd>Select a vehicle. Every vehicle has its own key; select one and press <b>Shortcut</b> on its card to give it a different key (Backspace clears it)</dd>
           <dt>Tab</dt><dd>Jump to the next incident (fire, forest fire, wreck or injured person)</dd>
           <dt>Home</dt><dd>Jump back to Station 1</dd>
           <dt>U</dt><dd>Show or hide the unit list (the Units button, top left)</dd>
@@ -2109,7 +2112,8 @@ body {
           <dt>M</dt><dd>Sound on or off</dd>
           <dt>Space</dt><dd>Pause or resume</dd>
           <dt>D</dt><dd>Dispatch to the fire that most needs it (one with no unit on it first) — an ambulance goes to the nearest patient</dd>
-          <dt>A</dt><dd>Dispatch all: every free vehicle goes to an incident of its own — fires, forest fires, injured people, people in the water, wrecks — and spare vehicles reinforce the big fires</dd>
+          <dt>A</dt><dd>Dispatch all: every free vehicle goes to an incident of its own — fires, forest fires, injured people, people in the water, wrecks — one vehicle per incident</dd>
+          <dt>Z</dt><dd>Back all: every vehicle returns to its station (an ambulance with patients goes to the hospital first)</dd>
           <dt>E</dt><dd>Deploy the crew at the engine</dd>
           <dt>R</dt><dd>Pack the crew back up</dd>
           <dt>G</dt><dd>Connect or detach the hydrant supply line</dd>
@@ -3475,13 +3479,13 @@ __m["src/core/hotkeys.js"] = (function () {
 
 // Keys that already do something (see the key handler in main.js).
 const RESERVED_KEYS = new Set([
-  'd', 'a', 'e', 'r', 'h', 'g', 'p', 'k', 'c', 'u', 'f', 'x', 'v', 't', 'm', 'b',
+  'd', 'a', 'z', 'e', 'r', 'h', 'g', 'p', 'k', 'c', 'u', 'f', 'x', 'v', 't', 'm', 'b',
 ]);
 
 // What a unit may be bound to, in the order they are handed out.
 const UNIT_KEYS = [
   '1', '2', '3', '4', '5', '6', '7', '8', '9', '0',
-  'q', 'w', 's', 'z', 'i', 'j', 'l', 'n', 'o', 'y',
+  'q', 'w', 's', 'i', 'j', 'l', 'n', 'o', 'y',
 ];
 
 const isUnitKey = (key) => UNIT_KEYS.includes(key);
@@ -7120,6 +7124,18 @@ function updateEngine(state, engine, dt) {
 
   refillEngine(state, engine, dt);
 
+  // A tank that has run dry is no use at a fire: drive back to the station to
+  // refill (once; the order can be overridden, and it re-arms after a refill). Beside
+  // a hydrant it stays: connect the line (G) instead.
+  if (engine.water > engine.capacity * 0.5) engine.dryHome = false;
+  if (engine.water <= 0 && engine.capacity > 0 && engine.capacity < 50000 && !engine.dryHome
+    && !engine.refilling && !engine.supply && isFirefighter(engine) && !engine.spec.boat
+    && !hydrantInReach(state, engine)) {
+    engine.dryHome = true;
+    addEvent(state, `${engine.name} is out of water — returning to the station to refill`, 'warn');
+    sendEngineHome(state, engine);
+  }
+
   if (engine.water < engine.capacity * 0.2 && !engine.lowWarned) {
     engine.lowWarned = true;
     addEvent(state, `${engine.name} water low — find a hydrant`, 'warn');
@@ -8484,7 +8500,7 @@ function updateSelection(state) {
 function shortcutRow(state, engine) {
   const waiting = state.ui.rebinding === engine.id;
   return '<div class="sel__shortcut"><span>Shortcut</span>' +
-    '<button type="button" class="btn btn--small' + (waiting ? ' is-active' : '') + '" data-action="rebind-key" title="Click, then press the key you want for this unit (a digit or Q W S Z I J L N O Y). Backspace clears it.">' +
+    '<button type="button" class="btn btn--small' + (waiting ? ' is-active' : '') + '" data-action="rebind-key" title="Click, then press the key you want for this unit (a digit or Q W S I J L N O Y). Backspace clears it.">' +
     (waiting ? 'Press a key…' : (engine.hotkey ? '<kbd>' + esc(engine.hotkey.toUpperCase()) + '</kbd> change' : 'Set a key')) + '</button></div>';
 }
 
@@ -8980,7 +8996,7 @@ function updateStation(state) {
     '<button type="button" class="btn btn--small" data-action="load-game">Load</button>' +
     '<button type="button" class="btn btn--small" data-action="new-shift">New shift</button></div>' +
     '<p class="station__saved">' + (state.saveStatus ? 'Saved at ' + state.saveStatus : 'Autosaves every 30 seconds') + '</p>' +
-    '<p class="station__keys"><kbd>B</kbd> headquarters · <kbd>D</kbd> dispatch · <kbd>A</kbd> dispatch all · <kbd>E</kbd> deploy · <kbd>R</kbd> pack up · <kbd>G</kbd> hydrant · <kbd>P</kbd> pharmacy · <kbd>K</kbd> hospital · <kbd>Tab</kbd> next incident · <kbd>M</kbd> sound · <kbd>F1</kbd> controls</p>';
+    '<p class="station__keys"><kbd>B</kbd> headquarters · <kbd>D</kbd> dispatch · <kbd>A</kbd> dispatch all · <kbd>Z</kbd> back all · <kbd>E</kbd> deploy · <kbd>R</kbd> pack up · <kbd>G</kbd> hydrant · <kbd>P</kbd> pharmacy · <kbd>K</kbd> hospital · <kbd>Tab</kbd> next incident · <kbd>M</kbd> sound · <kbd>F1</kbd> controls</p>';
 
   const html = '<p class="menu__eyebrow">Headquarters</p>' + tabs + body + footer;
   // Rebuilding the DOM under the pointer swallows clicks, so only touch it on a change.
@@ -9320,11 +9336,11 @@ const { dist } = __m["src/core/math.js"];
 const { addEvent } = __m["src/systems/events.js"];
 const { activeFires } = __m["src/systems/fire.js"];
 const { findPatient, isMedical } = __m["src/systems/medical.js"];
-const { boatCanReach, canDive, crewOf, isFirefighter, orderAmbulanceToPatient, orderEngine, orderEngineToBlockade, orderEngineToVictim, orderEngineToWildfire, sendToHospital, toolCount, toolsFree } = __m["src/systems/units.js"];
+const { boatCanReach, canDive, crewOf, isFirefighter, orderAmbulanceToPatient, orderEngine, orderEngineToBlockade, orderEngineToVictim, orderEngineToWildfire, sendEngineHome, sendToHospital, toolCount, toolsFree } = __m["src/systems/units.js"];
 // "Dispatch all": look at every open incident and every free vehicle and give
 // each vehicle its own job, so a big night does not send the whole fleet to one
-// fire. Each incident gets one suitable vehicle first (nearest pairs first); any
-// vehicles left over go to the biggest fires, a few more each round.
+// fire. Every incident gets exactly one suitable vehicle (nearest pairs first);
+// vehicles left over stay in quarters. "Back all" sends everything home.
 
 
 
@@ -9408,17 +9424,21 @@ function openJobs(state) {
   return jobs;
 }
 
+/** A tank (or bucket) that is nearly empty is no use at a fire. */
+const lowOnWater = (engine) => engine.capacity > 0 && engine.capacity < 50000
+  && engine.water < engine.capacity * 0.15;
+
 /** How well a vehicle suits a job: lower is better, Infinity if it cannot do it. */
 function cost(state, engine, job) {
   const d = dist(engine.x, engine.y, job.x, job.y);
   switch (job.kind) {
     case 'fire': {
-      if (!isFirefighter(engine)) return Infinity;
+      if (!isFirefighter(engine) || lowOnWater(engine)) return Infinity;
       if (engine.spec.boat && !boatCanReach(state, engine, job.x, job.y, Math.max(job.ref.w, job.ref.h) / 2)) return Infinity;
       return d * (engine.spec.hydrantOnly ? 1.6 : 1);
     }
     case 'wildfire': {
-      if (!isFirefighter(engine) || engine.spec.hydrantOnly) return Infinity;
+      if (!isFirefighter(engine) || engine.spec.hydrantOnly || lowOnWater(engine)) return Infinity;
       if (engine.spec.boat && !boatCanReach(state, engine, job.x, job.y, job.ref.radius / TILE)) return Infinity;
       return d * (engine.spec.flying ? 0.45 : 1);
     }
@@ -9475,22 +9495,13 @@ function dispatchAll(state) {
   const free = new Set(state.engines.filter((e) => isFree(state, e) && !((e.cargo?.length ?? 0) > 0)));
   const failed = new Set();
 
-  // Round 1 gives every incident one vehicle (life and fire before wrecks); the
-  // later rounds put more on the big fires, up to what each one asks for.
-  // After that, if vehicles are still free, they go to the fires too (at most
-  // four to a scene), the least-covered fire first: "all" means all.
-  const rounds = [
-    { tier: 0, goal: 1 }, { tier: 1, goal: 1 },
-    { tier: 0, goal: 2 }, { tier: 0, goal: 3 }, { tier: 0, goal: 4 },
-    { tier: 0, goal: 2, spare: true }, { tier: 0, goal: 3, spare: true }, { tier: 0, goal: 4, spare: true },
-  ];
-  for (const { tier, goal, spare } of rounds) {
+  // One vehicle per incident: life and fire first, then wrecks.
+  for (const tier of [0, 1]) {
     for (;;) {
       let best = null;
       let bestCost = Infinity;
       for (const job of jobs) {
-        if (job.tier !== tier || job.have >= (spare ? goal : Math.min(job.want, goal))) continue;
-        if (spare && job.kind !== 'fire' && job.kind !== 'wildfire') continue;
+        if (job.tier !== tier || job.have >= 1) continue;
         for (const engine of free) {
           if (failed.has(job.key + '|' + engine.id)) continue;
           const c = cost(state, engine, job);
@@ -9528,7 +9539,47 @@ function dispatchAll(state) {
 }
 
 
-return { isFree, openJobs, dispatchAll };
+/**
+ * Back all: every vehicle that is out goes back to its own base and drops its
+ * job. An ambulance with patients aboard takes them to the hospital first (it
+ * returns to its base by itself afterwards).
+ */
+function returnAll(state) {
+  const result = { sent: 0, hospital: 0 };
+  for (const engine of state.engines) {
+    if (isMedical(engine) && (engine.cargo?.length ?? 0) > 0) {
+      if (sendToHospital(state, engine)) result.hospital++;
+      continue;
+    }
+    const bay = state.city.bays[engine.bayIndex];
+    const home = bay && engine.path.length === 0 && dist(engine.x, engine.y, bay.x, bay.y) < TILE * 1.5;
+    if (home) continue;
+    if (engine.patientId) {
+      const patient = findPatient(state, engine.patientId);
+      if (patient && patient.claimedBy === engine.id) patient.claimedBy = null;
+      engine.patientId = null;
+    }
+    if (sendEngineHome(state, engine)) {
+      engine.wildfireId = null;
+      engine.blockadeId = null;
+      engine.victimId = null;
+      engine.targetId = null;
+      result.sent++;
+    }
+  }
+  if (result.sent + result.hospital > 0) {
+    addEvent(
+      state,
+      `${result.sent} vehicle${result.sent === 1 ? '' : 's'} returning to base` + (result.hospital > 0 ? `, ${result.hospital} to the hospital first` : ''),
+      'info',
+    );
+  } else {
+    addEvent(state, 'Every vehicle is already in quarters', 'info');
+  }
+  return result;
+}
+
+return { isFree, openJobs, dispatchAll, returnAll };
 })();
 
 // ---- src/systems/wildfire.js ----
@@ -9934,7 +9985,7 @@ const { repayLoan, takeLoan, toggleInsurance, trainCrew } = __m["src/systems/eco
 const { acceptContract, createContracts, restoreContracts, updateContracts } = __m["src/systems/contracts.js"];
 const { createTraffic, findBlockade, restoreBlockades, updateTraffic } = __m["src/systems/blockades.js"];
 const { explode, updateChains } = __m["src/systems/chains.js"];
-const { dispatchAll } = __m["src/systems/dispatch.js"];
+const { dispatchAll, returnAll } = __m["src/systems/dispatch.js"];
 const { bindHotkey, engineByKey } = __m["src/core/hotkeys.js"];
 const { createWind, updateWind } = __m["src/systems/wind.js"];
 const { createLedger, spend, updateEconomy } = __m["src/systems/economy.js"];
@@ -10417,6 +10468,12 @@ function commandDispatchAll(state) {
   return result.sent + result.hospital > 0 ? result : false;
 }
 
+/** Back all: every vehicle goes back to its station (loaded ambulances via the hospital). */
+function commandReturnAll(state) {
+  const result = returnAll(state);
+  return result.sent + result.hospital > 0 ? result : false;
+}
+
 /** Select the vehicle bound to a key. Returns true if there is one. */
 function selectUnitByKey(state, key) {
   const engine = engineByKey(state, key);
@@ -10677,7 +10734,7 @@ function loadState(data) {
   return state;
 }
 
-return { createGame, startShift, shiftTime, update, getSelected, selectWildfire, selectVictim, selectBlockade, selectPatient, selectUnit, selectBuilding, pickAt, commandMove, commandDispatchWildfire, commandDispatchPatient, commandDispatchVictim, commandDispatchBlockade, commandHospital, commandPharmacy, commandDispatch, commandDispatchAll, selectUnitByKey, commandBindKey, commandDeploy, commandRecall, commandReturnHome, commandEquip, commandHydrant, commandBuyVehicle, commandBuyStation, commandLoan, commandRepay, commandInsurance, commandTrain, commandAcceptContract, commandBuyEngine, commandSellVehicle, serialize, loadState, orderEngine, orderCrew };
+return { createGame, startShift, shiftTime, update, getSelected, selectWildfire, selectVictim, selectBlockade, selectPatient, selectUnit, selectBuilding, pickAt, commandMove, commandDispatchWildfire, commandDispatchPatient, commandDispatchVictim, commandDispatchBlockade, commandHospital, commandPharmacy, commandDispatch, commandDispatchAll, commandReturnAll, selectUnitByKey, commandBindKey, commandDeploy, commandRecall, commandReturnHome, commandEquip, commandHydrant, commandBuyVehicle, commandBuyStation, commandLoan, commandRepay, commandInsurance, commandTrain, commandAcceptContract, commandBuyEngine, commandSellVehicle, serialize, loadState, orderEngine, orderCrew };
 })();
 
 // ---- src/systems/audio.js ----
@@ -14765,7 +14822,7 @@ const hud = __m["src/ui/hud.js"];
 const { CONFIG, TILE } = __m["src/core/config.js"];
 const { clamp, formatClock } = __m["src/core/math.js"];
 const { createLoop } = __m["src/core/loop.js"];
-const { createGame, startShift, update, pickAt, selectUnit, selectBuilding, commandMove, commandDispatch, commandDeploy, commandRecall, commandReturnHome, commandBuyVehicle, commandSellVehicle, commandHydrant, commandDispatchWildfire, commandDispatchPatient, commandDispatchBlockade, commandPharmacy, commandHospital, selectPatient, selectBlockade, selectVictim, commandDispatchVictim, commandBuyStation, commandLoan, commandRepay, commandInsurance, commandTrain, commandAcceptContract, commandEquip, commandDispatchAll, selectUnitByKey, commandBindKey, selectWildfire, getSelected, serialize, loadState } = __m["src/systems/game.js"];
+const { createGame, startShift, update, pickAt, selectUnit, selectBuilding, commandMove, commandDispatch, commandDeploy, commandRecall, commandReturnHome, commandBuyVehicle, commandSellVehicle, commandHydrant, commandDispatchWildfire, commandDispatchPatient, commandDispatchBlockade, commandPharmacy, commandHospital, selectPatient, selectBlockade, selectVictim, commandDispatchVictim, commandBuyStation, commandLoan, commandRepay, commandInsurance, commandTrain, commandAcceptContract, commandEquip, commandDispatchAll, commandReturnAll, selectUnitByKey, commandBindKey, selectWildfire, getSelected, serialize, loadState } = __m["src/systems/game.js"];
 const { createAudio } = __m["src/systems/audio.js"];
 const { spawnPatient } = __m["src/systems/medical.js"];
 const { trafficAccident, pileUp } = __m["src/systems/chains.js"];
@@ -15284,6 +15341,7 @@ function onAction(action, data = {}) {
     case 'hospital': commandHospital(state); break;
     case 'dispatch': commandDispatch(state); break;
     case 'dispatch-all': if (commandDispatchAll(state)) audio.play('radio'); break;
+    case 'back-all': if (commandReturnAll(state)) audio.play('radio'); break;
     case 'rebind-key': {
       const engine = engineForUnit(state, getSelected(state));
       if (engine) setRebind(rebindId === engine.id ? null : engine.id);
@@ -15499,7 +15557,7 @@ window.addEventListener('keydown', (ev) => {
     }
     if (!engine || ev.repeat) return;
     if (!isUnitKey(key)) {
-      addEvent(state, 'That key is already used by the game — pick a digit or one of Q W S Z I J L N O Y', 'warn');
+      addEvent(state, 'That key is already used by the game — pick a digit or one of Q W S I J L N O Y', 'warn');
       return;
     }
     commandBindKey(state, engine.id, key);
@@ -15564,6 +15622,7 @@ window.addEventListener('keydown', (ev) => {
   switch (key) {
     case 'd': commandDispatch(state); break;
     case 'a': if (commandDispatchAll(state)) audio.play('radio'); break;
+    case 'z': if (commandReturnAll(state)) audio.play('radio'); break;
     case 'e': commandDeploy(state); break;
     case 'r': commandRecall(state); break;
     case 'h': commandReturnHome(state); break;

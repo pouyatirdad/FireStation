@@ -1,7 +1,7 @@
 // "Dispatch all": look at every open incident and every free vehicle and give
 // each vehicle its own job, so a big night does not send the whole fleet to one
-// fire. Each incident gets one suitable vehicle first (nearest pairs first); any
-// vehicles left over go to the biggest fires, a few more each round.
+// fire. Every incident gets exactly one suitable vehicle (nearest pairs first);
+// vehicles left over stay in quarters. "Back all" sends everything home.
 
 import { TILE } from '../core/config.js';
 import { dist } from '../core/math.js';
@@ -10,7 +10,7 @@ import { activeFires } from './fire.js';
 import { findPatient, isMedical } from './medical.js';
 import {
   boatCanReach, canDive, crewOf, isFirefighter, orderAmbulanceToPatient, orderEngine,
-  orderEngineToBlockade, orderEngineToVictim, orderEngineToWildfire, sendToHospital,
+  orderEngineToBlockade, orderEngineToVictim, orderEngineToWildfire, sendEngineHome, sendToHospital,
   toolCount, toolsFree,
 } from './units.js';
 
@@ -89,17 +89,21 @@ export function openJobs(state) {
   return jobs;
 }
 
+/** A tank (or bucket) that is nearly empty is no use at a fire. */
+const lowOnWater = (engine) => engine.capacity > 0 && engine.capacity < 50000
+  && engine.water < engine.capacity * 0.15;
+
 /** How well a vehicle suits a job: lower is better, Infinity if it cannot do it. */
 function cost(state, engine, job) {
   const d = dist(engine.x, engine.y, job.x, job.y);
   switch (job.kind) {
     case 'fire': {
-      if (!isFirefighter(engine)) return Infinity;
+      if (!isFirefighter(engine) || lowOnWater(engine)) return Infinity;
       if (engine.spec.boat && !boatCanReach(state, engine, job.x, job.y, Math.max(job.ref.w, job.ref.h) / 2)) return Infinity;
       return d * (engine.spec.hydrantOnly ? 1.6 : 1);
     }
     case 'wildfire': {
-      if (!isFirefighter(engine) || engine.spec.hydrantOnly) return Infinity;
+      if (!isFirefighter(engine) || engine.spec.hydrantOnly || lowOnWater(engine)) return Infinity;
       if (engine.spec.boat && !boatCanReach(state, engine, job.x, job.y, job.ref.radius / TILE)) return Infinity;
       return d * (engine.spec.flying ? 0.45 : 1);
     }
@@ -156,22 +160,13 @@ export function dispatchAll(state) {
   const free = new Set(state.engines.filter((e) => isFree(state, e) && !((e.cargo?.length ?? 0) > 0)));
   const failed = new Set();
 
-  // Round 1 gives every incident one vehicle (life and fire before wrecks); the
-  // later rounds put more on the big fires, up to what each one asks for.
-  // After that, if vehicles are still free, they go to the fires too (at most
-  // four to a scene), the least-covered fire first: "all" means all.
-  const rounds = [
-    { tier: 0, goal: 1 }, { tier: 1, goal: 1 },
-    { tier: 0, goal: 2 }, { tier: 0, goal: 3 }, { tier: 0, goal: 4 },
-    { tier: 0, goal: 2, spare: true }, { tier: 0, goal: 3, spare: true }, { tier: 0, goal: 4, spare: true },
-  ];
-  for (const { tier, goal, spare } of rounds) {
+  // One vehicle per incident: life and fire first, then wrecks.
+  for (const tier of [0, 1]) {
     for (;;) {
       let best = null;
       let bestCost = Infinity;
       for (const job of jobs) {
-        if (job.tier !== tier || job.have >= (spare ? goal : Math.min(job.want, goal))) continue;
-        if (spare && job.kind !== 'fire' && job.kind !== 'wildfire') continue;
+        if (job.tier !== tier || job.have >= 1) continue;
         for (const engine of free) {
           if (failed.has(job.key + '|' + engine.id)) continue;
           const c = cost(state, engine, job);
@@ -208,3 +203,43 @@ export function dispatchAll(state) {
   return result;
 }
 
+
+/**
+ * Back all: every vehicle that is out goes back to its own base and drops its
+ * job. An ambulance with patients aboard takes them to the hospital first (it
+ * returns to its base by itself afterwards).
+ */
+export function returnAll(state) {
+  const result = { sent: 0, hospital: 0 };
+  for (const engine of state.engines) {
+    if (isMedical(engine) && (engine.cargo?.length ?? 0) > 0) {
+      if (sendToHospital(state, engine)) result.hospital++;
+      continue;
+    }
+    const bay = state.city.bays[engine.bayIndex];
+    const home = bay && engine.path.length === 0 && dist(engine.x, engine.y, bay.x, bay.y) < TILE * 1.5;
+    if (home) continue;
+    if (engine.patientId) {
+      const patient = findPatient(state, engine.patientId);
+      if (patient && patient.claimedBy === engine.id) patient.claimedBy = null;
+      engine.patientId = null;
+    }
+    if (sendEngineHome(state, engine)) {
+      engine.wildfireId = null;
+      engine.blockadeId = null;
+      engine.victimId = null;
+      engine.targetId = null;
+      result.sent++;
+    }
+  }
+  if (result.sent + result.hospital > 0) {
+    addEvent(
+      state,
+      `${result.sent} vehicle${result.sent === 1 ? '' : 's'} returning to base` + (result.hospital > 0 ? `, ${result.hospital} to the hospital first` : ''),
+      'info',
+    );
+  } else {
+    addEvent(state, 'Every vehicle is already in quarters', 'info');
+  }
+  return result;
+}

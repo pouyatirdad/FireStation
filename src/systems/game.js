@@ -28,7 +28,7 @@ import {
   createTraffic, findBlockade, restoreBlockades, updateTraffic,
 } from './blockades.js';
 import { explode, updateChains } from './chains.js';
-import { dispatchAll } from './dispatch.js';
+import { dispatchAll, returnAll } from './dispatch.js';
 import { bindHotkey, engineByKey } from '../core/hotkeys.js';
 import { createWind, updateWind } from './wind.js';
 import { createLedger, spend, updateEconomy } from './economy.js';
@@ -485,6 +485,12 @@ export function commandDispatch(state, buildingId = null) {
  */
 export function commandDispatchAll(state) {
   const result = dispatchAll(state);
+  return result.sent + result.hospital > 0 ? result : false;
+}
+
+/** Back all: every vehicle goes back to its station (loaded ambulances via the hospital). */
+export function commandReturnAll(state) {
+  const result = returnAll(state);
   return result.sent + result.hospital > 0 ? result : false;
 }
 

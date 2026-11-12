@@ -566,7 +566,7 @@ function updateSelection(state) {
 function shortcutRow(state, engine) {
   const waiting = state.ui.rebinding === engine.id;
   return '<div class="sel__shortcut"><span>Shortcut</span>' +
-    '<button type="button" class="btn btn--small' + (waiting ? ' is-active' : '') + '" data-action="rebind-key" title="Click, then press the key you want for this unit (a digit or Q W S Z I J L N O Y). Backspace clears it.">' +
+    '<button type="button" class="btn btn--small' + (waiting ? ' is-active' : '') + '" data-action="rebind-key" title="Click, then press the key you want for this unit (a digit or Q W S I J L N O Y). Backspace clears it.">' +
     (waiting ? 'Press a key…' : (engine.hotkey ? '<kbd>' + esc(engine.hotkey.toUpperCase()) + '</kbd> change' : 'Set a key')) + '</button></div>';
 }
 
@@ -1062,7 +1062,7 @@ export function updateStation(state) {
     '<button type="button" class="btn btn--small" data-action="load-game">Load</button>' +
     '<button type="button" class="btn btn--small" data-action="new-shift">New shift</button></div>' +
     '<p class="station__saved">' + (state.saveStatus ? 'Saved at ' + state.saveStatus : 'Autosaves every 30 seconds') + '</p>' +
-    '<p class="station__keys"><kbd>B</kbd> headquarters · <kbd>D</kbd> dispatch · <kbd>A</kbd> dispatch all · <kbd>E</kbd> deploy · <kbd>R</kbd> pack up · <kbd>G</kbd> hydrant · <kbd>P</kbd> pharmacy · <kbd>K</kbd> hospital · <kbd>Tab</kbd> next incident · <kbd>M</kbd> sound · <kbd>F1</kbd> controls</p>';
+    '<p class="station__keys"><kbd>B</kbd> headquarters · <kbd>D</kbd> dispatch · <kbd>A</kbd> dispatch all · <kbd>Z</kbd> back all · <kbd>E</kbd> deploy · <kbd>R</kbd> pack up · <kbd>G</kbd> hydrant · <kbd>P</kbd> pharmacy · <kbd>K</kbd> hospital · <kbd>Tab</kbd> next incident · <kbd>M</kbd> sound · <kbd>F1</kbd> controls</p>';
 
   const html = '<p class="menu__eyebrow">Headquarters</p>' + tabs + body + footer;
   // Rebuilding the DOM under the pointer swallows clicks, so only touch it on a change.

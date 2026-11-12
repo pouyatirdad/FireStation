@@ -4,13 +4,13 @@
 
 // Keys that already do something (see the key handler in main.js).
 export const RESERVED_KEYS = new Set([
-  'd', 'a', 'e', 'r', 'h', 'g', 'p', 'k', 'c', 'u', 'f', 'x', 'v', 't', 'm', 'b',
+  'd', 'a', 'z', 'e', 'r', 'h', 'g', 'p', 'k', 'c', 'u', 'f', 'x', 'v', 't', 'm', 'b',
 ]);
 
 // What a unit may be bound to, in the order they are handed out.
 export const UNIT_KEYS = [
   '1', '2', '3', '4', '5', '6', '7', '8', '9', '0',
-  'q', 'w', 's', 'z', 'i', 'j', 'l', 'n', 'o', 'y',
+  'q', 'w', 's', 'i', 'j', 'l', 'n', 'o', 'y',
 ];
 
 export const isUnitKey = (key) => UNIT_KEYS.includes(key);

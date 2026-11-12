@@ -82,6 +82,7 @@ the night.
 
 - **Rapid response car:** a small, quick utility car with two crew and a locker of tools (a chainsaw, a rescue cutter and diving gear) but no pump, no tank and no deck gun. Sent to a fire it drives to the hydrant nearest the building, connects its supply line there by itself (or press <kbd>G</kbd>) and the crew run the hose out, up to 16 tiles. It is no use where there is no hydrant in hose reach, such as a forest fire. Dispatch picks it after the real engines.
 - **Command car:** no hose, no water. Parked, it makes every crew within 26 tiles spray 20% harder.
+- **Empty tank:** a fire vehicle whose tank runs dry drives back to its station to refill by itself (unless it is connected to a hydrant).
 - **Lockers:** an **engine** carries a chainsaw and two sets of diving gear; a **ladder** one chainsaw; a
   **rescue** unit two chainsaws, two rescue cutters and two sets of diving gear; a **tanker** only hose.
 - **Helicopter:** flies in a straight line over roads, wrecks and traffic and hovers over the target, dropping water on buildings and forest fires alike. It refills on any station apron or by dipping in the harbour (the south edge of the map), so it is fast but never close to the water. It is the first choice when you right-click a forest fire.
@@ -196,9 +197,10 @@ Hydrant, pharmacy, hospital and equipment actions are buttons on the selection c
 | Right click | Send the selected unit there; on a burning building, wildfire, wreck or injured person, dispatch |
 | Drag / arrow keys | Pan the map |
 | Scroll | Zoom around the pointer |
-| <kbd>1</kbd>–<kbd>9</kbd>, <kbd>0</kbd>, <kbd>Q</kbd> <kbd>W</kbd> <kbd>S</kbd> <kbd>Z</kbd> <kbd>I</kbd> <kbd>J</kbd> <kbd>L</kbd> <kbd>N</kbd> <kbd>O</kbd> <kbd>Y</kbd> | Select a vehicle. Every vehicle gets its own key (a digit first); select one and press **Shortcut** on its card, then the key you want, to change it. The vehicle that had that key takes the old one; Backspace clears a key |
+| <kbd>1</kbd>–<kbd>9</kbd>, <kbd>0</kbd>, <kbd>Q</kbd> <kbd>W</kbd> <kbd>S</kbd> <kbd>I</kbd> <kbd>J</kbd> <kbd>L</kbd> <kbd>N</kbd> <kbd>O</kbd> <kbd>Y</kbd> | Select a vehicle. Every vehicle gets its own key (a digit first); select one and press **Shortcut** on its card, then the key you want, to change it. The vehicle that had that key takes the old one; Backspace clears a key |
 | <kbd>D</kbd> | Dispatch the selected vehicle or firefighter (or the nearest idle one) to the selected building, else the fire that most needs it **and has the fewest units on it**; with nothing alight, to a forest fire or a building with people trapped. An ambulance goes to the nearest patient. If the selected engine is already on a job, <kbd>D</kbd> calls the next free one instead |
-| <kbd>A</kbd> | **Dispatch all** (also the *Dispatch all* button above the incident list and *All* in the bottom bar): every free vehicle gets an incident of its own — fires, forest fires, injured people, people in the water, wrecks — nearest first, with fires and rescues before wrecks. Loaded ambulances head for the hospital. Vehicles left over reinforce the big fires, up to four to a scene. Nobody already on a job is pulled off it |
+| <kbd>A</kbd> | **Dispatch all** (also the *Dispatch all* button above the incident list and *All* in the bottom bar): every free vehicle gets an incident of its own — fires, forest fires, injured people, people in the water, wrecks — nearest first, with fires and rescues before wrecks. Loaded ambulances head for the hospital. Exactly one vehicle goes to each incident, and vehicles with a nearly empty tank are not sent to fires. Nobody already on a job is pulled off it |
+| <kbd>Z</kbd> | **Back all** (also a button beside *Dispatch all* and in the bottom bar): every vehicle drives back to its own station and drops its job; an ambulance with patients aboard goes to the hospital first |
 | <kbd>U</kbd> | Show or hide the unit list (hidden by default) |
 | <kbd>P</kbd> | Send the selected ambulance to the nearest pharmacy |
 | <kbd>K</kbd> | Send the selected ambulance to the nearest hospital with its patients |

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   createGame, startShift, update, commandBuyVehicle, commandDispatch, commandDispatchAll,
-  commandBindKey, selectUnitByKey, commandDispatchWildfire, serialize, loadState,
+  commandBindKey, selectUnitByKey, commandDispatchWildfire, commandReturnAll, serialize, loadState,
 } from '../src/systems/game.js';
 import { dispatchEngine } from '../src/systems/units.js';
 import { ignite } from '../src/systems/fire.js';
@@ -54,16 +54,39 @@ test('dispatch all gives every fire a vehicle of its own', () => {
   for (const b of fires) assert.ok(targets.includes(b.id), b.name + ' got nobody');
 });
 
-test('with more vehicles than fires every fire is covered and the spares reinforce', () => {
+test('with more vehicles than fires each fire gets exactly one and the rest stay in quarters', () => {
   const state = shift();
   buy(state, 'engine', 4); // five engines
   const fires = scenes(state, 2);
   for (const b of fires) ignite(state, b, 'test');
   commandDispatchAll(state);
   for (const b of fires) {
-    assert.ok(state.engines.filter((e) => e.targetId === b.id).length >= 1, b.name + ' got nobody');
+    assert.equal(state.engines.filter((e) => e.targetId === b.id).length, 1, b.name);
   }
-  assert.ok(state.engines.every((e) => e.targetId), 'a vehicle was left at the station');
+  assert.equal(state.engines.filter((e) => e.targetId).length, 2);
+});
+
+test('one burning house gets one vehicle, not the whole fleet', () => {
+  const state = shift();
+  buy(state, 'engine', 3);
+  buy(state, 'ladder', 1);
+  const [house] = scenes(state, 1);
+  ignite(state, house, 'test');
+  const result = commandDispatchAll(state);
+  assert.equal(result.sent, 1);
+  assert.equal(state.engines.filter((e) => e.targetId === house.id).length, 1);
+  assert.equal(state.engines.filter((e) => e.path.length > 0).length, 1);
+});
+
+test('a vehicle with an empty tank is not dispatched to a fire', () => {
+  const state = shift();
+  buy(state, 'engine', 1);
+  const [house] = scenes(state, 1);
+  ignite(state, house, 'test');
+  state.engines[0].water = 0;
+  commandDispatchAll(state);
+  assert.equal(state.engines[0].targetId, null);
+  assert.equal(state.engines[1].targetId, house.id);
 });
 
 test('with fewer vehicles than fires the rest are reported, and a second press changes nothing', () => {
@@ -99,18 +122,59 @@ test('dispatch all sends ambulances to different patients and engines to the fir
   spawnPatient(state, b);
   spawnPatient(state, c);
   const result = commandDispatchAll(state);
-  assert.equal(result.sent, 4);
+  assert.equal(result.sent, 3); // one engine to the fire, an ambulance to each patient
   const ambulances = state.engines.filter((e) => e.spec.medical);
   assert.ok(ambulances.every((e) => e.patientId));
   assert.notEqual(ambulances[0].patientId, ambulances[1].patientId, 'both ambulances went to the same patient');
-  const engines = state.engines.filter((e) => !e.spec.medical);
-  assert.ok(engines.every((e) => e.targetId === a.id));
+  const engines = state.engines.filter((e) => !e.spec.medical && e.targetId);
+  assert.equal(engines.length, 1);
+  assert.equal(engines[0].targetId, a.id);
 });
 
 test('dispatch all says so when there is nothing to do', () => {
   const state = shift();
   assert.equal(commandDispatchAll(state), false);
   assert.ok(state.events[0].text.includes('quiet'));
+});
+
+// ------------------------------------------------- empty tanks, back all ---
+
+test('an engine whose tank runs dry drives back to the station by itself', () => {
+  const state = shift();
+  const engine = state.engines[0];
+  const [house] = scenes(state, 1);
+  ignite(state, house, 'test');
+  assert.equal(dispatchEngine(state, engine, house.id), engine);
+  for (let i = 0; i < 60 * 120 && engine.path.length > 0; i++) update(state, 1 / 60);
+  engine.water = 0;
+  update(state, 1 / 60);
+  assert.ok(engine.path.length > 0 || engine.packTimer > 0, 'it stayed at the fire with no water');
+  assert.ok(state.events.some((e) => e.text.includes('out of water — returning')));
+  for (let i = 0; i < 60 * 240; i++) update(state, 1 / 60);
+  const bay = state.city.bays[engine.bayIndex];
+  assert.ok(Math.hypot(engine.x - bay.x, engine.y - bay.y) < 3 * TILE, 'it did not reach its bay');
+  assert.ok(engine.water > 0, 'it did not refill');
+});
+
+test('back all sends every vehicle home and drops its job', () => {
+  const state = shift();
+  buy(state, 'engine', 2);
+  buy(state, 'ambulance', 1);
+  const [a, b, c] = scenes(state, 3);
+  ignite(state, a, 'test');
+  ignite(state, b, 'test');
+  spawnPatient(state, c);
+  commandDispatchAll(state);
+  assert.ok(state.engines.filter((e) => e.path.length > 0).length >= 3);
+  assert.ok(commandReturnAll(state));
+  assert.ok(state.engines.every((e) => !e.targetId && !e.patientId));
+  assert.ok(state.patients.every((p) => !p.claimedBy));
+  for (let i = 0; i < 60 * 240; i++) update(state, 1 / 60);
+  for (const e of state.engines) {
+    const bay = state.city.bays[e.bayIndex];
+    assert.ok(Math.hypot(e.x - bay.x, e.y - bay.y) < 3 * TILE, e.name + ' is not home');
+  }
+  assert.equal(commandReturnAll(state), false, 'nothing is left to send');
 });
 
 // ------------------------------------------------------- the rapid car ---
