@@ -179,6 +179,15 @@ lists the pointer controls. <kbd>F1</kbd> opens the full list.
 
 ### Controls
 
+**On a phone or tablet** the game is fully playable by touch, in portrait or landscape. Tap to select;
+drag to pan; pinch to zoom (two fingers also pan). **Press and hold** on the map is the right-click:
+it sends the selected unit there, or dispatches to a fire, wildfire, wreck or injured person. The
+**Order** button does the same in two taps (tap it, then tap the map). The action bar at the bottom
+scrolls sideways (Order, Dispatch, Deploy, Pack up, Station, Buy, Next); **Next** jumps to the next
+incident. On narrow or short screens the unit list and incident list fold into popovers opened by the
+**Units** and **Incidents** buttons, and the selection card becomes a sheet above the action bar.
+Hydrant, pharmacy, hospital and equipment actions are buttons on the selection card.
+
 | Input | Action |
 |---|---|
 | Left click | Select a vehicle, a crew member, a building, a wildfire, a wreck or an injured person |

@@ -3497,10 +3497,14 @@ function miniStatic(state, mw, mh) {
 
 function drawMinimap(ctx, state, cam, view) {
   const city = state.city;
-  const mw = Math.round(Math.min(280, view.width * 0.25));
+  // A small screen gets a smaller map, parked above the bottom action bar.
+  const compact = view.width <= 900 || view.height <= 520;
+  const mw = compact
+    ? Math.round(Math.min(280, Math.max(96, view.width * 0.28), view.height * 0.3 * (city.w / city.h)))
+    : Math.round(Math.min(280, view.width * 0.25));
   const mh = Math.round((mw * city.h) / city.w);
-  const x = view.width - mw - 16;
-  const y = view.height - mh - 16;
+  const x = view.width - mw - (compact ? 10 : 16);
+  const y = view.height - mh - (compact ? 58 : 16);
   state.ui.minimap = { x, y, w: mw, h: mh };
   const sx = mw / (city.w * TILE);
   const sy = mh / (city.h * TILE);

@@ -1636,3 +1636,227 @@ button { font-family: inherit; }
   .menu__lead { display: none; }
   .panel--incidents { min-height: 0; }
 }
+
+/* ---- touch and small screens ----------------------------------------------------
+   Everything below is the phone/tablet layer. "Compact" is a narrow window or a
+   short one (a phone in landscape): the side panels fold into popovers opened
+   from buttons, and a scrollable action bar takes over from the keyboard. */
+
+html, body { overscroll-behavior: none; }
+body {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+#app { height: 100vh; height: 100dvh; }
+
+/* No text selection or long-press callouts on the game surface. */
+.stage, .topbar {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+.btn, .chip, .unit, .incident, .dock-tab, .icon-btn, .speeds button, .tab, .station__buybtn, .ugroup__head {
+  touch-action: manipulation;
+}
+
+/* Things that only make sense with a finger, or only with a mouse. */
+.touch-only, .only-touch, .dock-tab--right { display: none; }
+
+.order-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 58px;
+  transform: translateX(-50%);
+  z-index: 8;
+  max-width: calc(100% - 20px);
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: rgba(20, 60, 80, 0.94);
+  border: 1px solid rgba(95, 208, 255, 0.55);
+  color: #d6f2ff;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+.stage.order-mode #game { cursor: crosshair; }
+
+@media (pointer: coarse), (max-width: 900px) {
+  .touch-only { display: inline-flex; }
+  .only-touch { display: inline; }
+  .only-mouse { display: none; }
+  .btn kbd, .dock-tab kbd, .hints { display: none; }
+}
+
+@media (max-width: 900px), (max-height: 520px) {
+  :root { --bar-h: 44px; }
+
+  /* ---- top bar: the numbers that matter, then the controls ---- */
+  .topbar {
+    height: 40px;
+    flex: 0 0 40px;
+    gap: 8px;
+    padding: 0 max(8px, env(safe-area-inset-right)) 0 max(8px, env(safe-area-inset-left));
+    overflow: hidden;
+  }
+  .brand { display: none; }
+  .stats { gap: 10px; flex: 1 1 0; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+  .stats::-webkit-scrollbar { display: none; }
+  /* Money and fires first; the clock scrolls off the end of a narrow bar. */
+  .stats .stat:nth-child(2) { order: 1; }
+  .stats .stat:nth-child(5) { order: 2; }
+  .stats .stat:nth-child(6) { order: 3; }
+  .stats .stat:nth-child(4) { order: 4; }
+  .stats .stat:nth-child(7) { order: 4; }
+  .stats .stat:nth-child(1) { order: 5; }
+  .stats .stat:nth-child(1),
+  .stats .stat:nth-child(2),
+  .stats .stat:nth-child(4),
+  .stats .stat:nth-child(5),
+  .stats .stat:nth-child(6),
+  .stats .stat:nth-child(7) { display: flex; }
+  .stats .stat:nth-child(3),
+  .stats .stat:nth-child(8),
+  .stats .stat:nth-child(9),
+  .stats .stat:nth-child(10),
+  .stats .stat:nth-child(11) { display: none; }
+  .stat__label { font-size: 7.5px; }
+  .stat__value { font-size: 13px; }
+  .topbar__controls { flex: none; gap: 6px; margin-left: auto; }
+  #btn-station { display: none; } /* the Buy button in the action bar opens it */
+  #btn-sound span { display: none; }
+  #btn-sound::before { content: "\1F50A"; font-size: 13px; }
+  #btn-sound.is-off::before { content: "\1F507"; }
+  .topbar .btn { min-height: 30px; padding: 4px 8px; font-size: 11.5px; }
+  .topbar .btn--icon { padding: 4px 9px; }
+  .speeds button { padding: 6px 7px; font-size: 11px; }
+
+  /* ---- the two lists open from buttons ---- */
+  .dock-tab {
+    top: 8px;
+    left: max(8px, env(safe-area-inset-left));
+    min-height: 30px;
+    padding: 4px 11px;
+    font-size: 12px;
+  }
+  .dock-tab--right { display: inline-flex; left: auto; right: max(8px, env(safe-area-inset-right)); }
+  .dock--left {
+    top: 44px;
+    left: max(8px, env(safe-area-inset-left));
+    width: min(260px, calc(100% - 16px));
+    max-height: calc(100% - 44px - var(--bar-h) - 16px);
+  }
+  .dock--right {
+    display: none;
+    top: 44px;
+    right: max(8px, env(safe-area-inset-right));
+    bottom: auto;
+    width: min(290px, calc(100% - 16px));
+    max-height: calc(100% - 44px - var(--bar-h) - 16px);
+  }
+  .stage.incidents-open .dock--right { display: flex; }
+  .dock .panel--log { display: none; }
+  .panel--incidents { max-height: none; flex: 1 1 auto; }
+
+  /* Bigger targets and type in the lists. */
+  .chip { padding: 6px 11px; font-size: 11px; }
+  .ugroup__head { min-height: 30px; font-size: 10.5px; }
+  .unit { min-height: 40px; padding: 5px 8px; }
+  .unit__name { font-size: 12.5px; }
+  .unit__status { font-size: 10.5px; }
+  .icon-btn { width: 32px; height: 32px; }
+  .incident { min-height: 42px; padding: 6px 8px; }
+  .incident__text b { font-size: 12px; }
+  .incident__text span { font-size: 10.5px; }
+  .incident__tag { font-size: 9px; padding: 2px 6px; }
+
+  /* ---- the selection card is a sheet above the action bar ---- */
+  .stage .panel--selection,
+  .stage.units-collapsed .panel--selection {
+    top: auto;
+    left: max(8px, env(safe-area-inset-left));
+    right: max(8px, env(safe-area-inset-right));
+    bottom: calc(var(--bar-h) + 12px + env(safe-area-inset-bottom));
+    width: auto;
+    max-height: 46%;
+    padding: 10px 12px;
+  }
+  .sel__name { font-size: 16px; }
+  /* The first line is the live summary; the explanation after it is trimmed to save room. */
+  .sel__meta {
+    margin: 6px 0 8px;
+    font-size: 11.5px;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    overflow: hidden;
+  }
+  .sel__hint { font-size: 11px; }
+  .sel__actions { grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); }
+  .sel__actions .btn:nth-child(5) { grid-column: auto; }
+  .sel__actions .btn,
+  .btn--tool { min-height: 38px; font-size: 12px; padding: 6px 8px; }
+
+  /* ---- the action bar: one scrollable row of thumb-sized buttons ---- */
+  .roster,
+  .stage.units-collapsed .roster {
+    left: 0;
+    right: 0;
+    bottom: 0;
+    justify-content: flex-start;
+    padding: 0 max(8px, env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+  }
+  .roster__actions {
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    width: 100%;
+    overflow-x: auto;
+    padding: 2px 0;
+    border: 0;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .roster__actions::-webkit-scrollbar { display: none; }
+  .roster__actions .btn { flex: 0 0 auto; min-height: 36px; padding: 6px 12px; font-size: 12px; }
+  #btn-order { order: -1; }
+
+  .banner { top: 44px; font-size: 10px; max-width: calc(100% - 16px); }
+  .toasts { top: 76px; max-width: calc(100% - 16px); }
+  .toast { font-size: 11.5px; }
+
+  /* ---- full-screen menus ---- */
+  .screen { padding: 8px; }
+  .menu { padding: 16px 14px 12px; }
+  .menu__title { font-size: 32px; }
+  .menu__grid { grid-template-columns: 1fr; gap: 6px; }
+  .menu__grid > div { padding: 8px 10px; }
+  .card { padding: 14px; }
+  .card--station,
+  .card--help { width: 100%; max-height: calc(100dvh - 16px); }
+}
+
+/* A phone on its side: the selection card goes to the left edge instead of across the bottom. */
+@media (max-height: 520px) and (min-width: 561px) {
+  .stage .panel--selection,
+  .stage.units-collapsed .panel--selection {
+    top: 44px;
+    bottom: auto;
+    right: auto;
+    width: 240px;
+    max-height: calc(100% - 44px - var(--bar-h) - 16px);
+  }
+  .stage:not(.units-collapsed) .panel--selection { left: calc(min(260px, 100% - 16px) + 16px); }
+  .order-hint { bottom: 54px; }
+  .sel__meta { -webkit-line-clamp: 2; line-clamp: 2; }
+  .sel__status { margin-bottom: 6px; }
+}
+
+/* A narrow screen drops a couple more numbers from the top bar. */
+@media (max-width: 600px) {
+  .stats .stat:nth-child(4),
+  .stats .stat:nth-child(7) { display: none; }
+}

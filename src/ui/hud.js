@@ -214,6 +214,12 @@ function localAction(button) {
   }
   if (action === 'units-collapse') {
     setUnitsCollapsed(!unitsCollapsed);
+    if (!unitsCollapsed) setIncidentsOpen(false); // on a phone the two lists share the screen
+    return true;
+  }
+  if (action === 'incidents-toggle') {
+    setIncidentsOpen(!incidentsOpen);
+    if (incidentsOpen) setUnitsCollapsed(true);
     return true;
   }
   if (action === 'group-toggle') {
@@ -239,6 +245,23 @@ function setUnitsCollapsed(collapsed) {
 /** Show or hide the unit list. */
 export function toggleUnits() {
   setUnitsCollapsed(!unitsCollapsed);
+}
+
+// On a phone the incident list is a popover too, opened from its own button.
+let incidentsOpen = false;
+
+function setIncidentsOpen(open) {
+  incidentsOpen = open;
+  const tab = $('incidents-open');
+  tab.classList.toggle('is-open', open);
+  tab.setAttribute('aria-expanded', String(open));
+  $('stage').classList.toggle('incidents-open', open);
+}
+
+/** Fold both lists away, so a small screen shows the map. */
+export function closePanels() {
+  setIncidentsOpen(false);
+  if (!unitsCollapsed) setUnitsCollapsed(true);
 }
 
 const unitKey = (index) => (index < 9 ? String(index + 1) : '');
@@ -458,6 +481,8 @@ function updateIncidents(state) {
   const sig = shown.map((i) => [i.kind, i.id, i.meta, i.handled].join(':')).join('|') + list.length;
   $('incident-count').textContent = String(list.length);
   $('incident-count').dataset.on = list.length > 0 ? '1' : '';
+  $('incidents-open-count').textContent = String(list.length);
+  $('incidents-open-count').dataset.on = list.length > 0 ? '1' : '';
   if (sig === incidentKey) return;
   incidentKey = sig;
   $('incident-list').innerHTML = shown.length

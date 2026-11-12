@@ -3,7 +3,11 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#11171d" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <title>Fire Station — Harbor City</title>
 <!-- build:css:start -->
 <style>
@@ -1646,6 +1650,230 @@ button { font-family: inherit; }
   .panel--incidents { min-height: 0; }
 }
 
+/* ---- touch and small screens ----------------------------------------------------
+   Everything below is the phone/tablet layer. "Compact" is a narrow window or a
+   short one (a phone in landscape): the side panels fold into popovers opened
+   from buttons, and a scrollable action bar takes over from the keyboard. */
+
+html, body { overscroll-behavior: none; }
+body {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+#app { height: 100vh; height: 100dvh; }
+
+/* No text selection or long-press callouts on the game surface. */
+.stage, .topbar {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+.btn, .chip, .unit, .incident, .dock-tab, .icon-btn, .speeds button, .tab, .station__buybtn, .ugroup__head {
+  touch-action: manipulation;
+}
+
+/* Things that only make sense with a finger, or only with a mouse. */
+.touch-only, .only-touch, .dock-tab--right { display: none; }
+
+.order-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 58px;
+  transform: translateX(-50%);
+  z-index: 8;
+  max-width: calc(100% - 20px);
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: rgba(20, 60, 80, 0.94);
+  border: 1px solid rgba(95, 208, 255, 0.55);
+  color: #d6f2ff;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+.stage.order-mode #game { cursor: crosshair; }
+
+@media (pointer: coarse), (max-width: 900px) {
+  .touch-only { display: inline-flex; }
+  .only-touch { display: inline; }
+  .only-mouse { display: none; }
+  .btn kbd, .dock-tab kbd, .hints { display: none; }
+}
+
+@media (max-width: 900px), (max-height: 520px) {
+  :root { --bar-h: 44px; }
+
+  /* ---- top bar: the numbers that matter, then the controls ---- */
+  .topbar {
+    height: 40px;
+    flex: 0 0 40px;
+    gap: 8px;
+    padding: 0 max(8px, env(safe-area-inset-right)) 0 max(8px, env(safe-area-inset-left));
+    overflow: hidden;
+  }
+  .brand { display: none; }
+  .stats { gap: 10px; flex: 1 1 0; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+  .stats::-webkit-scrollbar { display: none; }
+  /* Money and fires first; the clock scrolls off the end of a narrow bar. */
+  .stats .stat:nth-child(2) { order: 1; }
+  .stats .stat:nth-child(5) { order: 2; }
+  .stats .stat:nth-child(6) { order: 3; }
+  .stats .stat:nth-child(4) { order: 4; }
+  .stats .stat:nth-child(7) { order: 4; }
+  .stats .stat:nth-child(1) { order: 5; }
+  .stats .stat:nth-child(1),
+  .stats .stat:nth-child(2),
+  .stats .stat:nth-child(4),
+  .stats .stat:nth-child(5),
+  .stats .stat:nth-child(6),
+  .stats .stat:nth-child(7) { display: flex; }
+  .stats .stat:nth-child(3),
+  .stats .stat:nth-child(8),
+  .stats .stat:nth-child(9),
+  .stats .stat:nth-child(10),
+  .stats .stat:nth-child(11) { display: none; }
+  .stat__label { font-size: 7.5px; }
+  .stat__value { font-size: 13px; }
+  .topbar__controls { flex: none; gap: 6px; margin-left: auto; }
+  #btn-station { display: none; } /* the Buy button in the action bar opens it */
+  #btn-sound span { display: none; }
+  #btn-sound::before { content: "\1F50A"; font-size: 13px; }
+  #btn-sound.is-off::before { content: "\1F507"; }
+  .topbar .btn { min-height: 30px; padding: 4px 8px; font-size: 11.5px; }
+  .topbar .btn--icon { padding: 4px 9px; }
+  .speeds button { padding: 6px 7px; font-size: 11px; }
+
+  /* ---- the two lists open from buttons ---- */
+  .dock-tab {
+    top: 8px;
+    left: max(8px, env(safe-area-inset-left));
+    min-height: 30px;
+    padding: 4px 11px;
+    font-size: 12px;
+  }
+  .dock-tab--right { display: inline-flex; left: auto; right: max(8px, env(safe-area-inset-right)); }
+  .dock--left {
+    top: 44px;
+    left: max(8px, env(safe-area-inset-left));
+    width: min(260px, calc(100% - 16px));
+    max-height: calc(100% - 44px - var(--bar-h) - 16px);
+  }
+  .dock--right {
+    display: none;
+    top: 44px;
+    right: max(8px, env(safe-area-inset-right));
+    bottom: auto;
+    width: min(290px, calc(100% - 16px));
+    max-height: calc(100% - 44px - var(--bar-h) - 16px);
+  }
+  .stage.incidents-open .dock--right { display: flex; }
+  .dock .panel--log { display: none; }
+  .panel--incidents { max-height: none; flex: 1 1 auto; }
+
+  /* Bigger targets and type in the lists. */
+  .chip { padding: 6px 11px; font-size: 11px; }
+  .ugroup__head { min-height: 30px; font-size: 10.5px; }
+  .unit { min-height: 40px; padding: 5px 8px; }
+  .unit__name { font-size: 12.5px; }
+  .unit__status { font-size: 10.5px; }
+  .icon-btn { width: 32px; height: 32px; }
+  .incident { min-height: 42px; padding: 6px 8px; }
+  .incident__text b { font-size: 12px; }
+  .incident__text span { font-size: 10.5px; }
+  .incident__tag { font-size: 9px; padding: 2px 6px; }
+
+  /* ---- the selection card is a sheet above the action bar ---- */
+  .stage .panel--selection,
+  .stage.units-collapsed .panel--selection {
+    top: auto;
+    left: max(8px, env(safe-area-inset-left));
+    right: max(8px, env(safe-area-inset-right));
+    bottom: calc(var(--bar-h) + 12px + env(safe-area-inset-bottom));
+    width: auto;
+    max-height: 46%;
+    padding: 10px 12px;
+  }
+  .sel__name { font-size: 16px; }
+  /* The first line is the live summary; the explanation after it is trimmed to save room. */
+  .sel__meta {
+    margin: 6px 0 8px;
+    font-size: 11.5px;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    overflow: hidden;
+  }
+  .sel__hint { font-size: 11px; }
+  .sel__actions { grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); }
+  .sel__actions .btn:nth-child(5) { grid-column: auto; }
+  .sel__actions .btn,
+  .btn--tool { min-height: 38px; font-size: 12px; padding: 6px 8px; }
+
+  /* ---- the action bar: one scrollable row of thumb-sized buttons ---- */
+  .roster,
+  .stage.units-collapsed .roster {
+    left: 0;
+    right: 0;
+    bottom: 0;
+    justify-content: flex-start;
+    padding: 0 max(8px, env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+  }
+  .roster__actions {
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    width: 100%;
+    overflow-x: auto;
+    padding: 2px 0;
+    border: 0;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .roster__actions::-webkit-scrollbar { display: none; }
+  .roster__actions .btn { flex: 0 0 auto; min-height: 36px; padding: 6px 12px; font-size: 12px; }
+  #btn-order { order: -1; }
+
+  .banner { top: 44px; font-size: 10px; max-width: calc(100% - 16px); }
+  .toasts { top: 76px; max-width: calc(100% - 16px); }
+  .toast { font-size: 11.5px; }
+
+  /* ---- full-screen menus ---- */
+  .screen { padding: 8px; }
+  .menu { padding: 16px 14px 12px; }
+  .menu__title { font-size: 32px; }
+  .menu__grid { grid-template-columns: 1fr; gap: 6px; }
+  .menu__grid > div { padding: 8px 10px; }
+  .card { padding: 14px; }
+  .card--station,
+  .card--help { width: 100%; max-height: calc(100dvh - 16px); }
+}
+
+/* A phone on its side: the selection card goes to the left edge instead of across the bottom. */
+@media (max-height: 520px) and (min-width: 561px) {
+  .stage .panel--selection,
+  .stage.units-collapsed .panel--selection {
+    top: 44px;
+    bottom: auto;
+    right: auto;
+    width: 240px;
+    max-height: calc(100% - 44px - var(--bar-h) - 16px);
+  }
+  .stage:not(.units-collapsed) .panel--selection { left: calc(min(260px, 100% - 16px) + 16px); }
+  .order-hint { bottom: 54px; }
+  .sel__meta { -webkit-line-clamp: 2; line-clamp: 2; }
+  .sel__status { margin-bottom: 6px; }
+}
+
+/* A narrow screen drops a couple more numbers from the top bar. */
+@media (max-width: 600px) {
+  .stats .stat:nth-child(4),
+  .stats .stat:nth-child(7) { display: none; }
+}
+
 </style>
 <!-- build:css:end -->
 </head>
@@ -1747,6 +1975,8 @@ button { font-family: inherit; }
     </aside>
     <button type="button" class="dock-tab" id="units-open" data-action="units-collapse" title="Show or hide the unit list (U)" aria-expanded="false">Units<kbd>U</kbd></button>
 
+    <button type="button" class="dock-tab dock-tab--right" id="incidents-open" data-action="incidents-toggle" title="Show or hide the incident list" aria-expanded="false">Incidents <span class="count" id="incidents-open-count" data-on="">0</span></button>
+
     <aside class="panel panel--selection" id="selection" hidden></aside>
 
     <aside class="dock dock--right" id="dock-right">
@@ -1767,8 +1997,12 @@ button { font-family: inherit; }
         <button type="button" class="btn btn--small" data-action="recall">Pack up<kbd>R</kbd></button>
         <button type="button" class="btn btn--small" data-action="home">Station<kbd>H</kbd></button>
         <button type="button" class="btn btn--small" data-action="open-station">Buy<kbd>B</kbd></button>
+        <button type="button" class="btn btn--small touch-only" id="btn-order" data-action="order-mode" title="Tap this, then tap where the selected unit should go (or just press and hold on the map)">Order</button>
+        <button type="button" class="btn btn--small touch-only" data-action="next-incident" title="Jump to the next incident">Next</button>
       </div>
     </div>
+
+    <div class="order-hint" id="order-hint" hidden>Tap the map to send the selected unit there</div>
 
     <div class="hints" id="hints">
       <span><b>Click</b> select</span>
@@ -1793,12 +2027,12 @@ button { font-family: inherit; }
           you earn on more apparatus, boats and aircraft. Vehicle upkeep is due every hour.
         </p>
         <div class="menu__grid">
-          <div><b>Respond</b><span>Select a vehicle (1–8), right-click a fire. It finds the road route.</span></div>
+          <div><b>Respond</b><span><span class="only-mouse">Select a vehicle (1–8), right-click a fire. It finds the road route.</span><span class="only-touch">Tap a vehicle, then press and hold on a fire (or use Order). It finds the road route.</span></span></div>
           <div><b>Deploy</b><span>The crew ride along. On scene they dismount and attack.</span></div>
-          <div><b>Tank</b><span>The tank runs dry. Park beside a hydrant and press G to connect, or refill at the station.</span></div>
+          <div><b>Tank</b><span><span class="only-mouse">The tank runs dry. Park beside a hydrant and press G to connect, or refill at the station.</span><span class="only-touch">The tank runs dry. Park beside a hydrant and tap Connect hydrant, or refill at the station.</span></span></div>
           <div><b>Hose</b><span>Water only flows within the vehicle's hose range (12–16 tiles).</span></div>
           <div><b>Rescue</b><span>People still inside show on the building. A crew at the building brings them out before it comes down.</span></div>
-          <div><b>Medical</b><span>People hurt lie on the street on a clock. Send an ambulance; critical cases ride to a hospital (K). Restock kits at a pharmacy (P).</span></div>
+          <div><b>Medical</b><span><span class="only-mouse">People hurt lie on the street on a clock. Send an ambulance; critical cases ride to a hospital (K). Restock kits at a pharmacy (P).</span><span class="only-touch">People hurt lie on the street on a clock. Send an ambulance; critical cases ride to a hospital. Restock kits at a pharmacy. Both are buttons on the ambulance's card.</span></span></div>
           <div><b>Roads</b><span>Wrecks and debris block streets and traffic queues behind them. Send a crew to clear them; rescue units are fastest.</span></div>
           <div><b>Wind</b><span>Fire runs downwind. Check the wind in the top bar before you choose where to hold the line.</span></div>
           <div><b>Water</b><span>People fall in the river and the harbour. Divers by road or boat bring them out; fireboats and air tankers fight fire from the water.</span></div>
@@ -1807,7 +2041,10 @@ button { font-family: inherit; }
         <div class="menu__cta">
           <button type="button" id="btn-start" class="btn btn--primary btn--wide">Start shift</button>
           <button type="button" id="btn-continue" class="btn btn--wide" hidden>Continue saved shift</button>
-          <p class="menu__hint">Drag to pan · Scroll to zoom · Space pauses · F1 controls</p>
+          <p class="menu__hint">
+            <span class="only-mouse">Drag to pan · Scroll to zoom · Space pauses · F1 controls</span>
+            <span class="only-touch">Drag to pan · Pinch to zoom · Tap to select · Press and hold to order</span>
+          </p>
         </div>
       </div>
     </section>
@@ -1828,6 +2065,7 @@ button { font-family: inherit; }
           <button type="button" id="btn-help-close" class="btn btn--ghost btn--icon" aria-label="Close">×</button>
         </header>
         <dl class="keys">
+          <dt>Touch</dt><dd>Tap to select · drag to pan · pinch to zoom · press and hold on the map (or tap <b>Order</b>, then the map) to send the selected unit there · <b>Next</b> jumps to the next incident · the <b>Units</b> and <b>Incidents</b> buttons open the lists</dd>
           <dt>Left click</dt><dd>Select the engine, a crew member or a building</dd>
           <dt>Right click</dt><dd>Send the selected unit there — on a burning building, the engine is dispatched</dd>
           <dt>Drag</dt><dd>Pan the map</dd>
@@ -1900,6 +2138,13 @@ const CONFIG = {
     panSpeed: 950, // px/s while a pan key is held
     margin: 2, // tiles of slack around the city edge
     edgePad: 240, // screen pixels of slack at the edge, so a panel never hides the map's rim
+  },
+
+  // Fingers are fatter than a mouse pointer.
+  touch: {
+    longPressMs: 450, // hold this long on the map to give an order (the right-click)
+    tapSlop: 10, // px a finger may wander and still count as a tap or a hold
+    pickPad: 22, // px of forgiveness when tapping a unit or a building
   },
 
   city: { seed: 7, name: 'Harbor City' },
@@ -7628,6 +7873,12 @@ function localAction(button) {
   }
   if (action === 'units-collapse') {
     setUnitsCollapsed(!unitsCollapsed);
+    if (!unitsCollapsed) setIncidentsOpen(false); // on a phone the two lists share the screen
+    return true;
+  }
+  if (action === 'incidents-toggle') {
+    setIncidentsOpen(!incidentsOpen);
+    if (incidentsOpen) setUnitsCollapsed(true);
     return true;
   }
   if (action === 'group-toggle') {
@@ -7653,6 +7904,23 @@ function setUnitsCollapsed(collapsed) {
 /** Show or hide the unit list. */
 function toggleUnits() {
   setUnitsCollapsed(!unitsCollapsed);
+}
+
+// On a phone the incident list is a popover too, opened from its own button.
+let incidentsOpen = false;
+
+function setIncidentsOpen(open) {
+  incidentsOpen = open;
+  const tab = $('incidents-open');
+  tab.classList.toggle('is-open', open);
+  tab.setAttribute('aria-expanded', String(open));
+  $('stage').classList.toggle('incidents-open', open);
+}
+
+/** Fold both lists away, so a small screen shows the map. */
+function closePanels() {
+  setIncidentsOpen(false);
+  if (!unitsCollapsed) setUnitsCollapsed(true);
 }
 
 const unitKey = (index) => (index < 9 ? String(index + 1) : '');
@@ -7872,6 +8140,8 @@ function updateIncidents(state) {
   const sig = shown.map((i) => [i.kind, i.id, i.meta, i.handled].join(':')).join('|') + list.length;
   $('incident-count').textContent = String(list.length);
   $('incident-count').dataset.on = list.length > 0 ? '1' : '';
+  $('incidents-open-count').textContent = String(list.length);
+  $('incidents-open-count').dataset.on = list.length > 0 ? '1' : '';
   if (sig === incidentKey) return;
   incidentKey = sig;
   $('incident-list').innerHTML = shown.length
@@ -8455,7 +8725,7 @@ function setSoundState(muted) {
   button.setAttribute('aria-pressed', String(!muted));
 }
 
-return { mount, categoryOf, toggleUnits, reset, update, setStationTab, setBuyStation, getBuyStation, updateStation, setSoundState };
+return { mount, categoryOf, toggleUnits, closePanels, reset, update, setStationTab, setBuyStation, getBuyStation, updateStation, setSoundState };
 })();
 
 // ---- src/core/loop.js ----
@@ -13770,10 +14040,14 @@ function miniStatic(state, mw, mh) {
 
 function drawMinimap(ctx, state, cam, view) {
   const city = state.city;
-  const mw = Math.round(Math.min(280, view.width * 0.25));
+  // A small screen gets a smaller map, parked above the bottom action bar.
+  const compact = view.width <= 900 || view.height <= 520;
+  const mw = compact
+    ? Math.round(Math.min(280, Math.max(96, view.width * 0.28), view.height * 0.3 * (city.w / city.h)))
+    : Math.round(Math.min(280, view.width * 0.25));
   const mh = Math.round((mw * city.h) / city.w);
-  const x = view.width - mw - 16;
-  const y = view.height - mh - 16;
+  const x = view.width - mw - (compact ? 10 : 16);
+  const y = view.height - mh - (compact ? 58 : 16);
   state.ui.minimap = { x, y, w: mw, h: mh };
   const sx = mw / (city.w * TILE);
   const sy = mh / (city.h * TILE);
@@ -13872,6 +14146,64 @@ function drawVignette(ctx, w, h) {
 return { screenToWorld, worldToScreen, createCamera, clampCamera, render, daylight, PALETTE };
 })();
 
+// ---- src/ui/gestures.js ----
+__m["src/ui/gestures.js"] = (function () {
+const { clamp } = __m["src/core/math.js"];
+// Touch gesture maths, kept free of the DOM so it can be tested. main.js feeds
+// it pointer positions (in canvas pixels) and applies the camera it returns.
+
+
+
+const gap = (a, b) => Math.max(1, Math.hypot(a.x - b.x, a.y - b.y));
+
+/** Remember where a two-finger gesture began: the fingers' midpoint and spread, and the camera then. */
+function startPinch(a, b, cam) {
+  return {
+    dist: gap(a, b),
+    mx: (a.x + b.x) / 2,
+    my: (a.y + b.y) / 2,
+    zoom: cam.zoom,
+    x: cam.x,
+    y: cam.y,
+  };
+}
+
+/**
+ * The camera for fingers now at a and b. Zoom follows how far apart they are,
+ * and the point of the map that was under their midpoint stays under it as it
+ * moves, so two fingers zoom and pan at once. `view` is the canvas size in CSS
+ * pixels; `limits` is { min, max } zoom.
+ */
+function pinchCamera(start, a, b, view, limits) {
+  const zoom = clamp(start.zoom * (gap(a, b) / start.dist), limits.min, limits.max);
+  const mx = (a.x + b.x) / 2;
+  const my = (a.y + b.y) / 2;
+  const wx = (start.mx - view.width / 2) / start.zoom + start.x;
+  const wy = (start.my - view.height / 2) / start.zoom + start.y;
+  return {
+    zoom,
+    x: wx - (mx - view.width / 2) / zoom,
+    y: wy - (my - view.height / 2) / zoom,
+  };
+}
+
+/** Is this a small screen, where the panels fold away and the bottom bar takes over? */
+const COMPACT_QUERY = '(max-width: 900px), (max-height: 520px)';
+
+function isCompact() {
+  return typeof window !== 'undefined' && Boolean(window.matchMedia?.(COMPACT_QUERY).matches);
+}
+
+/** A zoom that suits the screen at the start of a shift: a phone sees the same few streets, not a keyhole. */
+function startZoomFor(width, height, base) {
+  const shortSide = Math.min(width, height);
+  if (shortSide >= 600) return base;
+  return clamp(base * (0.62 + (shortSide / 600) * 0.38), 0.5, base);
+}
+
+return { startPinch, pinchCamera, COMPACT_QUERY, isCompact, startZoomFor };
+})();
+
 // ---- src/main.js ----
 __m["src/main.js"] = (function () {
 const hud = __m["src/ui/hud.js"];
@@ -13889,8 +14221,10 @@ const { engineForUnit } = __m["src/systems/units.js"];
 const { startWildfire } = __m["src/systems/wildfire.js"];
 const { ignite } = __m["src/systems/fire.js"];
 const { render, createCamera, clampCamera, screenToWorld } = __m["src/render/render.js"];
+const { startPinch, pinchCamera, isCompact, startZoomFor } = __m["src/ui/gestures.js"];
 // Wiring: canvas, camera, pointer and keyboard, and the bridge between the
 // simulation and the DOM HUD. No game rules live here.
+
 
 
 
@@ -13939,6 +14273,7 @@ function resize() {
 window.addEventListener('resize', resize);
 if ('ResizeObserver' in window) new ResizeObserver(resize).observe(stage);
 resize();
+cam.zoom = startZoomFor(view.width, view.height, cam.zoom); // a phone starts a little further out
 
 function toWorld(mx, my) {
   return screenToWorld(cam, mx, my, view);
@@ -14006,14 +14341,67 @@ const unlockAudio = () => audio.unlock();
 window.addEventListener('pointerdown', unlockAudio, { capture: true });
 window.addEventListener('keydown', unlockAudio, { capture: true });
 
+// Fingers on the glass: every pressed pointer by id, so two of them can pinch.
+const pointers = new Map();
+let pinch = null;
+let pressTimer = 0;
+let orderMode = false;
+
+const isTouchLike = (ev) => ev.pointerType !== 'mouse';
+const pickPad = (ev) => (isTouchLike(ev) ? CONFIG.touch.pickPad : 10) / cam.zoom;
+
+/** Keep getting a finger's moves after it leaves the canvas. Not every pointer can be captured. */
+function capturePointer(ev) {
+  try {
+    canvas.setPointerCapture(ev.pointerId);
+  } catch {
+    // an inactive or synthetic pointer: the gesture still works while it stays on the canvas
+  }
+}
+
+function cancelPress() {
+  clearTimeout(pressTimer);
+  pressTimer = 0;
+}
+
+/** Holding a finger still on the map is the touch version of a right-click. */
+function startPress(p) {
+  cancelPress();
+  pressTimer = setTimeout(() => {
+    pressTimer = 0;
+    if (!drag || drag.moved || pinch) return;
+    drag.longPressed = true;
+    navigator.vibrate?.(18);
+    orderAt(p.x, p.y, true);
+  }, CONFIG.touch.longPressMs);
+}
+
+/** The Order button: the next tap on the map sends the selected unit there. */
+function setOrderMode(on) {
+  orderMode = on;
+  stage.classList.toggle('order-mode', on);
+  document.getElementById('btn-order')?.classList.toggle('is-active', on);
+  document.getElementById('order-hint').hidden = !on;
+}
+
+function toggleOrderMode() {
+  if (!orderMode && !getSelected(state)) {
+    addEvent(state, 'Select a unit first, then tap Order and tap where it should go', 'info');
+    return;
+  }
+  setOrderMode(!orderMode);
+}
+
 canvas.addEventListener('pointerdown', (ev) => {
   if (!state.running || state.over) return;
   const p = pointerPos(ev);
+  if (isCompact()) hud.closePanels(); // a panel over the map is in the way of the next tap
   const rect = state.ui.minimap;
-  if (rect && p.x >= rect.x - 8 && p.x <= rect.x + rect.w + 8 && p.y >= rect.y - 8 && p.y <= rect.y + rect.h + 8) {
+  const slack = isTouchLike(ev) ? 14 : 8;
+  if (rect && p.x >= rect.x - slack && p.x <= rect.x + rect.w + slack && p.y >= rect.y - slack && p.y <= rect.y + rect.h + slack) {
     minimapDrag = true;
     jumpFromMinimap(p.x, p.y);
-    canvas.setPointerCapture(ev.pointerId);
+    capturePointer(ev);
     return;
   }
   if (ev.button === 2) {
@@ -14021,8 +14409,23 @@ canvas.addEventListener('pointerdown', (ev) => {
     return;
   }
   if (ev.button !== 0) return;
-  drag = { sx: ev.clientX, sy: ev.clientY, camX: cam.x, camY: cam.y, moved: false };
-  canvas.setPointerCapture(ev.pointerId);
+
+  pointers.set(ev.pointerId, p);
+  capturePointer(ev);
+  if (pointers.size === 2) {
+    // A second finger: pinch to zoom, move both to pan.
+    cancelPress();
+    drag = null;
+    const [a, b] = [...pointers.values()];
+    pinch = startPinch(a, b, cam);
+    return;
+  }
+  if (pointers.size > 2) return;
+  drag = {
+    sx: ev.clientX, sy: ev.clientY, camX: cam.x, camY: cam.y, moved: false, longPressed: false,
+    slop: isTouchLike(ev) ? CONFIG.touch.tapSlop : 5,
+  };
+  if (isTouchLike(ev)) startPress(p);
 });
 
 canvas.addEventListener('pointermove', (ev) => {
@@ -14032,10 +14435,24 @@ canvas.addEventListener('pointermove', (ev) => {
     jumpFromMinimap(p.x, p.y);
     return;
   }
+  if (pointers.has(ev.pointerId)) pointers.set(ev.pointerId, p);
+  if (pinch && pointers.size >= 2) {
+    const [a, b] = [...pointers.values()];
+    const next = pinchCamera(pinch, a, b, view, { min: CONFIG.camera.minZoom, max: CONFIG.camera.maxZoom });
+    cam.zoom = next.zoom;
+    cam.x = next.x;
+    cam.y = next.y;
+    clampCamera(cam, state, view);
+    state.ui.hover = null;
+    return;
+  }
   if (drag) {
     const dx = ev.clientX - drag.sx;
     const dy = ev.clientY - drag.sy;
-    if (!drag.moved && Math.hypot(dx, dy) > 5) drag.moved = true;
+    if (!drag.moved && Math.hypot(dx, dy) > drag.slop) {
+      drag.moved = true;
+      cancelPress();
+    }
     if (drag.moved) {
       cam.x = drag.camX - dx / cam.zoom;
       cam.y = drag.camY - dy / cam.zoom;
@@ -14048,21 +14465,51 @@ canvas.addEventListener('pointermove', (ev) => {
   updateHover(ev);
 });
 
+function endPointer(ev) {
+  pointers.delete(ev.pointerId);
+  if (!pinch) return false;
+  if (pointers.size < 2) {
+    pinch = null;
+    cancelPress();
+    // A finger is still down: let it keep panning, but never count it as a tap.
+    const [id, p] = [...pointers.entries()][0] ?? [];
+    drag = id === undefined ? null : {
+      sx: p.x + canvas.getBoundingClientRect().left, sy: p.y + canvas.getBoundingClientRect().top,
+      camX: cam.x, camY: cam.y, moved: true, longPressed: false, slop: CONFIG.touch.tapSlop,
+    };
+  }
+  return true;
+}
+
+canvas.addEventListener('pointercancel', (ev) => {
+  endPointer(ev);
+  cancelPress();
+  drag = null;
+  minimapDrag = false;
+});
+
 canvas.addEventListener('pointerup', (ev) => {
   if (minimapDrag) {
     minimapDrag = false;
     return;
   }
+  cancelPress();
+  if (endPointer(ev)) return; // that was part of a pinch
   if (!drag) return;
-  const wasClick = !drag.moved;
+  const wasClick = !drag.moved && !drag.longPressed;
   drag = null;
   if (!wasClick || ev.button !== 0) {
     canvas.style.cursor = 'grab';
     return;
   }
   const p = pointerPos(ev);
+  if (orderMode) {
+    setOrderMode(false);
+    orderAt(p.x, p.y, true);
+    return;
+  }
   const world = toWorld(p.x, p.y);
-  const hit = pickAt(state, world.x, world.y, 10 / cam.zoom);
+  const hit = pickAt(state, world.x, world.y, pickPad(ev));
   if (hit) {
     if (hit.kind === 'unit') selectUnit(state, hit.id);
     else if (hit.kind === 'patient') selectPatient(state, hit.id);
@@ -14094,9 +14541,9 @@ canvas.addEventListener('wheel', (ev) => {
   clampCamera(cam, state, view);
 }, { passive: false });
 
-function orderAt(mx, my) {
+function orderAt(mx, my, touch = false) {
   const world = toWorld(mx, my);
-  const hit = pickAt(state, world.x, world.y, 12 / cam.zoom);
+  const hit = pickAt(state, world.x, world.y, (touch ? CONFIG.touch.pickPad + 4 : 12) / cam.zoom);
   if (hit?.kind === 'wildfire') {
     if (commandDispatchWildfire(state, hit.id)) audio.play('radio');
     return;
@@ -14272,6 +14719,8 @@ function onAction(action, data = {}) {
       break;
     }
     case 'center': centerOnSelected(); break;
+    case 'order-mode': toggleOrderMode(); break;
+    case 'next-incident': jumpToNextIncident(); hud.closePanels(); break;
     case 'hydrant': commandHydrant(state); break;
     case 'equip': if (commandEquip(state, data.tool)) audio.play('select'); break;
     case 'open-station': toggleStation(); break;
@@ -14398,7 +14847,7 @@ function loadGame() {
     cam.x = focus.x;
     cam.y = focus.y;
   }
-  cam.zoom = 1.05;
+  cam.zoom = startZoomFor(view.width, view.height, 1.05);
   clampCamera(cam, state, view);
   pausedByOverlay = false;
   helpScreen.hidden = true;
@@ -14419,6 +14868,7 @@ function restart() {
   loop?.stop();
   state = createGame(CONFIG.city.seed);
   cam = createCamera(state);
+  cam.zoom = startZoomFor(view.width, view.height, cam.zoom);
   pausedByOverlay = false;
   helpScreen.hidden = true;
   stationScreen.hidden = true;
@@ -14462,6 +14912,7 @@ window.addEventListener('keydown', (ev) => {
   if (key === 'escape') {
     if (!helpScreen.hidden) hideOverlay(helpScreen);
     else if (!stationScreen.hidden) hideOverlay(stationScreen);
+    else if (orderMode) setOrderMode(false);
     else state.selected = null;
     return;
   }
@@ -14547,13 +14998,19 @@ window.addEventListener('blur', () => {
   keys.clear();
   drag = null;
   minimapDrag = false;
+  pointers.clear();
+  pinch = null;
+  cancelPress();
 });
 
 // ------------------------------------------------------------------ boot ---
 
 hud.mount(state, {
   onAction,
-  onUnit: (id) => selectUnit(state, id),
+  onUnit: (id) => {
+    selectUnit(state, id);
+    if (isCompact()) hud.closePanels();
+  },
   onSpeed: (speed) => { state.speed = speed; },
   onPause: togglePause,
   onHelp: toggleHelp,
@@ -14564,7 +15021,10 @@ hud.mount(state, {
   onContinue: loadGame,
   onRestart: restart,
   onSound: toggleSound,
-  onIncident: showIncident,
+  onIncident: (kind, id) => {
+    showIncident(kind, id);
+    if (isCompact()) hud.closePanels(); // on a phone the list covers the map it just pointed at
+  },
   onUnitCenter: centerOnUnit,
 });
 hud.setSoundState(audio.isMuted());

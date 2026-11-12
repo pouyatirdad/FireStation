@@ -18,6 +18,13 @@ export const CONFIG = {
     edgePad: 240, // screen pixels of slack at the edge, so a panel never hides the map's rim
   },
 
+  // Fingers are fatter than a mouse pointer.
+  touch: {
+    longPressMs: 450, // hold this long on the map to give an order (the right-click)
+    tapSlop: 10, // px a finger may wander and still count as a tap or a hold
+    pickPad: 22, // px of forgiveness when tapping a unit or a building
+  },
+
   city: { seed: 7, name: 'Harbor City' },
 
   // The money model. Income is incident rewards, a knockdown fee, treatment fees

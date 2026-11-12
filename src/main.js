@@ -25,6 +25,7 @@ import { startWildfire } from './systems/wildfire.js';
 import { ignite } from './systems/fire.js';
 import { render, createCamera, clampCamera, screenToWorld } from './render/render.js';
 import * as hud from './ui/hud.js';
+import { startPinch, pinchCamera, isCompact, startZoomFor } from './ui/gestures.js';
 
 const canvas = document.getElementById('game');
 const stage = document.getElementById('stage');
@@ -57,6 +58,7 @@ function resize() {
 window.addEventListener('resize', resize);
 if ('ResizeObserver' in window) new ResizeObserver(resize).observe(stage);
 resize();
+cam.zoom = startZoomFor(view.width, view.height, cam.zoom); // a phone starts a little further out
 
 function toWorld(mx, my) {
   return screenToWorld(cam, mx, my, view);
@@ -124,14 +126,67 @@ const unlockAudio = () => audio.unlock();
 window.addEventListener('pointerdown', unlockAudio, { capture: true });
 window.addEventListener('keydown', unlockAudio, { capture: true });
 
+// Fingers on the glass: every pressed pointer by id, so two of them can pinch.
+const pointers = new Map();
+let pinch = null;
+let pressTimer = 0;
+let orderMode = false;
+
+const isTouchLike = (ev) => ev.pointerType !== 'mouse';
+const pickPad = (ev) => (isTouchLike(ev) ? CONFIG.touch.pickPad : 10) / cam.zoom;
+
+/** Keep getting a finger's moves after it leaves the canvas. Not every pointer can be captured. */
+function capturePointer(ev) {
+  try {
+    canvas.setPointerCapture(ev.pointerId);
+  } catch {
+    // an inactive or synthetic pointer: the gesture still works while it stays on the canvas
+  }
+}
+
+function cancelPress() {
+  clearTimeout(pressTimer);
+  pressTimer = 0;
+}
+
+/** Holding a finger still on the map is the touch version of a right-click. */
+function startPress(p) {
+  cancelPress();
+  pressTimer = setTimeout(() => {
+    pressTimer = 0;
+    if (!drag || drag.moved || pinch) return;
+    drag.longPressed = true;
+    navigator.vibrate?.(18);
+    orderAt(p.x, p.y, true);
+  }, CONFIG.touch.longPressMs);
+}
+
+/** The Order button: the next tap on the map sends the selected unit there. */
+function setOrderMode(on) {
+  orderMode = on;
+  stage.classList.toggle('order-mode', on);
+  document.getElementById('btn-order')?.classList.toggle('is-active', on);
+  document.getElementById('order-hint').hidden = !on;
+}
+
+function toggleOrderMode() {
+  if (!orderMode && !getSelected(state)) {
+    addEvent(state, 'Select a unit first, then tap Order and tap where it should go', 'info');
+    return;
+  }
+  setOrderMode(!orderMode);
+}
+
 canvas.addEventListener('pointerdown', (ev) => {
   if (!state.running || state.over) return;
   const p = pointerPos(ev);
+  if (isCompact()) hud.closePanels(); // a panel over the map is in the way of the next tap
   const rect = state.ui.minimap;
-  if (rect && p.x >= rect.x - 8 && p.x <= rect.x + rect.w + 8 && p.y >= rect.y - 8 && p.y <= rect.y + rect.h + 8) {
+  const slack = isTouchLike(ev) ? 14 : 8;
+  if (rect && p.x >= rect.x - slack && p.x <= rect.x + rect.w + slack && p.y >= rect.y - slack && p.y <= rect.y + rect.h + slack) {
     minimapDrag = true;
     jumpFromMinimap(p.x, p.y);
-    canvas.setPointerCapture(ev.pointerId);
+    capturePointer(ev);
     return;
   }
   if (ev.button === 2) {
@@ -139,8 +194,23 @@ canvas.addEventListener('pointerdown', (ev) => {
     return;
   }
   if (ev.button !== 0) return;
-  drag = { sx: ev.clientX, sy: ev.clientY, camX: cam.x, camY: cam.y, moved: false };
-  canvas.setPointerCapture(ev.pointerId);
+
+  pointers.set(ev.pointerId, p);
+  capturePointer(ev);
+  if (pointers.size === 2) {
+    // A second finger: pinch to zoom, move both to pan.
+    cancelPress();
+    drag = null;
+    const [a, b] = [...pointers.values()];
+    pinch = startPinch(a, b, cam);
+    return;
+  }
+  if (pointers.size > 2) return;
+  drag = {
+    sx: ev.clientX, sy: ev.clientY, camX: cam.x, camY: cam.y, moved: false, longPressed: false,
+    slop: isTouchLike(ev) ? CONFIG.touch.tapSlop : 5,
+  };
+  if (isTouchLike(ev)) startPress(p);
 });
 
 canvas.addEventListener('pointermove', (ev) => {
@@ -150,10 +220,24 @@ canvas.addEventListener('pointermove', (ev) => {
     jumpFromMinimap(p.x, p.y);
     return;
   }
+  if (pointers.has(ev.pointerId)) pointers.set(ev.pointerId, p);
+  if (pinch && pointers.size >= 2) {
+    const [a, b] = [...pointers.values()];
+    const next = pinchCamera(pinch, a, b, view, { min: CONFIG.camera.minZoom, max: CONFIG.camera.maxZoom });
+    cam.zoom = next.zoom;
+    cam.x = next.x;
+    cam.y = next.y;
+    clampCamera(cam, state, view);
+    state.ui.hover = null;
+    return;
+  }
   if (drag) {
     const dx = ev.clientX - drag.sx;
     const dy = ev.clientY - drag.sy;
-    if (!drag.moved && Math.hypot(dx, dy) > 5) drag.moved = true;
+    if (!drag.moved && Math.hypot(dx, dy) > drag.slop) {
+      drag.moved = true;
+      cancelPress();
+    }
     if (drag.moved) {
       cam.x = drag.camX - dx / cam.zoom;
       cam.y = drag.camY - dy / cam.zoom;
@@ -166,21 +250,51 @@ canvas.addEventListener('pointermove', (ev) => {
   updateHover(ev);
 });
 
+function endPointer(ev) {
+  pointers.delete(ev.pointerId);
+  if (!pinch) return false;
+  if (pointers.size < 2) {
+    pinch = null;
+    cancelPress();
+    // A finger is still down: let it keep panning, but never count it as a tap.
+    const [id, p] = [...pointers.entries()][0] ?? [];
+    drag = id === undefined ? null : {
+      sx: p.x + canvas.getBoundingClientRect().left, sy: p.y + canvas.getBoundingClientRect().top,
+      camX: cam.x, camY: cam.y, moved: true, longPressed: false, slop: CONFIG.touch.tapSlop,
+    };
+  }
+  return true;
+}
+
+canvas.addEventListener('pointercancel', (ev) => {
+  endPointer(ev);
+  cancelPress();
+  drag = null;
+  minimapDrag = false;
+});
+
 canvas.addEventListener('pointerup', (ev) => {
   if (minimapDrag) {
     minimapDrag = false;
     return;
   }
+  cancelPress();
+  if (endPointer(ev)) return; // that was part of a pinch
   if (!drag) return;
-  const wasClick = !drag.moved;
+  const wasClick = !drag.moved && !drag.longPressed;
   drag = null;
   if (!wasClick || ev.button !== 0) {
     canvas.style.cursor = 'grab';
     return;
   }
   const p = pointerPos(ev);
+  if (orderMode) {
+    setOrderMode(false);
+    orderAt(p.x, p.y, true);
+    return;
+  }
   const world = toWorld(p.x, p.y);
-  const hit = pickAt(state, world.x, world.y, 10 / cam.zoom);
+  const hit = pickAt(state, world.x, world.y, pickPad(ev));
   if (hit) {
     if (hit.kind === 'unit') selectUnit(state, hit.id);
     else if (hit.kind === 'patient') selectPatient(state, hit.id);
@@ -212,9 +326,9 @@ canvas.addEventListener('wheel', (ev) => {
   clampCamera(cam, state, view);
 }, { passive: false });
 
-function orderAt(mx, my) {
+function orderAt(mx, my, touch = false) {
   const world = toWorld(mx, my);
-  const hit = pickAt(state, world.x, world.y, 12 / cam.zoom);
+  const hit = pickAt(state, world.x, world.y, (touch ? CONFIG.touch.pickPad + 4 : 12) / cam.zoom);
   if (hit?.kind === 'wildfire') {
     if (commandDispatchWildfire(state, hit.id)) audio.play('radio');
     return;
@@ -390,6 +504,8 @@ function onAction(action, data = {}) {
       break;
     }
     case 'center': centerOnSelected(); break;
+    case 'order-mode': toggleOrderMode(); break;
+    case 'next-incident': jumpToNextIncident(); hud.closePanels(); break;
     case 'hydrant': commandHydrant(state); break;
     case 'equip': if (commandEquip(state, data.tool)) audio.play('select'); break;
     case 'open-station': toggleStation(); break;
@@ -516,7 +632,7 @@ function loadGame() {
     cam.x = focus.x;
     cam.y = focus.y;
   }
-  cam.zoom = 1.05;
+  cam.zoom = startZoomFor(view.width, view.height, 1.05);
   clampCamera(cam, state, view);
   pausedByOverlay = false;
   helpScreen.hidden = true;
@@ -537,6 +653,7 @@ function restart() {
   loop?.stop();
   state = createGame(CONFIG.city.seed);
   cam = createCamera(state);
+  cam.zoom = startZoomFor(view.width, view.height, cam.zoom);
   pausedByOverlay = false;
   helpScreen.hidden = true;
   stationScreen.hidden = true;
@@ -580,6 +697,7 @@ window.addEventListener('keydown', (ev) => {
   if (key === 'escape') {
     if (!helpScreen.hidden) hideOverlay(helpScreen);
     else if (!stationScreen.hidden) hideOverlay(stationScreen);
+    else if (orderMode) setOrderMode(false);
     else state.selected = null;
     return;
   }
@@ -665,13 +783,19 @@ window.addEventListener('blur', () => {
   keys.clear();
   drag = null;
   minimapDrag = false;
+  pointers.clear();
+  pinch = null;
+  cancelPress();
 });
 
 // ------------------------------------------------------------------ boot ---
 
 hud.mount(state, {
   onAction,
-  onUnit: (id) => selectUnit(state, id),
+  onUnit: (id) => {
+    selectUnit(state, id);
+    if (isCompact()) hud.closePanels();
+  },
   onSpeed: (speed) => { state.speed = speed; },
   onPause: togglePause,
   onHelp: toggleHelp,
@@ -682,7 +806,10 @@ hud.mount(state, {
   onContinue: loadGame,
   onRestart: restart,
   onSound: toggleSound,
-  onIncident: showIncident,
+  onIncident: (kind, id) => {
+    showIncident(kind, id);
+    if (isCompact()) hud.closePanels(); // on a phone the list covers the map it just pointed at
+  },
   onUnitCenter: centerOnUnit,
 });
 hud.setSoundState(audio.isMuted());
