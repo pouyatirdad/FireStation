@@ -277,6 +277,9 @@ export const CONFIG = {
     reward: {
       structure: 300, block: 600, rescue: 350, industrial: 1500, bigBlock: 1800, forest: 2200,
       crash: 250, chain: 700, pileup: 1800,
+      // Calls that belong to one kind of district.
+      kitchen: 330, gas: 460, apartment: 560, office: 650, hotel: 720, lift: 380, shopRow: 760,
+      chemical: 1400, dockFuel: 1550, tower: 2400, trapped: 400,
     },
     crashCall: 0.16, // share of small calls that are a traffic accident
     drownCall: 0.1, // share of small calls that are someone in the water

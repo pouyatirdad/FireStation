@@ -5,6 +5,7 @@ import {
   createGame, startShift, update, selectUnit, selectBuilding, commandDispatch,
 } from '../src/systems/game.js';
 import { ignite } from '../src/systems/fire.js';
+import { nearestPassable } from '../src/systems/grid.js';
 import { startWildfire } from '../src/systems/wildfire.js';
 import {
   coverageRadius, cyclePhase, openIncidents, openLimit, updateIncidents,
@@ -51,9 +52,16 @@ test('D works from a selected firefighter too', () => {
   assert.equal(state.engines[0].targetId, building.id);
 });
 
+
+// A forest tile a street reaches: the middle one of those within eight tiles of a road.
+function forestTileByRoad(state) {
+  const near = state.city.forestTiles.filter((t) => nearestPassable(state.nav, 'drive', t.x, t.y, 8));
+  return near[Math.floor(near.length / 2)];
+}
+
 test('D sends the selected engine to a forest fire when no building is alight', () => {
   const state = quietGame();
-  const tile = state.city.forestTiles[Math.floor(state.city.forestTiles.length / 2)];
+  const tile = forestTileByRoad(state);
   startWildfire(state, (tile.x + 0.5) * 32, (tile.y + 0.5) * 32, 2200);
   selectUnit(state, state.engines[0].id);
 

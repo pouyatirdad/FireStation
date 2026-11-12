@@ -10,6 +10,21 @@ import {
   V_ROADS, H_ROADS, APRON, SEA_Y, RIVER_HALF_WIDTH, riverCentre,
 } from '../data/city.js';
 
+// What the ground of each kind of block looks like, painted over the pavement:
+// lawns round the houses, dark yards in industry, pale paving downtown.
+const ZONE_GROUND = {
+  housing: 'rgba(112,150,82,0.5)',
+  industrial: 'rgba(52,56,62,0.62)',
+  company: 'rgba(206,214,224,0.3)',
+  commercial: 'rgba(160,140,112,0.2)',
+};
+const ZONE_MINIMAP = {
+  housing: '#4b6a45',
+  industrial: '#4a4a52',
+  company: '#5d6f86',
+  commercial: '#6a5f52',
+};
+
 const PALETTE = {
   sidewalk: '#a3a49f',
   sidewalkJoint: 'rgba(40,40,38,0.16)',
@@ -328,6 +343,12 @@ function drawGround(ctx, state, b, z) {
     ctx.fillStyle = canopy(ctx, woods, z >= 0.7 ? 2 : z >= 0.24 ? 1 : 0.25);
     ctx.fill();
   }
+  for (const blk of city.blocks ?? []) {
+    const tint = ZONE_GROUND[blk.zone];
+    if (!tint || blk.x1 < b.x0 || blk.x0 > b.x1 || blk.y1 < b.y0 || blk.y0 > b.y1) continue;
+    ctx.fillStyle = tint;
+    ctx.fillRect(blk.x0 * TILE, blk.y0 * TILE, (blk.x1 - blk.x0 + 1) * TILE, (blk.y1 - blk.y0 + 1) * TILE);
+  }
   ctx.fillStyle = grass;
   for (const p of city.parks) {
     ctx.fillRect(
@@ -415,7 +436,15 @@ function drawGround(ctx, state, b, z) {
   if (z >= 0.7) {
     for (const vx of vr) {
       for (const hy of hr) {
-        if (roadAt(vx, hy) && !ruralJunction(city, vx, hy)) drawCrosswalks(ctx, vx * TILE, hy * TILE);
+        if (roadAt(vx, hy) && !ruralJunction(city, vx, hy)) {
+          // A crossing only where the street it crosses actually runs on.
+          drawCrosswalks(ctx, vx * TILE, hy * TILE, {
+            n: hy > 0 && roadAt(vx, hy - 1),
+            s: roadAt(vx, hy + 2),
+            w: vx > 0 && roadAt(vx - 1, hy),
+            e: roadAt(vx + 2, hy),
+          });
+        }
       }
     }
   }
@@ -762,13 +791,13 @@ function drawCar(ctx, car) {
   ctx.restore();
 }
 
-function drawCrosswalks(ctx, x, y) {
+function drawCrosswalks(ctx, x, y, arms = { n: true, s: true, w: true, e: true }) {
   ctx.fillStyle = PALETTE.crosswalk;
   for (let i = 0; i < 4; i++) {
-    ctx.fillRect(x + 7 + i * 14, y - 13, 7, 11);
-    ctx.fillRect(x + 7 + i * 14, y + 2 * TILE + 2, 7, 11);
-    ctx.fillRect(x - 13, y + 7 + i * 14, 11, 7);
-    ctx.fillRect(x + 2 * TILE + 2, y + 7 + i * 14, 11, 7);
+    if (arms.n) ctx.fillRect(x + 7 + i * 14, y - 13, 7, 11);
+    if (arms.s) ctx.fillRect(x + 7 + i * 14, y + 2 * TILE + 2, 7, 11);
+    if (arms.w) ctx.fillRect(x - 13, y + 7 + i * 14, 11, 7);
+    if (arms.e) ctx.fillRect(x + 2 * TILE + 2, y + 7 + i * 14, 11, 7);
   }
 }
 
@@ -3494,6 +3523,11 @@ function miniStatic(state, mw, mh) {
   for (let y = 0; y < SEA_Y; y += 2) {
     const c = riverCentre(y + 1);
     g.fillRect((c - RIVER_HALF_WIDTH) * TILE * sx, y * TILE * sy, RIVER_HALF_WIDTH * 2 * TILE * sx, 2 * TILE * sy + 1);
+  }
+  for (const blk of city.blocks ?? []) {
+    if (!ZONE_MINIMAP[blk.zone]) continue;
+    g.fillStyle = ZONE_MINIMAP[blk.zone];
+    g.fillRect(blk.x0 * TILE * sx, blk.y0 * TILE * sy, (blk.x1 - blk.x0 + 1) * TILE * sx, (blk.y1 - blk.y0 + 1) * TILE * sy);
   }
   for (const a of city.forestAreas ?? []) {
     g.fillStyle = a.woods === 'pine' ? '#22382a' : '#2f4628';

@@ -614,7 +614,7 @@ function sellApparatus(id) {
 
 // ------------------------------------------------------------------- save ---
 
-const SAVE_KEY = 'firestation.save.v7';
+const SAVE_KEY = 'firestation.save.v8';
 
 function hasSave() {
   try {

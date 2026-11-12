@@ -623,7 +623,7 @@ export { orderEngine, orderCrew };
 
 export function serialize(state) {
   return {
-    version: 7,
+    version: 8,
     seed: state.seed,
     time: state.time,
     clock: state.clock,
@@ -645,6 +645,8 @@ export function serialize(state) {
       evacuated: Boolean(b.evacuated),
       reward: b.reward ?? 0,
       incidentType: b.incidentType ?? null,
+      incidentLabel: b.incidentLabel ?? null,
+      hazmat: Boolean(b.hazmat),
       big: Boolean(b.big),
     })),
     engines: state.engines.map((e) => ({
@@ -733,6 +735,8 @@ export function loadState(data) {
     b.evacuated = Boolean(saved.evacuated);
     b.reward = saved.reward ?? 0;
     b.incidentType = saved.incidentType ?? null;
+    b.incidentLabel = saved.incidentLabel ?? null;
+    b.hazmat = Boolean(saved.hazmat);
     b.big = Boolean(saved.big);
   }
 

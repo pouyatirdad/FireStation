@@ -30,7 +30,7 @@ Node 18+ is only needed for the build and the tests; playing needs nothing but a
 
 ## The shift
 
-You command **Station 1** in Harbor City: about 1,800 buildings, 570 hydrants, 48 pharmacies, eight
+You command **Station 1** in Harbor City: about 1,400 buildings, 430 hydrants, 40 pharmacies, eight
 forests, and **$3,000** to start. One engine and three firefighters are in quarters. Calls come in;
 you send what fits, lay hose, pull people out, treat the injured, and spend what you earn on more
 apparatus. The first calls come from near the station; the area the calls cover grows through a
@@ -99,6 +99,22 @@ Selling returns 60% of the price. Every incident carries its own reward:
 | Industrial fire (major) | $1,500 |
 | Major block fire | $1,800 |
 | Forest fire (major) | $2,200 |
+
+### Districts and their calls
+
+The city is zoned like a real one, and the calls depend on where they come from (they start near your
+stations and reach further as the shift goes on, so the industrial waterfront comes into play once
+the dock or Station 2 is open or the shift is well along):
+
+| District | Where | Calls |
+|---|---|---|
+| **Housing** (green lawns) | the neighbourhoods round the shopping streets: houses, flats, a pharmacy now and then | **Kitchen fire** ($330; the family may be trapped upstairs), **apartment block fire** ($560; three to six residents trapped), **gas explosion** ($460; the house is alight and two people are hurt), a resident who collapsed at home, a resident locked in behind a door |
+| **Business districts** (pale paving) | round the seven commercial centres: offices, hotels, a few shops | **Office fire** ($650) and **hotel fire** ($720) with staff and guests trapped on the upper floors, **lift rescues** ($380), a worker who collapsed at the office; the major incident is a **high-rise fire** ($2,400, four to eight trapped) |
+| **Shopping streets** | a ring of shops and flats round each centre | **Shopping-street fire**: the whole terrace goes up ($760 shared), a shopper who fainted |
+| **Industrial** (dark yards) | on the water: the quay rows along the sea and the river banks. Big warehouses with yards | **Chemical fire** ($1,400; toxic smoke, spreads further and faster, may explode), **dockside fuel fire** ($1,550) on the waterfront, where a fireboat can reach it, an **industrial accident** (a worker crushed by machinery), a worker pinned under a fallen load, **a dock worker who has fallen off the quay** (divers); the major incident is an **industrial fire** at a works or a **fuel depot** on the waterfront |
+
+The incident list and the building card show the kind of call (and the district) so you know what you
+are driving into. The minimap is tinted by district.
 
 ### Finance
 
@@ -226,9 +242,13 @@ The game is a fixed 60 Hz simulation (`src/core/loop.js`) drawn to one canvas. N
 simulation knows about the DOM, and nothing in the renderer changes the simulation.
 
 - **The city** (`src/data/city.js`) is generated from a seed: a 520×384 tile grid of blocks between 17
-  avenues and 16 streets, seven commercial centres, suburbs, industry, parks, a waterfront, eight
-  forests, pharmacies in a quarter of the blocks, and the original Station 1 quarter in the north-west
-  where it always was. The same seed always builds the same Harbor City.
+  avenues and 16 streets (not evenly spaced: the gaps are drawn from a seeded stream between fixed
+  anchors), seven commercial centres, housing, shopping streets, industry on the quay and the river
+  banks, parks, eight forests, pharmacies in a quarter of the blocks, and the original Station 1
+  quarter in the north-west where it always was. Every block is cut into lots of different sizes, a
+  few neighbouring blocks are merged (the street between them removed) into estates and squares, and
+  each building knows its district (`building.zone`) and whether it is on the waterfront. The same
+  seed always builds the same Harbor City.
 - **Navigation** (`src/systems/grid.js`, search buffers reused between calls) is A* on two tile layers: vehicles use roads and the apron,
   crews walk anywhere that is not a building footprint. Paths are smoothed with a grid-traversal
   line check, so a diagonal can never clip a building.

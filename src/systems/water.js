@@ -126,6 +126,13 @@ export function drowningCall(state, allowed = () => true) {
     }
   }
   if (!spot) {
+    // Along the industrial quay: a dock worker, a deckhand, a fisherman.
+    const quays = (city.blocks ?? []).filter((b) => b.kind === 'industry' && b.y1 >= SEA_Y - 30);
+    for (let n = 0; n < 40 && !spot && quays.length > 0; n++) {
+      const q = rng.pick(quays);
+      const x = rng.int(q.x0, q.x1);
+      if (allowed(x, SEA_Y - 1)) spot = { x: (x + 0.5) * TILE, y: (SEA_Y + 1.6) * TILE, what: 'A dock worker has fallen off the quay' };
+    }
     for (let n = 0; n < 40 && !spot; n++) {
       const x = rng.int(8, city.w - 8);
       if (allowed(x, SEA_Y - 1)) spot = { x: (x + 0.5) * TILE, y: (SEA_Y + 1.6) * TILE, what: 'Someone has gone into the harbour' };

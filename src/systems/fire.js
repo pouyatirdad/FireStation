@@ -108,7 +108,9 @@ function trySpread(state, building) {
   const wind = state.wind;
   // Downwind the fire reaches further; upwind it barely crosses the gap. An
   // unattended fire reaches further still.
-  const reach = CONFIG.fire.spreadRange * TILE * (1 + 0.9 * (wind?.speed ?? 0)) * (1 + Math.min(0.6, dry / 150));
+  // Chemicals and fuel (industrial calls) throw the fire further and faster.
+  const hazmat = building.hazmat ? 1.5 : 1;
+  const reach = CONFIG.fire.spreadRange * TILE * (1 + 0.9 * (wind?.speed ?? 0)) * (1 + Math.min(0.6, dry / 150)) * (building.hazmat ? 1.25 : 1);
   const cx = rect.x + rect.w / 2;
   const cy = rect.y + rect.h / 2;
   for (const other of state.buildings) {
@@ -119,8 +121,8 @@ function trySpread(state, building) {
     const oy = o.y + o.h / 2;
     const factor = downwindFactor(state, cx, cy, ox, oy);
     // The extended reach is only available downwind.
-    if (!rectsTouch(rect, o, CONFIG.fire.spreadRange * TILE) && factor <= 1) continue;
-    if (state.rng.float() < CONFIG.fire.spreadChance * building.fire * factor * unattendedFactor(building)) {
+    if (!rectsTouch(rect, o, CONFIG.fire.spreadRange * TILE * (building.hazmat ? 1.25 : 1)) && factor <= 1) continue;
+    if (state.rng.float() < CONFIG.fire.spreadChance * building.fire * factor * unattendedFactor(building) * hazmat) {
       ignite(state, other, 'spread');
     }
   }
@@ -164,7 +166,7 @@ export function updateFire(state, dt) {
     }
 
     // An industrial fire left to run can take the whole building up with it.
-    if (b.type === 'warehouse' && b.fire >= 0.85 && !b.exploded && state.rng.float() < dt * 0.04) {
+    if (b.type === 'warehouse' && b.fire >= (b.hazmat ? 0.7 : 0.85) && !b.exploded && state.rng.float() < dt * (b.hazmat ? 0.08 : 0.04)) {
       b.exploded = true;
       state.onExplosion?.(b);
     }

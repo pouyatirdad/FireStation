@@ -12,9 +12,10 @@ import { startWildfire } from './wildfire.js';
 import { spawnPatient } from './medical.js';
 import { pileUp, trafficAccident } from './chains.js';
 import { drowningCall } from './water.js';
+import { placeNear } from './places.js';
 
 const SMALL = () => ['structure', 'structure', 'structure', 'rescue', 'block'];
-const BIG = ['industrial', 'bigBlock', 'forest', 'pileup'];
+const BIG = ['industrial', 'tower', 'bigBlock', 'forest', 'pileup'];
 
 /**
  * Where the shift is in its build-up. Difficulty climbs through a cycle and
@@ -87,17 +88,107 @@ function price(state, kind, count = 1) {
   return Math.round(total / count);
 }
 
-function structureFire(state) {
-  const building = pick(state);
-  if (!building) return null;
-  building.reward = price(state, 'structure');
+/** A building of one kind of district, within reach of a station you own; null if there is none. */
+function pickZone(state, zone, types = null) {
+  const pool = state.buildings.filter((b) => (
+    b.state === 'ok' && b.zone === zone && (!types || types.includes(b.type))
+    && inCoverage(state, b.x + b.w / 2, b.y + b.h / 2)
+  ));
+  return pool.length ? state.rng.pick(pool) : null;
+}
+
+/** Start a fire with a story: a label for the list, a reward and a line in the log. */
+function scenario(state, building, { label, kind, text, fire = 0, trapped = 0 }) {
+  building.reward = price(state, kind);
   building.incidentType = 'structure';
+  building.incidentLabel = label;
+  if (trapped > 0) building.trapped = trapped;
   ignite(state, building, 'call');
+  if (fire > 0) building.fire = Math.max(building.fire, fire);
+  addEvent(state, text, 'fire');
   return building;
 }
 
+/**
+ * A fire call. What happens depends on the district the building is in: a
+ * kitchen fire or a gas explosion in the housing, a floor of people trapped in
+ * the business districts, chemicals on the industrial estates and the quay.
+ */
+function structureFire(state) {
+  const b = pick(state);
+  if (!b) return null;
+  const rng = state.rng;
+  const where = placeNear(state, (b.x + b.w / 2) * TILE, (b.y + b.h / 2) * TILE);
+
+  if (b.zone === 'housing') {
+    if (b.type === 'apartment') {
+      const n = rng.int(3, 6);
+      return scenario(state, b, {
+        label: 'Apartment block fire', kind: 'apartment', fire: 0.3, trapped: n,
+        text: `Apartment block fire — ${n} residents cannot get out of ${b.name}`,
+      });
+    }
+    if (rng.chance(0.3)) {
+      const house = scenario(state, b, {
+        label: 'Gas explosion', kind: 'gas', fire: 0.45,
+        text: `Gas explosion at ${b.name} — the house is alight and people are hurt`,
+      });
+      spawnPatient(state, b, rng.range(0.55, 0.9), 'Gas explosion casualty at');
+      spawnPatient(state, b, rng.range(0.3, 0.6), 'Gas explosion casualty at');
+      return house;
+    }
+    const n = rng.chance(0.55) ? rng.int(1, 3) : 0;
+    return scenario(state, b, {
+      label: 'Kitchen fire', kind: 'kitchen', trapped: n,
+      text: n > 0 ? `Kitchen fire at ${b.name} — ${n} still inside upstairs` : `Kitchen fire at ${b.name} — the family is out on the lawn`,
+    });
+  }
+
+  if (b.zone === 'company') {
+    if (b.type === 'hotel') {
+      const n = rng.int(2, 5);
+      return scenario(state, b, {
+        label: 'Hotel fire', kind: 'hotel', fire: 0.2, trapped: n,
+        text: `Hotel fire — ${n} guests trapped on the upper floors of ${b.name}`,
+      });
+    }
+    if (b.type === 'office') {
+      const n = rng.int(2, Math.min(6, 2 + Math.floor(b.floors / 2)));
+      return scenario(state, b, {
+        label: 'Office fire', kind: 'office', fire: 0.2, trapped: n,
+        text: `Office fire in ${where} — ${n} staff trapped on the ${b.floors > 4 ? 'upper floors' : 'first floor'} of ${b.name}`,
+      });
+    }
+  }
+
+  if (b.zone === 'industrial' && b.type === 'warehouse') {
+    if (rng.chance(0.3)) {
+      // An accident, not a fire: somebody is badly hurt in the works.
+      b.incidentLabel = 'Industrial accident';
+      spawnPatient(state, b, rng.range(0.75, 1), 'Worker crushed by machinery at');
+      addEvent(state, `Industrial accident at ${b.name} — a worker is trapped under a load`, 'warn');
+      return b;
+    }
+    const quay = b.waterfront;
+    b.hazmat = true;
+    return scenario(state, b, {
+      label: quay ? 'Dockside fuel fire' : 'Chemical fire', kind: quay ? 'dockFuel' : 'chemical', fire: 0.35,
+      text: quay
+        ? `Fuel store alight at ${b.name} on the waterfront — it burns hot and spreads; a fireboat can reach it`
+        : `Chemical fire at ${b.name} — toxic smoke, it will spread fast and may explode`,
+    });
+  }
+
+  b.reward = price(state, 'structure');
+  b.incidentType = 'structure';
+  b.incidentLabel = b.zone === 'commercial' ? 'Shop fire' : null;
+  ignite(state, b, 'call');
+  return b;
+}
+
 function blockFire(state, count) {
-  const first = pick(state);
+  // A fire in a shopping street takes the whole terrace with it.
+  const first = (state.rng.chance(0.6) ? pickZone(state, 'commercial', ['shop']) : null) ?? pick(state);
   if (!first) return null;
   const rect = buildingRect(first);
   const neighbours = state.buildings.filter((b) => (
@@ -108,26 +199,65 @@ function blockFire(state, count) {
   ));
   const picks = [first, ...state.rng.shuffle(neighbours).slice(0, count - 1)];
   const each = price(state, 'block', picks.length);
+  const street = first.zone === 'commercial';
   for (const b of picks) {
     b.reward = each;
     b.incidentType = 'block';
+    b.incidentLabel = street ? 'Shopping-street fire' : 'Block fire';
   }
   for (const b of picks) ignite(state, b, 'call');
-  addEvent(state, `Block fire — ${picks.length} buildings around ${first.name}`, 'fire');
+  addEvent(
+    state,
+    street
+      ? `Shopping-street fire — ${picks.length} shops alight around ${first.name}`
+      : `Block fire — ${picks.length} buildings around ${first.name}`,
+    'fire',
+  );
   return picks[0];
 }
 
 function rescueJob(state) {
-  const building = pick(state, ['office', 'hotel', 'apartment', 'shop']);
+  const building = pick(state, ['office', 'hotel', 'apartment', 'shop', 'warehouse']);
   if (!building) return null;
-  building.trapped = state.rng.int(1, 2);
+  const n = state.rng.int(1, 2);
+  building.trapped = n;
   building.incidentType = 'rescue';
-  building.reward = price(state, 'rescue');
-  addEvent(state, `Person reported trapped — ${building.name}`, 'warn');
+  const lift = building.type === 'office' || building.type === 'hotel';
+  building.reward = price(state, lift ? 'lift' : 'rescue');
+  const text = {
+    office: `Lift failure — ${n} stuck between floors at ${building.name}`,
+    hotel: `Lift failure — ${n} guests stuck at ${building.name}`,
+    apartment: `Resident collapsed behind a locked door — ${building.name}`,
+    shop: `Shelving has collapsed on a customer — ${building.name}`,
+    warehouse: `Worker pinned under a fallen load — ${building.name}`,
+  }[building.type];
+  building.incidentLabel = {
+    office: 'Lift rescue', hotel: 'Lift rescue', apartment: 'Locked-in resident', shop: 'Collapse rescue', warehouse: 'Industrial rescue',
+  }[building.type];
+  addEvent(state, text ?? `Person reported trapped — ${building.name}`, 'warn');
   return building;
 }
 
 function industrialFire(state) {
+  // A works or a quay warehouse if one is in reach, else whatever is big.
+  const works = pickZone(state, 'industrial', ['warehouse']);
+  if (works) {
+    works.hazmat = true;
+    works.reward = price(state, works.waterfront ? 'dockFuel' : 'industrial');
+    works.incidentType = 'big';
+    works.incidentLabel = works.waterfront ? 'Waterfront fuel depot fire' : 'Industrial fire';
+    works.big = true;
+    ignite(state, works, 'call');
+    works.fire = 0.55;
+    addEvent(
+      state,
+      works.waterfront
+        ? `MAJOR INCIDENT — fuel depot burning at ${works.name} on the waterfront`
+        : `MAJOR INCIDENT — industrial fire at ${works.name}; chemicals stored on site`,
+      'big',
+    );
+    return works;
+  }
   const building = pick(state, ['warehouse', 'office', 'hotel']);
   if (!building) return null;
   building.reward = price(state, 'industrial');
@@ -137,6 +267,22 @@ function industrialFire(state) {
   building.fire = 0.55;
   addEvent(state, `MAJOR INCIDENT — industrial fire at ${building.name}`, 'big');
   return building;
+}
+
+/** A tall office or hotel in a business district, with people on every floor. */
+function towerFire(state) {
+  const tower = pickZone(state, 'company', ['office', 'hotel']);
+  if (!tower || tower.floors < 5) return bigBlockFire(state);
+  const n = state.rng.int(4, 8);
+  tower.trapped = n;
+  tower.reward = price(state, 'tower');
+  tower.incidentType = 'big';
+  tower.incidentLabel = 'High-rise fire';
+  tower.big = true;
+  ignite(state, tower, 'call');
+  tower.fire = 0.4;
+  addEvent(state, `MAJOR INCIDENT — high-rise fire at ${tower.name}: ${n} people trapped above the fire`, 'big');
+  return tower;
 }
 
 function bigBlockFire(state) {
@@ -179,7 +325,12 @@ function medicalCall(state) {
   if (state.patients.filter((p) => !p.treated).length >= 5) return null;
   const building = pick(state, ['house', 'apartment', 'office', 'hotel', 'shop', 'pharmacy']);
   if (!building) return null;
-  return spawnPatient(state, building, state.rng.range(0.3, 1));
+  const reason = {
+    housing: 'Resident collapsed at home — suspected cardiac arrest at',
+    company: 'Worker collapsed at the office —',
+    commercial: 'Shopper fainted outside',
+  }[building.zone] ?? null;
+  return spawnPatient(state, building, state.rng.range(0.3, 1), reason);
 }
 
 const roadAllowed = (state) => (x, y) => inCoverage(state, x, y);
@@ -203,6 +354,7 @@ function spawnBig(state) {
   const kind = state.rng.pick(BIG);
   if (kind === 'industrial') return industrialFire(state);
   if (kind === 'forest') return forestFire(state);
+  if (kind === 'tower') return towerFire(state);
   if (kind === 'pileup') return pileUp(state, (x, y) => inCoverage(state, x, y, 1.2));
   return bigBlockFire(state);
 }

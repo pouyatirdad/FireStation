@@ -55,7 +55,9 @@ test('an unattended building is lost, and the city rating drops with it', () => 
 test('fire spreads to a neighbouring building', () => {
   const state = createGame(13);
   state.running = true;
-  const source = state.buildings.find((b) => b.type === 'office');
+  // An office with a neighbour close enough to catch.
+  const close = (a, b) => Math.abs(a.x + a.w / 2 - (b.x + b.w / 2)) < (a.w + b.w) / 2 + 2 && Math.abs(a.y + a.h / 2 - (b.y + b.h / 2)) < (a.h + b.h) / 2 + 2;
+  const source = state.buildings.find((b) => b.type === 'office' && state.buildings.some((o) => o !== b && o.type !== 'station' && close(b, o)));
   source.integrity = 100000; // hold the source open while the spread is tested
   source.fire = 0.95;
   ignite(state, source, 'test');

@@ -441,13 +441,13 @@ function collectIncidents(state) {
     if (b.state === 'burning') {
       list.push({
         kind: 'building', id: b.id, tone: 'fire', urgency: 600 + b.fire * 100 + (b.trapped ?? 0) * 40 + (b.dryTime ?? 0) / 4,
-        title: b.name, meta: Math.round(b.fire * 100) + '% burning' + ((b.trapped ?? 0) > 0 ? ' · ' + b.trapped + ' trapped' : '') + (b.runaway ? ' · out of control' : ''),
+        title: b.name, meta: (b.incidentLabel ? b.incidentLabel + ' · ' : '') + Math.round(b.fire * 100) + '% burning' + ((b.trapped ?? 0) > 0 ? ' · ' + b.trapped + ' trapped' : '') + (b.runaway ? ' · out of control' : ''),
         handled: claimed((e) => e.targetId === b.id) || state.streams.some((st) => st.targetId === b.id),
       });
     } else if ((b.trapped ?? 0) > 0 && b.state !== 'rubble') {
       list.push({
         kind: 'building', id: b.id, tone: 'bad', urgency: 700,
-        title: b.name, meta: b.trapped + ' trapped inside', handled: claimed((e) => e.targetId === b.id),
+        title: b.name, meta: (b.incidentLabel ? b.incidentLabel + ' · ' : '') + b.trapped + ' trapped inside', handled: claimed((e) => e.targetId === b.id),
       });
     }
   }
@@ -754,6 +754,14 @@ function crewCard(state, crew) {
     </div>`;
 }
 
+const ZONE_LABEL = {
+  housing: 'Housing',
+  company: 'Business district',
+  commercial: 'Shopping street',
+  industrial: 'Industrial',
+  civic: 'Civic',
+};
+
 function buildingCard(state, building) {
   const type = TYPE_LABEL[building.type] ?? 'Building';
   const burning = building.state === 'burning';
@@ -764,10 +772,15 @@ function buildingCard(state, building) {
   const tone = burning ? 'fire' : building.state === 'rubble' ? 'bad' : building.state === 'out' ? 'good' : '';
   const status = burning ? 'Burning' : building.state === 'out' ? 'Knocked down' : building.state === 'rubble' ? 'Lost' : 'No fire';
 
+  const district = ZONE_LABEL[building.zone] ?? null;
+  const story = building.incidentLabel && building.state !== 'rubble'
+    ? `<div class="sel__alert sel__alert--story">${esc(building.incidentLabel)}${building.hazmat ? ' — chemicals, spreads fast' : ''}</div>`
+    : '';
   return `
-    <div class="sel__kind">Structure · ${esc(type)}</div>
+    <div class="sel__kind">${district ? esc(district) + ' · ' : 'Structure · '}${esc(type)}${building.waterfront ? ' · waterfront' : ''}</div>
     <h2 class="sel__name">${esc(building.name)}</h2>
     <div class="sel__status" data-tone="${tone}"><i></i>${status}</div>
+    ${story}
     ${trapped > 0 ? `<div class="sel__alert">${trapped} trapped inside</div>` : ''}
     ${burning ? `
       <div class="bar__label"><span>Fire</span><span>${Math.round(building.fire * 100)}%</span></div>

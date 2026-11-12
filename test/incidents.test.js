@@ -6,6 +6,7 @@ import {
   commandDispatchWildfire,
 } from '../src/systems/game.js';
 import { ignite, updateFire } from '../src/systems/fire.js';
+import { nearestPassable } from '../src/systems/grid.js';
 import { startWildfire, updateWildfires } from '../src/systems/wildfire.js';
 import { CONFIG } from '../src/core/config.js';
 
@@ -79,11 +80,18 @@ test('a fire with an incident reward pays when it is knocked down', () => {
   assert.ok(gained <= Math.round(750 * (1 + CONFIG.economy.speedBonus.max)) + fee, `gained too much: ${gained}`);
 });
 
+
+// A forest tile a street reaches: the middle one of those within eight tiles of a road.
+function forestTileByRoad(state) {
+  const near = state.city.forestTiles.filter((t) => nearestPassable(state.nav, 'drive', t.x, t.y, 8));
+  return near[Math.floor(near.length / 2)];
+}
+
 test('a crew can be sent to a forest fire and put it out', () => {
   const state = createGame(7);
   startShift(state);
   state.incidentsEnabled = false;
-  const tile = state.city.forestTiles[Math.floor(state.city.forestTiles.length / 2)];
+  const tile = forestTileByRoad(state);
   const wildfire = startWildfire(state, (tile.x + 0.5) * 32, (tile.y + 0.5) * 32, 2200);
 
   assert.equal(commandDispatchWildfire(state, wildfire.id), true);

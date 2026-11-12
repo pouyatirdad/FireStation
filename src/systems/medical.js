@@ -30,7 +30,7 @@ const buildingRectOf = (b) => ({
  * they last and whether they are critical (stabilise them, then a hospital).
  */
 export function spawnPatientAt(state, {
-  x, y, severity = null, label = 'somewhere', buildingId = null, silent = false,
+  x, y, severity = null, label = 'somewhere', buildingId = null, silent = false, reason = null,
 }) {
   if (state.patients.length >= 40) return null;
   const sev = severity ?? state.rng.range(0.25, 1);
@@ -53,12 +53,13 @@ export function spawnPatientAt(state, {
     claimedBy: null, // the ambulance heading for them
     medicId: null,
     leaveAt: 0,
+    reason,
   };
   state.patients.push(patient);
   if (!silent) {
     addEvent(
       state,
-      `Injured person near ${label} — ambulance needed${patient.critical ? ' (critical)' : ''}`,
+      `${reason ?? 'Injured person near'} ${label} — ambulance needed${patient.critical ? ' (critical)' : ''}`,
       'warn',
     );
   }
@@ -66,7 +67,7 @@ export function spawnPatientAt(state, {
 }
 
 /** Put an injured person on the ground beside a building. */
-export function spawnPatient(state, building, severity = null) {
+export function spawnPatient(state, building, severity = null, reason = null) {
   const rect = buildingRectOf(building);
   const stand = standTileForRect(state.nav, rect, rect.x + rect.w / 2, rect.y + rect.h / 2, 4);
   if (!stand) return null;
@@ -77,6 +78,7 @@ export function spawnPatient(state, building, severity = null) {
     severity,
     label: building.name,
     buildingId: building.id,
+    reason,
   });
 }
 

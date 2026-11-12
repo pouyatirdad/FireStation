@@ -14,9 +14,47 @@ export const CITY_W = 520;
 export const CITY_H = 384;
 export const CITY_NAME = 'Harbor City';
 
-// Avenues run north–south, streets east–west. Each is two tiles wide.
-export const V_ROADS = Array.from({ length: 17 }, (_, i) => 12 + i * 30);
-export const H_ROADS = Array.from({ length: 15 }, (_, i) => 12 + i * 24);
+// Avenues run north–south, streets east–west. Each is two tiles wide. They are
+// not evenly spaced: between the fixed anchors (the original quarter, Station 2's
+// block, the dock, the river banks and the quay) the gaps are drawn from a seeded
+// stream, so blocks come in different sizes, like the streets of a real city.
+function spacedLines(count, start, step, pins, min, max, seed) {
+  const lines = Array.from({ length: count }, (_, i) => start + i * step);
+  const rng = new Rng(seed);
+  const fixed = [...pins].sort((a, b) => a - b);
+  for (let p = 0; p + 1 < fixed.length; p++) {
+    const i = fixed[p];
+    const j = fixed[p + 1];
+    const n = j - i;
+    if (n < 2) continue;
+    const total = lines[j] - lines[i];
+    // Random gaps that still add up exactly to `total`, each within [min, max].
+    let gaps = Array.from({ length: n }, () => rng.range(0.7, 1.35));
+    for (let pass = 0; pass < 12; pass++) {
+      const sum = gaps.reduce((s, g) => s + g, 0);
+      gaps = gaps.map((g) => Math.min(max, Math.max(min, (g / sum) * total)));
+    }
+    const ints = gaps.map((g) => Math.round(g));
+    let diff = total - ints.reduce((s, g) => s + g, 0);
+    for (let k = 0; diff !== 0 && k < 400; k++) {
+      const at = k % n;
+      const step1 = Math.sign(diff);
+      if (ints[at] + step1 >= min && ints[at] + step1 <= max) {
+        ints[at] += step1;
+        diff -= step1;
+      }
+    }
+    let cur = lines[i];
+    for (let k = 1; k < n; k++) {
+      cur += ints[k - 1];
+      lines[i + k] = cur;
+    }
+  }
+  return lines;
+}
+
+export const V_ROADS = spacedLines(17, 12, 30, [0, 1, 2, 7, 8, 9, 11, 12, 16], 22, 42, 4711);
+export const H_ROADS = spacedLines(15, 12, 24, [0, 1, 2, 5, 6, 13, 14], 20, 34, 1993);
 
 // The sea fills everything south of the last street (the harbour quay). A river
 // meanders down through the east of the city inside one column of blocks, so it
@@ -71,9 +109,9 @@ const ROOFS = {
 };
 
 const KIND_TYPES = {
-  houses: [['house', 6], ['shop', 1], ['apartment', 1]],
-  downtown: [['office', 4], ['shop', 2], ['hotel', 2], ['apartment', 1]],
-  industry: [['warehouse', 5], ['shop', 2], ['office', 1]],
+  houses: [['house', 6], ['apartment', 1.2], ['shop', 0.4]],
+  downtown: [['office', 4], ['shop', 1.5], ['hotel', 2], ['apartment', 1]],
+  industry: [['warehouse', 6], ['office', 1], ['shop', 0.3]],
   market: [['shop', 4], ['apartment', 2], ['house', 1]],
 };
 
@@ -235,7 +273,75 @@ function species(x, y, pineShare, birchShare = 0.1) {
   return { kind, tone: tones[Math.floor(tileHash(x, y, 5) * tones.length)] };
 }
 
-/** The road grid, cut into blocks, with a district kind for each. */
+// The columns the river runs through and its two banks (blocks, not tiles).
+const RIVER_COLS = [11, 13];
+
+// How big each kind of building can be, in tiles.
+const TYPE_RULES = {
+  house: { minW: 3, minH: 3, maxW: 5, maxH: 5 },
+  apartment: { minW: 5, minH: 5, maxW: 10, maxH: 9 },
+  shop: { minW: 3, minH: 3, maxW: 7, maxH: 6 },
+  office: { minW: 5, minH: 5, maxW: 14, maxH: 12 },
+  hotel: { minW: 6, minH: 6, maxW: 11, maxH: 10 },
+  warehouse: { minW: 7, minH: 5, maxW: 24, maxH: 14 },
+  pharmacy: { minW: 3, minH: 3, maxW: 6, maxH: 6 },
+};
+
+// How each kind of block is cut into lots: lot sizes, the lane between lots, how
+// often a lot is split further than it has to be, and how a building sits on it.
+const LOT_PARAMS = {
+  suburb: { minW: 3, maxW: 5, minH: 4, maxH: 6, gap: [1, 1], split: 0.2, setback: [1, 2], flush: 0.15, empty: 0.06 },
+  flats: { minW: 5, maxW: 9, minH: 5, maxH: 9, gap: [1, 2], split: 0.15, setback: [1, 2], flush: 0.4, empty: 0.08 },
+  market: { minW: 4, maxW: 7, minH: 5, maxH: 9, gap: [0, 1], split: 0.25, setback: [1, 1], flush: 0.8, empty: 0.04 },
+  downtown: { minW: 6, maxW: 14, minH: 6, maxH: 12, gap: [1, 2], split: 0.2, setback: [1, 1], flush: 0.6, empty: 0.12 },
+  industry: { minW: 9, maxW: 22, minH: 7, maxH: 13, gap: [2, 4], split: 0.15, setback: [1, 3], flush: 0.3, empty: 0.16 },
+};
+
+/** Cut a rectangle into lots by repeated random splits, with a lane between neighbours. */
+function subdivide(rng, x0, y0, x1, y1, p, out) {
+  const w = x1 - x0 + 1;
+  const h = y1 - y0 + 1;
+  const canX = w >= 2 * p.minW + p.gap[1];
+  const canY = h >= 2 * p.minH + p.gap[1];
+  const tooBig = w > p.maxW || h > p.maxH;
+  if ((!canX && !canY) || (!tooBig && !rng.chance(p.split))) {
+    out.push({ x0, y0, x1, y1 });
+    return;
+  }
+  const vertical = canX && canY
+    ? w / p.maxW + rng.range(-0.25, 0.25) >= h / p.maxH
+    : canX;
+  const gap = rng.int(p.gap[0], p.gap[1]);
+  if (vertical) {
+    const left = rng.int(p.minW, w - gap - p.minW);
+    subdivide(rng, x0, y0, x0 + left - 1, y1, p, out);
+    subdivide(rng, x0 + left + gap, y0, x1, y1, p, out);
+  } else {
+    const top = rng.int(p.minH, h - gap - p.minH);
+    subdivide(rng, x0, y0, x1, y0 + top - 1, p, out);
+    subdivide(rng, x0, y0 + top + gap, x1, y1, p, out);
+  }
+}
+
+// A few made-up neighbourhood names for the housing districts and industrial areas.
+const HOUSING_NAMES = ['MAPLE HEIGHTS', 'WESTFIELD', 'LINDEN PARK', 'ORCHARD HILL', 'KINGSLEY', 'ASHFORD', 'BRIARWOOD', 'ST. CLAIR', 'ELMGROVE', 'HOLLOWAY', 'FAIRMOUNT', 'THORNBURY'];
+const INDUSTRY_NAMES = ['HARBOUR WORKS', 'DOCKLANDS', 'FREIGHT YARD', 'SOUTH QUAY', 'TIDEWATER ESTATE', 'IRONBRIDGE WORKS'];
+
+// What each kind of block is for. Housing, business ("company"), industry and
+// shopping streets are separate districts, the way a real city zones them.
+const ZONE_OF = { downtown: 'company', market: 'commercial', houses: 'housing', industry: 'industrial' };
+
+/**
+ * The road grid, cut into blocks, with a district kind for each:
+ *  - business districts (`downtown`) round the commercial centres,
+ *  - shopping streets (`market`) around those,
+ *  - industry on the waterfront (the quay rows in the south and the river banks),
+ *  - housing everywhere else, with parks and woods between.
+ * A few pairs of neighbouring blocks of the same kind are then merged into one
+ * big block (the street between them is removed): an industrial estate, a
+ * housing estate round a green, a market square.
+ * Returns `{ blocks, removed }`; `removed` are tile rectangles of street to take out.
+ */
 function buildBlocks(seed = 7) {
   const xs = [];
   let start = 0;
@@ -266,18 +372,20 @@ function buildBlocks(seed = 7) {
   // More woods in the outskirts, each two blocks by two, clear of the old town.
   for (let zone = 1, tries = 0; zone < BIG_FOREST.zone && tries < 200; tries++) {
     const col = rng.int(0, xs.length - 2);
-    const row = rng.int(0, lastRow - 3);
+    const row = rng.int(0, lastRow - 5); // never on the industrial waterfront
     if (col < 6 && row < 6) continue; // the original quarter and its own woods
     const cells = [[col, row], [col + 1, row], [col, row + 1], [col + 1, row + 1]];
     if (cells.some(([c, r]) => forestBlocks.has(`${c},${r}`))) continue;
     // Keep a block of town between the small woods and the big forest.
     if (cells.some(([c, r]) => c >= BIG_FOREST.col0 - 1 && r >= BIG_FOREST.row0 - 1)) continue;
     if (cells.some(([c, r]) => DOWNTOWNS.some((d) => Math.abs(d.col - c) <= 1 && Math.abs(d.row - r) <= 1))) continue;
+    // Nor on the river banks, where the works are.
+    if (cells.some(([c]) => c >= RIVER_COLS[0] - 1 && c <= RIVER_COLS[1] + 1)) continue;
     for (const [c, r] of cells) forestBlocks.set(`${c},${r}`, zone);
     zone++;
   }
   const parks = new Set(['1,3', '3,4']);
-  const blocks = [];
+  const grid = [];
   for (let row = 0; row < ys.length; row++) {
     for (let col = 0; col < xs.length; col++) {
       const [x0, x1] = xs[col];
@@ -288,6 +396,7 @@ function buildBlocks(seed = 7) {
         99,
       );
       const roll = rng.float();
+      const waterfront = row >= lastRow - 3 || (col >= RIVER_COLS[0] && col <= RIVER_COLS[1] && row >= 1);
       let kind;
       let zone;
       if (row === lastRow) kind = 'sea';
@@ -297,23 +406,59 @@ function buildBlocks(seed = 7) {
       } else if (parks.has(key)) kind = 'park';
       else if ((col === 2 && row === 2) || (col === 8 && row === 6)) kind = 'station';
       else if (col === 9 && row === 14) kind = 'dock';
-      else if (near === 0 && roll < 0.02) kind = 'park';
-      else if (near <= 1) kind = 'downtown';
-      else if (row >= lastRow - 2 || (row >= 4 && (col * 5 + row * 3) % 7 === 0)) kind = 'industry';
-      else if (roll < 0.07) kind = 'park';
-      else if (row === 0 || near >= 3) kind = (col + row) % 3 === 0 ? 'market' : 'houses';
-      else kind = 'market';
+      else if (near === 0) kind = roll < 0.03 ? 'park' : 'downtown';
+      else if (near === 1 && !waterfront) kind = roll < 0.55 ? 'downtown' : 'market';
+      else if (waterfront) kind = near === 1 ? 'downtown' : 'industry';
+      else if (roll < 0.06) kind = 'park';
+      else if (near === 2) kind = roll < 0.55 ? 'market' : 'houses';
+      else kind = roll < 0.12 ? 'market' : 'houses';
       const woods = kind === 'forest' ? (zone === BIG_FOREST.zone ? 'pine' : 'mixed') : undefined;
-      blocks.push({ col, row, x0, y0, x1, y1, kind, zone, woods });
+      grid.push({ col, row, x0, y0, x1, y1, kind, zone, woods, style: Math.floor(tileHash(col, row, 31) * 3) });
     }
   }
-  return blocks;
+
+  // Merge some neighbouring pairs into one big block.
+  const cols = xs.length;
+  const at = (c, r) => grid[r * cols + c];
+  const mergeable = (b) => ['houses', 'market', 'industry'].includes(b.kind)
+    && !(b.col < 4 && b.row < 4) // the original quarter keeps its streets
+    && !(b.col >= 6 && b.col <= 10 && b.row >= 4 && b.row <= 7) // round Station 2
+    && !(b.row >= lastRow - 2 && b.col >= 7 && b.col <= 11) // round the dock
+    && !(b.col >= RIVER_COLS[0] - 1 && b.col <= RIVER_COLS[1] + 1 && b.row >= 1) // the bridges
+    && b.row < lastRow;
+  const used = new Set();
+  const removed = [];
+  for (const b of grid) {
+    if (!mergeable(b) || used.has(b) || !rng.chance(0.2)) continue;
+    const east = b.col + 1 < cols ? at(b.col + 1, b.row) : null;
+    const south = b.row + 1 < ys.length ? at(b.col, b.row + 1) : null;
+    const options = [];
+    if (east && east.kind === b.kind && mergeable(east) && !used.has(east)) options.push(['v', east]);
+    if (south && south.kind === b.kind && mergeable(south) && !used.has(south)) options.push(['h', south]);
+    if (!options.length) continue;
+    const [axis, other] = rng.pick(options);
+    used.add(b);
+    used.add(other);
+    if (axis === 'v') {
+      removed.push({ x0: b.x1 + 1, y0: b.y0, x1: other.x0 - 1, y1: b.y1 });
+      b.x1 = other.x1;
+    } else {
+      removed.push({ x0: b.x0, y0: b.y1 + 1, x1: b.x1, y1: other.y0 - 1 });
+      b.y1 = other.y1;
+    }
+    b.merged = true;
+    b.green = b.kind !== 'industry'; // a green or a square in the middle
+    other.gone = true;
+  }
+  return { blocks: grid.filter((b) => !b.gone), removed };
 }
 
 export function createCity(seed = 7) {
   const rng = new Rng(seed);
   const w = CITY_W;
   const h = CITY_H;
+  const plan = buildBlocks(seed);
+  const blocks = plan.blocks;
   const road = new Uint8Array(w * h);
   const apron = new Uint8Array(w * h);
   const blocked = new Uint8Array(w * h);
@@ -330,6 +475,13 @@ export function createCity(seed = 7) {
     for (let x = 0; x < w; x++) {
       road[at(x, y)] = 1;
       road[at(x, y + 1)] = 1;
+    }
+  }
+
+  // Streets taken out where two blocks were merged into one.
+  for (const r of plan.removed) {
+    for (let y = r.y0; y <= r.y1; y++) {
+      for (let x = r.x0; x <= r.x1; x++) road[at(x, y)] = 0;
     }
   }
 
@@ -388,6 +540,8 @@ export function createCity(seed = 7) {
     const building = {
       id: extra.id ?? `b${buildings.length + 1}`,
       type,
+      zone: extra.zone ?? 'civic',
+      waterfront: false,
       name: extra.name ?? takeName(type),
       x,
       y,
@@ -443,8 +597,6 @@ export function createCity(seed = 7) {
       trees.push({ x: (tx + 0.5) * TILE, y: (ty + 0.5) * TILE, r: rng.range(11, 15), tone: rng.pick(['#46683a', '#4f7339', '#3d5e32']) });
     }
   }
-
-  const blocks = buildBlocks(seed);
 
   // Park trees grow in groves with open lawn between them, plus a few
   // specimen trees standing on their own.
@@ -531,43 +683,73 @@ export function createCity(seed = 7) {
     }
     if (kind === 'station' || kind === 'dock' || kind === 'sea') return;
 
-    const ax0 = x0 + 1;
-    const ax1 = x1 - 1;
-    const ay0 = y0 + 1;
-    const ay1 = y1 - 1;
-    const bw = ax1 - ax0 + 1;
-    const bh = ay1 - ay0 + 1;
-    if (bw < 3 || bh < 3) {
+    const zone = ZONE_OF[kind];
+    const variant = kind === 'houses' ? (block.style === 2 ? 'flats' : 'suburb') : kind;
+    const p = LOT_PARAMS[variant];
+    // The pavement round the block: a different width on each side.
+    const side = () => rng.int(p.setback[0], p.setback[1]);
+    const ax0 = x0 + side();
+    const ax1 = x1 - side();
+    const ay0 = y0 + side();
+    const ay1 = y1 - side();
+    if (ax1 - ax0 + 1 < 3 || ay1 - ay0 + 1 < 3) {
       parks.push({ x0, y0, x1, y1 });
       scatterTrees(x0, y0, x1, y1);
       return;
     }
 
-    const cols = clamp(Math.round(bw / 5), 1, 4);
-    const rows = clamp(Math.round(bh / 7), 1, 2);
-    const xs = splitCells(ax0, ax1, cols);
-    const ys = splitCells(ay0, ay1, rows);
+    const lots = [];
+    subdivide(rng, ax0, ay0, ax1, ay1, p, lots);
+    // A merged block keeps its biggest lot as a green or a square.
+    let green = null;
+    if (block.green) green = lots.reduce((best, l) => ((l.x1 - l.x0 + 1) * (l.y1 - l.y0 + 1) > (best ? (best.x1 - best.x0 + 1) * (best.y1 - best.y0 + 1) : 0) ? l : best), null);
 
-    // A quarter of the residential and commercial blocks have a pharmacy.
+    // A quarter of the homes and shops have a pharmacy.
     let wantsPharmacy = kind !== 'industry' && (block.col * 2 + block.row) % 4 === 0;
 
-    for (const [cy0, cy1] of ys) {
-      for (const [cx0, cx1] of xs) {
-        const bx = cx0;
-        const by = cy0;
-        let bwid = cx1 - cx0 + 1;
-        let bhei = cy1 - cy0 + 1;
-        if (bwid >= 5 && rng.chance(0.4)) bwid -= 1;
-        if (bhei >= 5 && rng.chance(0.4)) bhei -= 1;
-        if (bwid < 3 || bhei < 3) continue;
-        let type = weightedPick(rng, KIND_TYPES[kind]);
-        if (wantsPharmacy) {
-          type = 'pharmacy';
-          wantsPharmacy = false;
-        }
-        if (waterIn(bx, by, bwid, bhei)) continue;
-        addBuilding(bx, by, bwid, bhei, type);
+    for (const lot of lots) {
+      const lw = lot.x1 - lot.x0 + 1;
+      const lh = lot.y1 - lot.y0 + 1;
+      if (lot === green || (lw >= 5 && lh >= 5 && kind !== 'industry' && rng.chance(kind === 'downtown' ? 0.1 : 0.05))) {
+        parks.push({ x0: lot.x0, y0: lot.y0, x1: lot.x1, y1: lot.y1 });
+        scatterTrees(lot.x0, lot.y0, lot.x1, lot.y1);
+        continue;
       }
+      // Which buildings fit this lot.
+      let options = KIND_TYPES[kind].filter(([type]) => {
+        const r = TYPE_RULES[type];
+        return lw >= r.minW && lh >= r.minH;
+      });
+      if (wantsPharmacy && lw >= TYPE_RULES.pharmacy.minW && lh >= TYPE_RULES.pharmacy.minH) options = [['pharmacy', 1]];
+      if (options.length === 0 || rng.chance(p.empty)) {
+        // An empty lot: a garden, a yard, a bit of waste ground.
+        if (lw >= 3 && lh >= 3 && rng.chance(0.5)) scatterTrees(lot.x0, lot.y0, lot.x1, lot.y1);
+        continue;
+      }
+      // Big lots favour the big building types.
+      const big = lw * lh;
+      options = options.map(([type, weight]) => {
+        const r = TYPE_RULES[type];
+        const fit = Math.min(1, (Math.min(lw, r.maxW) * Math.min(lh, r.maxH)) / Math.max(12, big));
+        return [type, weight * (0.3 + fit)];
+      });
+      const type = weightedPick(rng, options);
+      if (type === 'pharmacy') wantsPharmacy = false;
+      const r = TYPE_RULES[type];
+      let bwid = Math.min(lw, r.maxW);
+      let bhei = Math.min(lh, r.maxH);
+      if (bwid > r.minW && rng.chance(0.35)) bwid -= rng.int(1, Math.min(2, bwid - r.minW));
+      if (bhei > r.minH && rng.chance(0.35)) bhei -= rng.int(1, Math.min(2, bhei - r.minH));
+      // Shops and offices front the street; homes sit back in their lots.
+      const flush = rng.chance(p.flush);
+      const bx = lot.x0 + (flush ? 0 : rng.int(0, lw - bwid));
+      const by = lot.y0 + (flush ? 0 : rng.int(0, lh - bhei));
+      if (waterIn(bx, by, bwid, bhei)) continue;
+      const area = bwid * bhei;
+      let floors;
+      if ((type === 'office' || type === 'hotel') && area >= 70) floors = rng.int(SPEC[type].floors[1] - 1, SPEC[type].floors[1] + 2);
+      else if (type === 'apartment' && area >= 40) floors = rng.int(3, 6);
+      addBuilding(bx, by, bwid, bhei, type, { zone, floors });
     }
   }
 
@@ -782,7 +964,7 @@ export function createCity(seed = 7) {
 
   for (const vx of V_ROADS) {
     for (let y = 2; y < h - 2; y += 3) {
-      if (nearCrossStreet(y) || !rng.chance(0.3)) continue;
+      if (nearCrossStreet(y) || !road[at(vx, y)] || !rng.chance(0.3)) continue;
       for (const side of [-0.42, 2.42]) {
         if (!rng.chance(0.5)) continue;
         tryCar(Math.floor(vx + side), y, (vx + side) * TILE, (y + 0.5) * TILE, -Math.PI / 2);
@@ -791,7 +973,7 @@ export function createCity(seed = 7) {
   }
   for (const hy of H_ROADS) {
     for (let x = 2; x < w - 2; x += 3) {
-      if (nearCrossAvenue(x) || !rng.chance(0.24)) continue;
+      if (nearCrossAvenue(x) || !road[at(x, hy)] || !rng.chance(0.24)) continue;
       for (const side of [-0.42, 2.42]) {
         if (!rng.chance(0.5)) continue;
         tryCar(x, Math.floor(hy + side), (x + 0.5) * TILE, (hy + side) * TILE, 0);
@@ -850,6 +1032,44 @@ export function createCity(seed = 7) {
   districts.push({ name: 'RIVER', x: riverCentre(120) * TILE, y: 120 * TILE });
   districts.push({ name: 'RIVER MOUTH', x: riverCentre(320) * TILE, y: 320 * TILE });
 
+  // Buildings by the sea or the river: the waterfront, where dock accidents and
+  // fuel fires happen.
+  for (const b of buildings) {
+    let near = false;
+    for (let ty = b.y - 8; ty <= b.y + b.h + 8 && !near; ty++) {
+      for (let tx = b.x - 8; tx <= b.x + b.w + 8; tx++) {
+        if (inb(tx, ty) && water[at(tx, ty)]) {
+          near = true;
+          break;
+        }
+      }
+    }
+    b.waterfront = near;
+  }
+
+  // Map labels for the housing districts and the industrial areas: one per
+  // cluster of blocks of that kind.
+  const cluster = (list, size, names, firstName = 0) => {
+    const groups = new Map();
+    for (const b of list) {
+      const key = `${Math.floor(b.col / size)},${Math.floor(b.row / size)}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(b);
+    }
+    let n = firstName;
+    for (const group of [...groups.values()].sort((a, b) => b.length - a.length)) {
+      if (group.length < 3 || n >= names.length) continue;
+      const avg = (f) => group.reduce((sum, g) => sum + f(g), 0) / group.length;
+      districts.push({
+        name: names[n++],
+        x: avg((g) => (g.x0 + g.x1 + 1) / 2) * TILE,
+        y: avg((g) => (g.y0 + g.y1 + 1) / 2) * TILE,
+      });
+    }
+  };
+  cluster(blocks.filter((b) => b.kind === 'houses'), 3, HOUSING_NAMES);
+  cluster(blocks.filter((b) => b.kind === 'industry'), 3, INDUSTRY_NAMES);
+
   const bays1 = BAYS.map((b) => ({ x: b.x * TILE, y: b.y * TILE, station: 0 }));
   const bays2 = BAYS.map((b) => ({
     x: (b.x - APRON.x0 + apron2.x0) * TILE,
@@ -899,6 +1119,7 @@ export function createCity(seed = 7) {
     stations,
     districts,
     pharmacies: buildings.filter((b) => b.type === 'pharmacy'),
+    blocks: blocks.map((b) => ({ col: b.col, row: b.row, x0: b.x0, y0: b.y0, x1: b.x1, y1: b.y1, kind: b.kind, zone: ZONE_OF[b.kind] ?? null, merged: Boolean(b.merged) })),
     hospitals: [hospital1, hospital2],
     spawn: { x: BAYS[0].x * TILE, y: BAYS[0].y * TILE, angle: Math.PI / 2 },
     startHour: START_HOUR,
