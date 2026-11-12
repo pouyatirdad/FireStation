@@ -1,6 +1,6 @@
 {
   "name": "fire-station",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "private": true,
   "type": "module",
   "description": "Top-down emergency-services game in the spirit of Emergency 4: a 520x384 city, buyable engines and ambulances, pharmacies, injured civilians, a real budget and synthesised sound. One self-contained index.html.",
