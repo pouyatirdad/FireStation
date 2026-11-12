@@ -309,6 +309,41 @@ function inBounds(b, x, y) {
   return x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1;
 }
 
+// Curvy roads: each is a list of points in tile coordinates, drawn as a smooth
+// stroke two tiles wide. Cached bounds let a view skip the ones it cannot see.
+const curveBounds = new WeakMap();
+function curvesInView(city, b) {
+  let list = curveBounds.get(city);
+  if (!list) {
+    list = (city.curves ?? []).map((curve) => ({
+      curve,
+      x0: Math.min(...curve.pts.map((p) => p.x)),
+      x1: Math.max(...curve.pts.map((p) => p.x)),
+      y0: Math.min(...curve.pts.map((p) => p.y)),
+      y1: Math.max(...curve.pts.map((p) => p.y)),
+    }));
+    curveBounds.set(city, list);
+  }
+  return list
+    .filter((e) => !(e.x1 < b.x0 - 2 || e.x0 > b.x1 + 2 || e.y1 < b.y0 - 2 || e.y0 > b.y1 + 2))
+    .map((e) => e.curve);
+}
+
+/** Trace a curve's points as a smooth path (quadratic curves through the midpoints). */
+function traceCurve(ctx, pts, from = 0, to = pts.length - 1) {
+  ctx.beginPath();
+  ctx.moveTo(pts[from].x * TILE, pts[from].y * TILE);
+  for (let i = from + 1; i < to; i++) {
+    ctx.quadraticCurveTo(
+      pts[i].x * TILE,
+      pts[i].y * TILE,
+      ((pts[i].x + pts[i + 1].x) / 2) * TILE,
+      ((pts[i].y + pts[i + 1].y) / 2) * TILE,
+    );
+  }
+  ctx.lineTo(pts[to].x * TILE, pts[to].y * TILE);
+}
+
 function drawGround(ctx, state, b, z) {
   const city = state.city;
   const left = b.x0 * TILE;
@@ -383,6 +418,19 @@ function drawGround(ctx, state, b, z) {
   const vRuns = runsInView(city, 'v', vr, b.y0, b.y1);
   const hRuns = runsInView(city, 'h', hr, b.x0, b.x1);
   const roadAt = (x, y) => city.road[y * city.w + x] === 1;
+  const curves = curvesInView(city, b);
+  // The dark edge of each curvy road goes down first, so the streets it joins
+  // are painted over it and the junctions come out clean.
+  if (curves.length > 0) {
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = 'rgba(24,24,24,0.5)';
+    ctx.lineWidth = 2 * TILE + 5;
+    for (const c of curves) {
+      traceCurve(ctx, c.pts);
+      ctx.stroke();
+    }
+  }
   ctx.fillStyle = asphalt;
   for (const r of vRuns) ctx.fillRect(r.line * TILE, r.a * TILE, 2 * TILE, (r.b - r.a + 1) * TILE);
   for (const r of hRuns) ctx.fillRect(r.a * TILE, r.line * TILE, (r.b - r.a + 1) * TILE, 2 * TILE);
@@ -405,6 +453,32 @@ function drawGround(ctx, state, b, z) {
       ctx.moveTo(x0, (r.line + 2) * TILE - 1); ctx.lineTo(x1, (r.line + 2) * TILE - 1);
     }
     ctx.stroke();
+  }
+
+  // The curvy roads themselves, over the edges of the streets they join, with
+  // a dashed centre line that stops short of those junctions.
+  if (curves.length > 0) {
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = asphalt;
+    ctx.lineWidth = 2 * TILE - 2;
+    for (const c of curves) {
+      traceCurve(ctx, c.pts);
+      ctx.stroke();
+    }
+    if (z >= 0.5) {
+      ctx.strokeStyle = PALETTE.centre;
+      ctx.lineWidth = 1.6;
+      ctx.setLineDash([10, 9]);
+      ctx.lineCap = 'butt';
+      for (const c of curves) {
+        if (c.pts.length < 8) continue;
+        traceCurve(ctx, c.pts, 2, c.pts.length - 3);
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+    }
+    ctx.lineCap = 'butt';
   }
 
   // Double yellow centre lines, then intersections painted back over them so
@@ -2282,37 +2356,7 @@ function drawEngine(ctx, e, now) {
   else if (type === 'rapid') ctx.scale(0.68, 0.8);
   else if (type === 'ambubus') ctx.scale(1.38, 1.04);
 
-  if (type === 'command') {
-    paint(ctx, -37, -16, 76, 32, 8, '#f1efe9');
-    ctx.fillStyle = '#c93a2f';
-    ctx.fillRect(-37, -2.5, 76, 5);
-    ctx.fillStyle = 'rgba(255,255,255,0.18)';
-    ctx.fillRect(-30, -12, 24, 24);
-    const sg = ctx.createLinearGradient(6, 0, 28, 0);
-    sg.addColorStop(0, '#0e161d');
-    sg.addColorStop(1, '#5d7d95');
-    ctx.fillStyle = sg;
-    ctx.beginPath();
-    ctx.moveTo(10, -12);
-    ctx.lineTo(26, -14);
-    ctx.lineTo(26, 14);
-    ctx.lineTo(10, 12);
-    ctx.closePath();
-    ctx.fill();
-    ctx.strokeStyle = '#2d3136';
-    ctx.lineWidth = 1.6;
-    ctx.beginPath();
-    ctx.moveTo(-14, 0);
-    ctx.lineTo(-14, -22);
-    ctx.stroke();
-    ctx.fillStyle = '#fff3cf';
-    ctx.fillRect(37, -12, 2, 4);
-    ctx.fillRect(37, 8, 2, 4);
-    ctx.fillStyle = '#16191c';
-    ctx.fillRect(18, -19.5, 4, 3.5);
-    ctx.fillRect(18, 16, 4, 3.5);
-    lightBar(ctx, -4, busy, now);
-  } else if (type === 'ambulance' || type === 'medcar' || type === 'ambubus') {
+  if (type === 'ambulance' || type === 'medcar' || type === 'ambubus') {
     paint(ctx, -41, -17, 59, 34, 5, '#f4f3ee');
     ctx.fillStyle = '#d3382f';
     ctx.fillRect(-41, -17, 59, 3.5);
@@ -3103,15 +3147,6 @@ function drawWorldSelection(ctx, state, now, z) {
     ctx.stroke();
     ctx.setLineDash([]);
 
-    if (entity.kind === 'engine' && entity.spec.command) {
-      ctx.strokeStyle = 'rgba(95,208,255,0.35)';
-      ctx.lineWidth = 2;
-      ctx.setLineDash([12, 10]);
-      ctx.beginPath();
-      ctx.arc(entity.x, entity.y, CONFIG.command.range * TILE, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.setLineDash([]);
-    }
     if (entity.kind === 'engine') {
       // Where the hose can still reach, and where the deck gun can.
       ctx.strokeStyle = 'rgba(95,208,255,0.13)';
@@ -3536,6 +3571,14 @@ function miniStatic(state, mw, mh) {
   g.fillStyle = '#3c4a38';
   for (const pk of city.parks) {
     g.fillRect(pk.x0 * TILE * sx, pk.y0 * TILE * sy, (pk.x1 - pk.x0 + 1) * TILE * sx, (pk.y1 - pk.y0 + 1) * TILE * sy);
+  }
+  g.strokeStyle = '#5a626b';
+  g.lineWidth = Math.max(1, 2 * TILE * sx);
+  g.lineJoin = 'round';
+  for (const c of city.curves ?? []) {
+    g.beginPath();
+    c.pts.forEach((p, i) => (i === 0 ? g.moveTo(p.x * TILE * sx, p.y * TILE * sy) : g.lineTo(p.x * TILE * sx, p.y * TILE * sy)));
+    g.stroke();
   }
   g.fillStyle = '#5a626b';
   for (const r of runsInView(city, 'v', V_ROADS, 0, city.h)) {

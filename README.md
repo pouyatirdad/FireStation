@@ -72,7 +72,6 @@ the night.
 | **Rescue** | 4 | 600 L | 16 | 6 | $1,600 | $30 |
 | **Ambulance** | 2 paramedics | 8 kits | walks 22 tiles | — | $1,400 | $22 |
 | **Rapid response** | 2 | none (hydrant only) | 16 | — | $1,300 | $20 |
-| **Command** | 2 | — | — | — | $2,600 | $40 |
 | **Helicopter** | none | 2,600 L | — | 11 (from the air) | $8,000 | $95 |
 | **Air tanker** | none | 5,000 L | — | 8 (circling) | $11,000 | $140 |
 | **Fireboat** | none | unlimited | — | 18 (from the water) | $6,200 | $70 |
@@ -81,7 +80,6 @@ the night.
 | **Ambulance bus** | 4 paramedics | 16 kits, 8 stretchers | walks 24 tiles | — | $3,400 | $48 |
 
 - **Rapid response car:** a small, quick utility car with two crew and a locker of tools (a chainsaw, a rescue cutter and diving gear) but no pump, no tank and no deck gun. Sent to a fire it drives to the hydrant nearest the building, connects its supply line there by itself (or press <kbd>G</kbd>) and the crew run the hose out, up to 16 tiles. It is no use where there is no hydrant in hose reach, such as a forest fire. Dispatch picks it after the real engines.
-- **Command car:** no hose, no water. Parked, it makes every crew within 26 tiles spray 20% harder.
 - **Empty tank:** a fire vehicle whose tank runs dry drives back to its station to refill by itself (unless it is connected to a hydrant).
 - **Lockers:** an **engine** carries a chainsaw and two sets of diving gear; a **ladder** one chainsaw; a
   **rescue** unit two chainsaws, two rescue cutters and two sets of diving gear; a **tanker** only hose.
@@ -249,7 +247,15 @@ simulation knows about the DOM, and nothing in the renderer changes the simulati
   few neighbouring blocks are merged (the street between them removed) into estates and squares, and
   each building knows its district (`building.zone`) and whether it is on the waterfront. The same
   seed always builds the same Harbor City.
-- **Navigation** (`src/systems/grid.js`, search buffers reused between calls) is A* on two tile layers: vehicles use roads and the apron,
+- **Roads:** besides the straight avenues and streets there are about twenty **curvy roads**: winding
+  streets through housing and shopping blocks, from one street to another (bezier curves stamped into
+  the road map two tiles wide, drawn as smooth strokes; buildings are laid out round them).
+- **Vehicles are not tied to roads:** they prefer roads (driving off them costs about a third more
+  per tile) but take shortcuts across lots, lawns and lanes between the buildings, and park right
+  beside the building they are sent to. They never go through a building, open water or the woods (a
+  forest still needs a chainsaw track). A **wreck seals the whole width of the street**, pavement
+  included, so nobody drives round it.
+- **Navigation** (`src/systems/grid.js`, search buffers reused between calls) is A* on two tile layers: vehicles use open ground, preferring roads and the apron,
   crews walk anywhere that is not a building footprint. Paths are smoothed with a grid-traversal
   line check, so a diagonal can never clip a building.
 - **Fire** (`src/systems/fire.js`) is a per-building intensity and structural integrity. Intensity
@@ -306,7 +312,7 @@ needs editing.
 ?drown          start, and put people in the river or the harbour
 ?injured        start, and put two injured people near the station
 ?crash          start, and cause a traffic accident
-?heli           start, and buy a helicopter and a command car
+?heli           start, and buy a helicopter
 ?pileup         start, and cause a pile-up
 ?fleet=ambulance,ladder   (buy several, ambulances included)
 ?hydrantpark    park Engine 1 beside a hydrant

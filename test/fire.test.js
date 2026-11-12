@@ -100,7 +100,7 @@ test('dispatch sends the engine, deploys the crew and puts the fire out', () => 
   assert.ok(state.engines[0].water < state.engines[0].capacity, 'no water was used');
 });
 
-test('the engine drives only on roads and stops beside the target', () => {
+test('the engine never drives through a building and stops beside the target', () => {
   const state = createGame(7);
   startShift(state);
   const target = state.buildings.find((b) => b.type === 'shop');
@@ -110,8 +110,8 @@ test('the engine drives only on roads and stops beside the target', () => {
     update(state, 1 / 30);
     const tileX = Math.floor(state.engines[0].x / 32);
     const tileY = Math.floor(state.engines[0].y / 32);
-    const drivable = state.city.road[tileY * state.city.w + tileX] || state.city.apron[tileY * state.city.w + tileX];
-    assert.ok(drivable, `engine left the road at ${tileX},${tileY}`);
+    const i = tileY * state.city.w + tileX;
+    assert.ok(!state.city.blocked[i] && !state.city.water[i] && !state.city.woods[i], `engine drove into a building, the water or the woods at ${tileX},${tileY}`);
     if (state.engines[0].path.length === 0 && state.engines[0].arrived) break;
   }
   assert.equal(state.engines[0].arrived, true, 'engine never arrived');

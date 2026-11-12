@@ -18,19 +18,60 @@ let seq = 1;
 
 // ---------------------------------------------------------- blockades ---
 
-/** Block a rectangle of road tiles. Returns the blockade. */
+/**
+ * Block a rectangle of road tiles. Vehicles can drive on open ground beside the
+ * road, so the wreck seals the whole width of the street too: the pavement and
+ * any lane on either side, out to the first building (or wall of trees).
+ * Returns the blockade.
+ */
 export function addBlockade(state, rect, opts = {}) {
   const { tx, ty, tw, th } = rect;
   const nav = state.nav;
   const saved = [];
+  const seal = (x, y) => {
+    if (x < 0 || y < 0 || x >= nav.w || y >= nav.h) return false;
+    const i = y * nav.w + x;
+    if (nav.drive[i] !== 1) return false;
+    saved.push(i);
+    nav.drive[i] = 0;
+    return true;
+  };
   for (let y = ty; y < ty + th; y++) {
-    for (let x = tx; x < tx + tw; x++) {
-      if (x < 0 || y < 0 || x >= nav.w || y >= nav.h) continue;
-      const i = y * nav.w + x;
-      if (nav.drive[i] === 1) {
-        saved.push(i);
-        nav.drive[i] = 0;
+    for (let x = tx; x < tx + tw; x++) seal(x, y);
+  }
+  // Out across the street, both ways, until something solid. A wreck two tiles
+  // wide on a vertical street is sealed sideways; one two tiles tall, up and
+  // down; a square of debris both ways.
+  const reach = 8;
+  let sideways = tw < th;
+  let lengthways = th < tw;
+  if (tw === th) {
+    // Debris on a square: the street runs the way there is more road.
+    const road = state.city.road;
+    const run = (dx, dy) => {
+      let n = 0;
+      for (let k = 1; k <= reach; k++) {
+        const x = dx < 0 ? tx - k : dx > 0 ? tx + tw - 1 + k : tx;
+        const y = dy < 0 ? ty - k : dy > 0 ? ty + th - 1 + k : ty;
+        if (x < 0 || y < 0 || x >= nav.w || y >= nav.h || !road[y * nav.w + x]) break;
+        n++;
       }
+      return n;
+    };
+    const horizontal = run(-1, 0) + run(1, 0) >= run(0, -1) + run(0, 1);
+    sideways = !horizontal;
+    lengthways = horizontal;
+  }
+  for (let y = ty; y < ty + th; y++) {
+    if (sideways) {
+      for (let x = tx - 1; x >= tx - reach && seal(x, y); x--);
+      for (let x = tx + tw; x < tx + tw + reach && seal(x, y); x++);
+    }
+  }
+  for (let x = tx; x < tx + tw; x++) {
+    if (lengthways) {
+      for (let y = ty - 1; y >= ty - reach && seal(x, y); y--);
+      for (let y = ty + th; y < ty + th + reach && seal(x, y); y++);
     }
   }
   const blockade = {

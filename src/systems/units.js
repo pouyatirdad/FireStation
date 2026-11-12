@@ -53,7 +53,7 @@ function syncUnits(state) {
 export const vehicleSpec = (type) => CONFIG.vehicles[type] ?? null;
 export const vehicleCost = (type) => CONFIG.vehicles[type]?.cost ?? 0;
 
-export const isFirefighter = (engine) => !engine?.spec?.medical && !engine?.spec?.command && !engine?.spec?.diver;
+export const isFirefighter = (engine) => !engine?.spec?.medical && !engine?.spec?.diver;
 
 // ------------------------------------------------------------- equipment ---
 
@@ -603,17 +603,9 @@ function nearStation(state, engine) {
   });
 }
 
-/** Extra spray power for crews near a parked command car, plus fire training. */
+/** Spray power multiplier: fire training. (x and y are kept for callers that pass the crew's position.) */
 export function firePower(state, x, y) {
-  let boost = 1 + CONFIG.economy.training.fire * (state.training?.fire ?? 0);
-  for (const e of state.engines) {
-    if (e.spec.command && e.path.length === 0
-      && dist(e.x, e.y, x, y) <= CONFIG.command.range * TILE) {
-      boost *= 1 + CONFIG.command.aura;
-      break;
-    }
-  }
-  return boost;
+  return 1 + CONFIG.economy.training.fire * (state.training?.fire ?? 0);
 }
 
 function hydrantInReach(state, engine) {

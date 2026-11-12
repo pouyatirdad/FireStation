@@ -124,41 +124,16 @@ test('a helicopter fights a forest fire from the air and refills in the harbour'
   assert.ok(heli.water > 500, 'the helicopter did not refill over the harbour');
 });
 
-test('a command car boosts crews parked near it, and is never sent to a fire', () => {
-  const state = shift();
-  const engine = state.engines[0];
-  const base = firePower(state, engine.x, engine.y);
-  assert.equal(base, 1);
-  const car = commandBuyVehicle(state, 'command');
-  car.x = engine.x + 3 * TILE;
-  car.y = engine.y;
-  assert.ok(Math.abs(firePower(state, engine.x, engine.y) - (1 + CONFIG.command.aura)) < 1e-9);
-  car.x = engine.x + (CONFIG.command.range + 5) * TILE;
-  assert.equal(firePower(state, engine.x, engine.y), 1, 'the aura reached too far');
-
-  car.x = engine.x;
-  const target = burnable(state);
-  ignite(state, target, 'test');
-  selectUnit(state, car.id);
-  commandDispatch(state, target.id);
-  assert.notEqual(state.activeEngineId === car.id && car.targetId, target.id, 'the command car was sent to the fire');
-});
-
-test('a boosted crew puts a fire out faster', () => {
-  const run = (withCar) => {
+test('fire training makes a crew put a fire out faster', () => {
+  const run = (level) => {
     const state = shift();
+    state.training.fire = level;
     const engine = state.engines[0];
-    if (withCar) {
-      const car = commandBuyVehicle(state, 'command');
-      car.x = engine.x + 2 * TILE;
-      car.y = engine.y;
-    }
     const target = burnable(state);
     ignite(state, target, 'test');
     target.fire = 0.9;
     target.integrity = 1e6;
     target.maxIntegrity = 1e6;
-    state.streams = [{ targetId: target.id, power: 0.05 * firePower(state, engine.x, engine.y) }];
     let t = 0;
     while (target.state === 'burning' && t < 600) {
       state.streams = [{ targetId: target.id, power: 0.05 * firePower(state, engine.x, engine.y) }];
@@ -167,7 +142,7 @@ test('a boosted crew puts a fire out faster', () => {
     }
     return t;
   };
-  assert.ok(run(true) < run(false));
+  assert.ok(run(3) < run(0));
 });
 
 // --------------------------------------------------------------- finance ---

@@ -169,3 +169,30 @@ test('a chemical fire spreads further than an ordinary one', () => {
   const chemical = spreadFrom(true);
   assert.ok(chemical > plain, `chemical ${chemical} vs plain ${plain}`);
 });
+
+test('curvy roads wind through some blocks, and no building sits on a road', () => {
+  assert.ok(city.curves.length >= 10, 'curves: ' + city.curves.length);
+  const onGrid = (x, y) => V_ROADS.some((v) => x >= v && x <= v + 1) || H_ROADS.some((h) => y >= h && y <= h + 1);
+  let winding = 0;
+  for (let y = 0; y < city.h; y++) {
+    for (let x = 0; x < city.w; x++) if (city.road[y * city.w + x] && !onGrid(x, y)) winding++;
+  }
+  assert.ok(winding > 600, 'too little curvy road: ' + winding);
+  // Each curve really bends: it is longer than the straight line between its ends.
+  let bend = 0;
+  for (const c of city.curves) {
+    const first = c.pts[0];
+    const last = c.pts[c.pts.length - 1];
+    let length = 0;
+    for (let i = 1; i < c.pts.length; i++) length += Math.hypot(c.pts[i].x - c.pts[i - 1].x, c.pts[i].y - c.pts[i - 1].y);
+    const ratio = length / Math.hypot(last.x - first.x, last.y - first.y);
+    assert.ok(ratio > 1.01, 'a curve that is a straight line: ' + ratio);
+    bend += ratio;
+  }
+  assert.ok(bend / city.curves.length > 1.08, 'the curves hardly bend: ' + bend / city.curves.length);
+  for (const b of city.buildings) {
+    for (let y = b.y; y < b.y + b.h; y++) {
+      for (let x = b.x; x < b.x + b.w; x++) assert.equal(city.road[y * city.w + x], 0, b.name + ' stands on a road');
+    }
+  }
+});

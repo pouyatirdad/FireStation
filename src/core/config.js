@@ -69,8 +69,6 @@ export const CONFIG = {
     dockPrice: 6500, // buying the Harbour Dock (berths for boats)
   },
 
-  command: { aura: 0.2, range: 26 }, // tiles; extra spray power for crews near a parked command car
-
   // Equipment a firefighter takes from their own vehicle, one item at a time.
   // Diving needs no special vehicle: engines and rescue units carry the gear.
   tools: {
@@ -168,14 +166,6 @@ export const CONFIG = {
       refillRate: 0, rescueTime: 2.6, refund: 0.6,
       hydrantOnly: true, tag: 'U',
       tools: { chainsaw: 1, cutter: 1, diving: 1 },
-    },
-    // The chief's car: no hose, no water. Parked, it boosts every crew within
-    // range (spray power +20%), so it earns its place on a big fire.
-    command: {
-      label: 'Command', cost: 2600, crew: 2, speed: 9.4, capacity: 0, upkeep: 40,
-      hoseRange: 0, turretRange: 0, turretPower: 0, turretWater: 0,
-      refillRate: 0, rescueTime: 3.2, refund: 0.6,
-      command: true,
     },
     // A water-bombing helicopter: no crew, flies straight over roads, wrecks and
     // traffic, and drops water on whatever it hovers over, forest fires included.

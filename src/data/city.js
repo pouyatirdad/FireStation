@@ -485,6 +485,84 @@ export function createCity(seed = 7) {
     }
   }
 
+  // Curvy roads: winding streets through some housing and shopping blocks, from
+  // one of the surrounding streets to another. They are bezier curves, stamped
+  // into the road map two tiles wide, so they drive, route and park like any other
+  // street; buildings are laid out round them.
+  const curves = [];
+  const crng = new Rng(seed * 977 + 31);
+  const bez = (p0, p1, p2, p3, t) => {
+    const u = 1 - t;
+    return {
+      x: u * u * u * p0.x + 3 * u * u * t * p1.x + 3 * u * t * t * p2.x + t * t * t * p3.x,
+      y: u * u * u * p0.y + 3 * u * u * t * p1.y + 3 * u * t * t * p2.y + t * t * t * p3.y,
+    };
+  };
+  for (const b of blocks) {
+    if (b.kind !== 'houses' && b.kind !== 'market') continue;
+    if (b.merged || (b.col < 4 && b.row < 4)) continue;
+    if (b.col >= 6 && b.col <= 10 && b.row >= 4 && b.row <= 7) continue; // Station 2
+    if (b.col >= RIVER_COLS[0] - 1 && b.col <= RIVER_COLS[1] + 1) continue; // the river
+    const bw = b.x1 - b.x0 + 1;
+    const bh = b.y1 - b.y0 + 1;
+    if (bw < 16 || bh < 16 || !crng.chance(0.4)) continue;
+    // The centre lines of the four streets round the block.
+    const north = b.y0 - 1;
+    const south = b.y1 + 2;
+    const west = b.x0 - 1;
+    const east = b.x1 + 2;
+    const alongX = () => b.x0 + bw * crng.range(0.25, 0.75);
+    const alongY = () => b.y0 + bh * crng.range(0.25, 0.75);
+    const shape = crng.pick(['ns', 'ns', 'ew', 'ew', 'arc']);
+    let p0;
+    let p1;
+    let p2;
+    let p3;
+    if (shape === 'ns') {
+      const swing = bw * crng.range(0.35, 0.55) * (crng.chance(0.5) ? 1 : -1);
+      const ax = alongX();
+      const bx = alongX();
+      p0 = { x: ax, y: north };
+      p3 = { x: bx, y: south };
+      p1 = { x: ax + swing, y: b.y0 + bh * 0.3 };
+      p2 = { x: bx - swing, y: b.y0 + bh * 0.7 };
+    } else if (shape === 'ew') {
+      const swing = bh * crng.range(0.35, 0.55) * (crng.chance(0.5) ? 1 : -1);
+      const ay = alongY();
+      const by = alongY();
+      p0 = { x: west, y: ay };
+      p3 = { x: east, y: by };
+      p1 = { x: b.x0 + bw * 0.3, y: ay + swing };
+      p2 = { x: b.x0 + bw * 0.7, y: by - swing };
+    } else {
+      // A bend from one street round into the next one.
+      const top = crng.chance(0.5);
+      const left = crng.chance(0.5);
+      const ax = alongX();
+      const ay = alongY();
+      p0 = { x: ax, y: top ? north : south };
+      p3 = { x: left ? west : east, y: ay };
+      p1 = { x: ax, y: top ? b.y0 + bh * 0.5 : b.y1 - bh * 0.5 };
+      p2 = { x: left ? b.x0 + bw * 0.5 : b.x1 - bw * 0.5, y: ay };
+    }
+    const pts = [];
+    let last = null;
+    for (let i = 0; i <= 600; i++) {
+      const p = bez(p0, p1, p2, p3, i / 600);
+      for (let ty = Math.floor(p.y - 1.1); ty <= Math.floor(p.y + 1.1); ty++) {
+        for (let tx = Math.floor(p.x - 1.1); tx <= Math.floor(p.x + 1.1); tx++) {
+          if (!inb(tx, ty) || apron[at(tx, ty)]) continue;
+          if (Math.hypot(tx + 0.5 - p.x, ty + 0.5 - p.y) <= 1.02) road[at(tx, ty)] = 1;
+        }
+      }
+      if (!last || Math.hypot(p.x - last.x, p.y - last.y) >= 1.5 || i === 600) {
+        pts.push({ x: Math.round(p.x * 100) / 100, y: Math.round(p.y * 100) / 100 });
+        last = p;
+      }
+    }
+    curves.push({ block: `${b.col},${b.row}`, width: 2, pts });
+  }
+
   // Water: the sea to the south and the river. Streets stop at the quay, and a
   // street that crosses the river carries on over it as a bridge.
   const water = new Uint8Array(w * h);
@@ -498,6 +576,12 @@ export function createCity(seed = 7) {
       else if (river && road[at(x, y)]) bridge[at(x, y)] = 1;
     }
   }
+  const roadIn = (x, y, wid, hei) => {
+    for (let ty = y; ty < y + hei; ty++) {
+      for (let tx = x; tx < x + wid; tx++) if (inb(tx, ty) && road[at(tx, ty)]) return true;
+    }
+    return false;
+  };
   const waterIn = (x, y, wid, hei) => {
     for (let ty = y - 1; ty <= y + hei; ty++) {
       for (let tx = x - 1; tx <= x + wid; tx++) if (inb(tx, ty) && water[at(tx, ty)]) return true;
@@ -744,7 +828,7 @@ export function createCity(seed = 7) {
       const flush = rng.chance(p.flush);
       const bx = lot.x0 + (flush ? 0 : rng.int(0, lw - bwid));
       const by = lot.y0 + (flush ? 0 : rng.int(0, lh - bhei));
-      if (waterIn(bx, by, bwid, bhei)) continue;
+      if (waterIn(bx, by, bwid, bhei) || roadIn(bx, by, bwid, bhei)) continue;
       const area = bwid * bhei;
       let floors;
       if ((type === 'office' || type === 'hotel') && area >= 70) floors = rng.int(SPEC[type].floors[1] - 1, SPEC[type].floors[1] + 2);
@@ -1118,6 +1202,7 @@ export function createCity(seed = 7) {
     bays: [...bays1, ...bays2, ...berths, ...extra1, ...extra2, ...extraBerths],
     stations,
     districts,
+    curves,
     pharmacies: buildings.filter((b) => b.type === 'pharmacy'),
     blocks: blocks.map((b) => ({ col: b.col, row: b.row, x0: b.x0, y0: b.y0, x1: b.x1, y1: b.y1, kind: b.kind, zone: ZONE_OF[b.kind] ?? null, merged: Boolean(b.merged) })),
     hospitals: [hospital1, hospital2],

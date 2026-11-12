@@ -685,17 +685,17 @@ function specialCard(state, engine) {
         ? (boat ? 'Sails to the casualty and puts divers over the side.' : 'Drives to the bank nearest the casualty; divers swim out up to ' + engine.spec.diveRange + ' tiles.') + ' Right-click someone in the water to send it.'
         : boat
           ? 'Pumps river or sea water without limit from ' + engine.spec.turretRange + ' tiles out, but only works fires near the water. Right-click a fire to send it.'
-          : 'Park it near the fight: every crew within ' + CONFIG.command.range + ' tiles sprays ' + Math.round(CONFIG.command.aura * 100) + '% harder while it stands still.';
+          : '';
   return '<div class="sel__kind">' + esc(engine.spec.label) + '</div><h2 class="sel__name">' + esc(engine.name) + '</h2>' + statusChip(engine.status) + water +
     '<p class="sel__meta">' + crew.length + ' crew<br>' + note + '</p>' +
-    '<div class="sel__actions">' + (!engine.spec.command ? '<button type="button" class="btn" data-action="dispatch">Dispatch<kbd>D</kbd></button>' : '') +
+    '<div class="sel__actions">' + '<button type="button" class="btn" data-action="dispatch">Dispatch<kbd>D</kbd></button>' +
     (diver ? '<button type="button" class="btn" data-action="deploy">Dive<kbd>E</kbd></button><button type="button" class="btn" data-action="recall">Recall<kbd>R</kbd></button>' : '') +
     '<button type="button" class="btn" data-action="home">Base<kbd>H</kbd></button></div>';
 }
 
 function engineCard(state, engine) {
   if (engine.spec.medical) return ambulanceCard(state, engine);
-  if (engine.spec.flying || engine.spec.command || engine.spec.boat || engine.spec.diver) return specialCard(state, engine);
+  if (engine.spec.flying || engine.spec.boat || engine.spec.diver) return specialCard(state, engine);
   const crew = state.crew.filter((c) => c.engineId === engine.id);
   const aboard = crew.filter((c) => c.riding).length;
   const deployed = crew.length - aboard;
@@ -929,7 +929,6 @@ const vehicleBlurb = (spec) => {
   if (spec.boat) return 'no crew · pumps water without limit · reaches ' + spec.turretRange + ' tiles from the water';
   if (spec.medical) return spec.crew + ' paramedics · ' + spec.kits + ' kits · ' + spec.carry + ' stretchers';
   if (spec.flying) return 'no crew · ' + spec.capacity.toLocaleString('en-US') + ' L · flies over roads · dips in the harbour';
-  if (spec.command) return spec.crew + ' crew · parked, boosts crews within ' + CONFIG.command.range + ' tiles by ' + Math.round(CONFIG.command.aura * 100) + '%';
   if (spec.hydrantOnly) return spec.crew + ' crew · no pump or tank · hooks to a hydrant · hose ' + spec.hoseRange + ' · chainsaw, cutter, diving gear';
   return spec.crew + ' crew · ' + spec.capacity.toLocaleString('en-US') + ' L · hose ' + spec.hoseRange;
 };

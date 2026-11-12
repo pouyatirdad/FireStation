@@ -614,7 +614,7 @@ function sellApparatus(id) {
 
 // ------------------------------------------------------------------- save ---
 
-const SAVE_KEY = 'firestation.save.v8';
+const SAVE_KEY = 'firestation.save.v9';
 
 function hasSave() {
   try {
@@ -1016,7 +1016,6 @@ if (params.has('drown')) {
 if (params.has('heli')) {
   startGame();
   commandBuyVehicle(state, 'helicopter');
-  commandBuyVehicle(state, 'command');
 }
 if (params.has('injured')) {
   // Two hurt people near the station, for looking at ambulances.

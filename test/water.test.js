@@ -361,7 +361,7 @@ test('water on a fire resets how long it has been unattended', () => {
 test('the unit list groups vehicles by what they do', () => {
   const state = shift();
   const kinds = {
-    engine: 'fire', command: 'fire', ambulance: 'medical', ambubus: 'medical', medcar: 'medical',
+    engine: 'fire', ambulance: 'medical', ambubus: 'medical', medcar: 'medical',
     helicopter: 'air', airtanker: 'air', rescue: 'fire', rescueboat: 'water', fireboat: 'water',
   };
   commandBuyStation(state, 2);

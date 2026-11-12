@@ -623,7 +623,7 @@ export { orderEngine, orderCrew };
 
 export function serialize(state) {
   return {
-    version: 8,
+    version: 9,
     seed: state.seed,
     time: state.time,
     clock: state.clock,

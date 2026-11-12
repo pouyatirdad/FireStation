@@ -1,5 +1,7 @@
-// Navigation over tile grids. The engine is allowed on roads and the station
-// apron; the crew may walk anywhere that is not a building footprint.
+// Navigation over tile grids. Vehicles prefer roads and the station apron but
+// can drive on any open ground between the buildings (lanes, yards, lawns,
+// pavements); not through buildings, water or woods. The crew may walk anywhere
+// that is not a building footprint.
 //
 // A* is good enough here: even the 520×384 city is open ground and straight
 // avenues, and a path is asked for only when somebody is ordered somewhere.
@@ -10,20 +12,26 @@ import { distToRect } from '../core/math.js';
 // Four ways to move: vehicles `drive` on roads and aprons (bridges included),
 // crews `walk` on anything that is not a building or open water, boats `sail` on
 // water (under bridges too), and divers `swim` anywhere but through a building.
+export const OFFROAD_COST = 1.35; // driving off the road costs this much more per tile
+
 export function buildNav(city) {
   const { w, h, blocked, road, apron } = city;
   const water = city.water ?? new Uint8Array(w * h);
+  const woods = city.woods ?? new Uint8Array(w * h);
   const walk = new Uint8Array(w * h);
   const drive = new Uint8Array(w * h);
+  const driveCost = new Float32Array(w * h);
   const sail = new Uint8Array(w * h);
   const swim = new Uint8Array(w * h);
   for (let i = 0; i < w * h; i++) {
     walk[i] = blocked[i] || (water[i] && !road[i]) ? 0 : 1;
-    drive[i] = road[i] || apron[i] ? 1 : 0;
+    const paved = road[i] || apron[i];
+    drive[i] = paved || !(blocked[i] || water[i] || woods[i]) ? 1 : 0;
+    driveCost[i] = paved ? 1 : OFFROAD_COST;
     sail[i] = water[i] ? 1 : 0;
     swim[i] = blocked[i] ? 0 : 1;
   }
-  return { w, h, walk, drive, sail, swim, water };
+  return { w, h, walk, drive, driveCost, sail, swim, water };
 }
 
 const gridOf = (nav, mode) => (mode === 'drive' ? nav.drive : mode === 'sail' ? nav.sail : mode === 'swim' ? nav.swim : nav.walk);
@@ -182,6 +190,7 @@ export function nearestPassable(nav, mode, tx, ty, maxR = 8) {
 /** A* on tile coordinates. Returns tiles after the start, or null. */
 export function findPath(nav, mode, from, to) {
   const grid = gridOf(nav, mode);
+  const costs = mode === 'drive' ? nav.driveCost : null;
   const start = passable(nav, mode, from.x, from.y)
     ? { x: from.x, y: from.y }
     : nearestPassable(nav, mode, from.x, from.y, 4);
@@ -242,7 +251,7 @@ export function findPath(nav, mode, from, to) {
       }
       const ni = ny * nav.w + nx;
       if (closedStamp[ni] === gen) continue;
-      const ng = gBuf[ci] + cost;
+      const ng = gBuf[ci] + (costs ? cost * costs[ni] : cost);
       if (ng < gAt(ni)) {
         stamp[ni] = gen;
         gBuf[ni] = ng;
