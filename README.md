@@ -140,8 +140,13 @@ There is a real budget, shown in the top bar and in Headquarters.
 ### Major incidents and the forest
 
 After the first four minutes the city can throw a **major incident**: an industrial fire, a
-multi-building block fire, or a forest fire in the north woods. Only one major incident is live at a
+multi-building block fire, or a forest fire in one of the woods. Only one major incident is live at a
 time, and the small calls keep coming in the background.
+
+The biggest woodland is the **Southeast Forest**: a pine forest of twenty-five blocks east of the river,
+from the Eastside district down to the quay. The roads through it are country roads with grass verges,
+no street lamps and no parked cars, and it is a long drive from Station 1, so a fire there is a job
+for the helicopter or the air tanker first.
 
 A forest fire is an area, not a building. It grows, throws embers into any building it reaches, and
 has to be fought on foot from the tree line: park on the nearest street, deploy the crew, and let

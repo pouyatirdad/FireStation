@@ -63,7 +63,20 @@ function hashString(str) {
   return (h >>> 0) / 4294967296 * 1000;
 }
 
+// Shaded colours are asked for thousands of times a frame (every tree crown),
+// from a small set of base colours, so remember them.
+const shadeCache = new Map();
 function shade(hex, amount) {
+  const key = hex + amount;
+  let out = shadeCache.get(key);
+  if (out === undefined) {
+    out = shadeRaw(hex, amount);
+    if (shadeCache.size < 4000) shadeCache.set(key, out);
+  }
+  return out;
+}
+
+function shadeRaw(hex, amount) {
   const n = parseInt(hex.slice(1), 16);
   let r = (n >> 16) & 255;
   let g = (n >> 8) & 255;
@@ -175,7 +188,7 @@ export function render(ctx, state, cam, view, opts = {}) {
   drawWildfires(ctx, state, now, z);
   if (currentDark > 0.15) {
     ctx.globalCompositeOperation = 'lighter';
-    drawStreetLights(ctx, bounds, z, true);
+    drawStreetLights(ctx, state.city, bounds, z, true);
     ctx.globalCompositeOperation = 'source-over';
   }
   drawDistrictLabels(ctx, state, z);
@@ -237,13 +250,13 @@ function drawNight(ctx, state, W, H, z) {
 
 // Street lights: a post on each junction corner and a pool of warm light
 // under it after dark.
-function drawStreetLights(ctx, b, z, glowPass) {
+function drawStreetLights(ctx, city, b, z, glowPass) {
   if (z < 0.4) return;
   const vr = V_ROADS.filter((vx) => vx + 2 >= b.x0 - 1 && vx <= b.x1 + 1);
   const hr = H_ROADS.filter((hy) => hy + 2 >= b.y0 - 1 && hy <= b.y1 + 1);
   for (const vx of vr) {
     for (const hy of hr) {
-      if (hy >= SEA_Y - 1) continue;
+      if (hy >= SEA_Y - 1 || ruralJunction(city, vx, hy)) continue;
       for (const [cx, cy] of [[vx - 0.35, hy - 0.35], [vx + 2.35, hy + 2.35]]) {
         const px = cx * TILE;
         const py = cy * TILE;
@@ -295,9 +308,12 @@ function drawGround(ctx, state, b, z) {
   ctx.fillStyle = concrete;
   ctx.fillRect(left, top, width, height);
 
-  // Grass under the blocks, then the streets on top of it.
-  ctx.fillStyle = '#2f4226';
-  for (const area of city.forestAreas ?? []) {
+  // Forest: a closed canopy of crowns over a dark floor, painted from a tile so
+  // a whole forest costs one fill. The trees drawn on top break up the repeat
+  // and give the edges their ragged line.
+  const forests = (city.forestAreas ?? []).filter((a) => !(a.x1 < b.x0 - 1 || a.x0 > b.x1 + 1 || a.y1 < b.y0 - 1 || a.y0 > b.y1 + 1));
+  for (const area of forests) {
+    ctx.fillStyle = canopy(ctx, area.woods ?? 'mixed', z >= 0.7 ? 2 : z >= 0.24 ? 1 : 0.25);
     ctx.fillRect(
       area.x0 * TILE,
       area.y0 * TILE,
@@ -314,6 +330,7 @@ function drawGround(ctx, state, b, z) {
       (p.y1 - p.y0 + 1) * TILE,
     );
   }
+  if (z >= 0.35) drawParkPaths(ctx, city.parks, b);
 
   // Sidewalk joints — only worth drawing when they are a pixel apart.
   if (z >= 0.8) {
@@ -383,9 +400,12 @@ function drawGround(ctx, state, b, z) {
 
   if (z >= 0.7) {
     for (const vx of vr) {
-      for (const hy of hr) drawCrosswalks(ctx, vx * TILE, hy * TILE);
+      for (const hy of hr) if (!ruralJunction(city, vx, hy)) drawCrosswalks(ctx, vx * TILE, hy * TILE);
     }
   }
+
+  drawBridges(ctx, b, z);
+  if (z >= 0.3) drawVerges(ctx, forests, z);
 
   // The station apron and its parking bays.
   for (const st of city.stations ?? [{ apron: APRON }]) {
@@ -426,13 +446,45 @@ function drawGround(ctx, state, b, z) {
   }
 
   if (z >= 0.7) drawRoadWear(ctx, vr, hr, b);
-  drawStreetLights(ctx, b, z, false);
+  drawStreetLights(ctx, city, b, z, false);
 
   // Trees and hydrants sit on the ground, in front of the streets.
-  for (const tree of z < 0.16 ? [] : city.trees) {
-    if (tree.x < left - 40 || tree.x > left + width + 40) continue;
-    if (tree.y < top - 40 || tree.y > top + height + 40) continue;
-    drawTree(ctx, tree, z);
+  if (z >= 0.16) {
+    const x0 = left - 40;
+    const x1 = left + width + 40;
+    const y0 = top - 40;
+    const y1 = top + height + 40;
+    if (z < 0.45) {
+      // At map scale a tree is a dot: one path per species, not a fill per tree.
+      for (const kind of ['conifer', 'broadleaf', 'birch']) {
+        ctx.fillStyle = TREE_DOT[kind];
+        ctx.beginPath();
+        for (const tree of city.trees) {
+          if ((tree.kind ?? 'broadleaf') !== kind) continue;
+          if (tree.x < x0 || tree.x > x1 || tree.y < y0 || tree.y > y1) continue;
+          ctx.moveTo(tree.x + tree.r, tree.y);
+          ctx.arc(tree.x, tree.y, tree.r, 0, Math.PI * 2);
+        }
+        ctx.fill();
+      }
+    } else {
+      // All the shadows in one path (overlapping shade does not double up),
+      // then each crown as a cached sprite.
+      const visible = city.trees.filter((t) => t.x >= x0 && t.x <= x1 && t.y >= y0 && t.y <= y1);
+      const rot = Math.atan2(currentSun.dy, currentSun.dx);
+      const stretch = 1 + 0.25 * Math.abs(currentSun.dx);
+      ctx.fillStyle = `rgba(10,18,10,${0.32 * (1 - currentDark * 0.85)})`;
+      ctx.beginPath();
+      for (const t of visible) {
+        const cx = t.x + currentSun.dx * t.r * 1.1;
+        const cy = t.y + currentSun.dy * t.r * 1.1 + 2;
+        const rx = t.r * stretch;
+        ctx.moveTo(cx + Math.cos(rot) * rx, cy + Math.sin(rot) * rx);
+        ctx.ellipse(cx, cy, rx, t.r * 0.82, rot, 0, Math.PI * 2);
+      }
+      ctx.fill();
+      for (const t of visible) drawTree(ctx, t);
+    }
   }
   for (const h of z < 0.3 ? [] : city.hydrants) {
     if (!inBounds(b, h.x, h.y)) continue;
@@ -461,47 +513,115 @@ function drawGround(ctx, state, b, z) {
   }
 }
 
-// The sea along the south, the river down the east, bridge rails where a street
-// crosses it, and the dock's jetties. Water is the one thing drawn row by row:
-// a few hundred fillRects at most.
+let seaGradient = null;
+
+// Bridges, drawn after the roads: concrete parapets along both sides of the
+// deck and the deck's shadow on the water downstream.
+function drawBridges(ctx, b, z) {
+  if (z < 0.3) return;
+  for (const hy of H_ROADS) {
+    if (hy >= SEA_Y - 1 || hy + 2 < b.y0 || hy > b.y1 + 1) continue;
+    const c = riverCentre(hy + 1);
+    const x0 = (c - RIVER_HALF_WIDTH - 0.6) * TILE;
+    const x1 = (c + RIVER_HALF_WIDTH + 0.6) * TILE;
+    ctx.fillStyle = 'rgba(8,18,24,0.4)';
+    ctx.fillRect(x0 + 6, (hy + 2) * TILE, x1 - x0 - 12, 10);
+    for (const y of [hy * TILE, (hy + 2) * TILE - 5]) {
+      ctx.fillStyle = '#bdbab0';
+      ctx.fillRect(x0, y, x1 - x0, 5);
+      ctx.fillStyle = 'rgba(0,0,0,0.3)';
+      ctx.fillRect(x0, y + 4, x1 - x0, 1);
+    }
+    if (z >= 0.6) {
+      ctx.fillStyle = '#8f8c83';
+      for (let x = x0; x <= x1; x += 24) {
+        ctx.fillRect(x, hy * TILE - 1, 4, 7);
+        ctx.fillRect(x, (hy + 2) * TILE - 6, 4, 7);
+      }
+    }
+  }
+}
+
+// The sea along the south, the river down the east and the dock's jetties.
 function drawWater(ctx, state, b, z) {
   const city = state.city;
   const left = b.x0 * TILE;
   const right = (b.x1 + 1) * TILE;
 
-  // Sea.
+  // Sea: shallow and green-grey against the quay, deep blue further out.
   if (b.y1 >= SEA_Y) {
     const y0 = Math.max(b.y0, SEA_Y) * TILE;
     const y1 = (b.y1 + 1) * TILE;
-    ctx.fillStyle = '#2f5f73';
+    if (!seaGradient) {
+      seaGradient = ctx.createLinearGradient(0, SEA_Y * TILE, 0, (SEA_Y + 34) * TILE);
+      seaGradient.addColorStop(0, '#3e6f78');
+      seaGradient.addColorStop(0.25, '#2c5a6c');
+      seaGradient.addColorStop(1, '#1b3b4f');
+    }
+    ctx.fillStyle = seaGradient;
     ctx.fillRect(left, y0, right - left, y1 - y0);
-    ctx.fillStyle = '#244d60';
-    ctx.fillRect(left, Math.max(y0, (SEA_Y + 10) * TILE), right - left, Math.max(0, y1 - Math.max(y0, (SEA_Y + 10) * TILE)));
-    ctx.fillStyle = 'rgba(255,255,255,0.35)';
-    ctx.fillRect(left, SEA_Y * TILE, right - left, 3); // the foam line on the quay
+    // The quay: a stone wall with a wet, dark foot.
+    ctx.fillStyle = '#7b786c';
+    ctx.fillRect(left, SEA_Y * TILE, right - left, 6);
+    ctx.fillStyle = 'rgba(10,20,26,0.45)';
+    ctx.fillRect(left, SEA_Y * TILE + 6, right - left, 4);
+    ctx.fillStyle = 'rgba(235,242,245,0.18)';
+    ctx.fillRect(left, SEA_Y * TILE + 10, right - left, 2);
   }
 
-  // River: one span per row of tiles.
-  const rowTop = Math.max(0, b.y0);
-  const rowBottom = Math.min(SEA_Y - 1, b.y1);
-  ctx.fillStyle = '#33697c';
-  for (let y = rowTop; y <= rowBottom; y++) {
-    const c = riverCentre(y + 0.5);
-    ctx.fillRect((c - RIVER_HALF_WIDTH) * TILE, y * TILE, RIVER_HALF_WIDTH * 2 * TILE, TILE + 1);
-  }
-  if (z >= 0.35) {
-    // Banks, and a few ripples so the water reads as moving.
-    ctx.strokeStyle = 'rgba(15,35,50,0.45)';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    for (let y = rowTop; y <= rowBottom; y++) {
-      const c = riverCentre(y + 0.5);
-      ctx.moveTo((c - RIVER_HALF_WIDTH) * TILE, y * TILE);
-      ctx.lineTo((c - RIVER_HALF_WIDTH) * TILE, (y + 1) * TILE);
-      ctx.moveTo((c + RIVER_HALF_WIDTH) * TILE, y * TILE);
-      ctx.lineTo((c + RIVER_HALF_WIDTH) * TILE, (y + 1) * TILE);
+  // River: one smooth polygon down the valley, a darker channel in the middle,
+  // grassy banks and a stone embankment at the water's edge.
+  const rowTop = Math.max(0, b.y0 - 1);
+  const rowBottom = Math.min(SEA_Y, b.y1 + 2);
+  if (rowTop <= rowBottom) {
+    const hw = RIVER_HALF_WIDTH + 0.25;
+    const edge = (side, k) => {
+      const pts = [];
+      for (let y = rowTop; y <= rowBottom; y++) pts.push([(riverCentre(y) + side * hw * k) * TILE, y * TILE]);
+      return pts;
+    };
+    const leftEdge = edge(-1, 1);
+    const rightEdge = edge(1, 1);
+    const line = (pts) => {
+      ctx.moveTo(pts[0][0], pts[0][1]);
+      for (const [x, y] of pts) ctx.lineTo(x, y);
+    };
+    if (z >= 0.3) {
+      ctx.strokeStyle = '#4f5a38';
+      ctx.lineWidth = 18;
+      ctx.beginPath();
+      line(leftEdge);
+      line(rightEdge);
+      ctx.stroke();
     }
-    ctx.stroke();
+    ctx.fillStyle = '#3a6b78';
+    ctx.beginPath();
+    line(leftEdge);
+    for (let i = rightEdge.length - 1; i >= 0; i--) ctx.lineTo(rightEdge[i][0], rightEdge[i][1]);
+    ctx.closePath();
+    ctx.fill();
+    const midL = edge(-1, 0.5);
+    const midR = edge(1, 0.5);
+    ctx.fillStyle = 'rgba(20,52,66,0.55)';
+    ctx.beginPath();
+    line(midL);
+    for (let i = midR.length - 1; i >= 0; i--) ctx.lineTo(midR[i][0], midR[i][1]);
+    ctx.closePath();
+    ctx.fill();
+    if (z >= 0.35) {
+      ctx.strokeStyle = '#7b786c';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      line(leftEdge);
+      line(rightEdge);
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(10,22,28,0.5)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      line(edge(-1, 0.94));
+      line(edge(1, 0.94));
+      ctx.stroke();
+    }
   }
   if (z >= 0.55) {
     const t = state.time;
@@ -522,24 +642,6 @@ function drawWater(ctx, state, b, z) {
           ctx.lineTo((x + off + 1.2) * TILE, (y + 0.5) * TILE);
         }
       }
-    }
-    ctx.stroke();
-  }
-
-  // Bridges: the road is already drawn over the river; add the railings.
-  if (z >= 0.3) {
-    ctx.strokeStyle = '#c9ced3';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    for (const hy of H_ROADS) {
-      if (hy + 2 < b.y0 || hy > b.y1 + 1) continue;
-      const c = riverCentre(hy + 1);
-      const x0 = (c - RIVER_HALF_WIDTH - 0.5) * TILE;
-      const x1 = (c + RIVER_HALF_WIDTH + 0.5) * TILE;
-      ctx.moveTo(x0, hy * TILE + 2);
-      ctx.lineTo(x1, hy * TILE + 2);
-      ctx.moveTo(x0, (hy + 2) * TILE - 2);
-      ctx.lineTo(x1, (hy + 2) * TILE - 2);
     }
     ctx.stroke();
   }
@@ -666,40 +768,219 @@ function drawDistrictLabels(ctx, state, z) {
   }
 }
 
-function drawTree(ctx, tree, z) {
-  // At map scale a tree is a dot; do not pay for three arcs and a shadow.
-  if (z < 0.45) {
-    ctx.fillStyle = tree.tone;
-    ctx.beginPath();
-    ctx.arc(tree.x, tree.y, tree.r, 0, Math.PI * 2);
-    ctx.fill();
+// ----------------------------------------------------------------- trees ---
+
+const TREE_DOT = { conifer: '#22392a', broadleaf: '#3f5d33', birch: '#5f7a3e' };
+const CANOPY_FLAT = { pine: '#1f3426', mixed: '#2a4026' };
+const TREE_TONES = {
+  conifer: ['#24412c', '#2b4a31', '#203a2a', '#2f4f34'],
+  broadleaf: ['#46683a', '#4f7339', '#3d5e32', '#587b3f'],
+  birch: ['#6f8a45', '#7a9350', '#66843f'],
+};
+
+// One tree crown seen from above, lit from the north-west.
+// Conifers are stars of needle whorls stacked toward the leader; broadleaf and
+// birch crowns are clusters of leafy lobes with a dark underside and lit tops.
+function drawCrown(ctx, x, y, r, kind, tone, seed) {
+  if (kind === 'conifer') {
+    const spikes = 9 + Math.floor(hash(seed) * 4);
+    const rot = hash(seed + 1) * Math.PI;
+    const n = spikes * 2;
+    for (const [k, amt] of [[1, -0.3], [0.74, -0.1], [0.5, 0.08], [0.24, 0.26]]) {
+      const ox = -(1 - k) * r * 0.14;
+      const oy = -(1 - k) * r * 0.18;
+      ctx.fillStyle = shade(tone, amt);
+      ctx.beginPath();
+      for (let i = 0; i < n; i++) {
+        const a = rot + k * 0.6 + (i / n) * Math.PI * 2;
+        const rad = r * k * (i % 2 ? 0.56 : 1) * (0.86 + 0.28 * hash(seed + i * 1.37));
+        const px = x + ox + Math.cos(a) * rad;
+        const py = y + oy + Math.sin(a) * rad;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.fill();
+    }
     return;
   }
-
-  ctx.fillStyle = 'rgba(20,30,20,0.22)';
-  ctx.beginPath();
-  ctx.ellipse(tree.x + 4, tree.y + 5, tree.r * 1.05, tree.r * 0.75, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.fillStyle = shade(tree.tone, -0.25);
-  ctx.beginPath();
-  ctx.arc(tree.x, tree.y, tree.r, 0, Math.PI * 2);
-  ctx.fill();
-  // Foliage as a cluster of lobes, lit from the top-left.
-  const lobes = [[-0.35, -0.3, 0.62], [0.4, -0.15, 0.55], [-0.1, 0.4, 0.55], [0.1, -0.1, 0.5]];
-  lobes.forEach(([dx, dy, k], i) => {
-    ctx.fillStyle = shade(tree.tone, -0.08 + i * 0.07);
+  const birch = kind === 'birch';
+  const lobes = birch ? 5 : 7;
+  const spin = hash(seed) * 6.283;
+  const layers = [[1, 0, 0, -0.34], [0.8, -0.08, -0.1, 0], [0.5, -0.2, -0.24, 0.16]];
+  for (const [k, ox, oy, amt] of layers) {
+    ctx.fillStyle = shade(tone, amt);
     ctx.beginPath();
-    ctx.arc(tree.x + dx * tree.r, tree.y + dy * tree.r, tree.r * k, 0, Math.PI * 2);
+    const count = k < 0.6 ? 3 : lobes;
+    for (let i = 0; i < count; i++) {
+      const a = spin + (i / count) * Math.PI * 2 + (k < 0.6 ? 3.6 : 0);
+      const d = r * (k < 0.6 ? 0.22 : 0.4) * (birch ? 1.1 : 1);
+      const lr = r * k * (0.5 + 0.14 * hash(seed + i * 2.1 + k)) * (birch ? 0.86 : 1);
+      const cx = x + ox * r + Math.cos(a) * d;
+      const cy = y + oy * r + Math.sin(a) * d;
+      ctx.moveTo(cx + lr, cy);
+      ctx.arc(cx, cy, lr, 0, Math.PI * 2);
+    }
     ctx.fill();
-  });
-  if (z >= 1.1) {
-    ctx.strokeStyle = 'rgba(20,40,20,0.35)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.arc(tree.x, tree.y, tree.r, 0, Math.PI * 2);
-    ctx.stroke();
   }
+}
+
+// Crowns are drawn once into small sprites (by species, colour, size and one
+// of six shapes) and stamped from then on: a vector crown is four or five
+// path fills, a sprite is one drawImage.
+const crownSprites = new Map();
+function crownSprite(kind, tone, r, variant) {
+  const rb = Math.max(6, Math.round(r / 2) * 2);
+  const key = `${kind}|${tone}|${rb}|${variant}`;
+  let sprite = crownSprites.get(key);
+  if (!sprite) {
+    const k = 2;
+    const size = Math.ceil(rb * 2.6);
+    const c = document.createElement('canvas');
+    c.width = size * k;
+    c.height = size * k;
+    const g = c.getContext('2d');
+    g.scale(k, k);
+    drawCrown(g, size / 2, size / 2, rb, kind, tone, variant * 191.3 + 7);
+    sprite = { c, size, rb };
+    crownSprites.set(key, sprite);
+  }
+  return sprite;
+}
+
+function drawTree(ctx, tree) {
+  const variant = Math.floor(hash(tree.x * 0.37 + tree.y * 0.61) * 6);
+  const sprite = crownSprite(tree.kind ?? 'broadleaf', tree.tone, tree.r, variant);
+  const size = sprite.size * (tree.r / sprite.rb);
+  ctx.drawImage(sprite.c, tree.x - size / 2, tree.y - size / 2, size, size);
+}
+
+// The repeating forest canopy: hundreds of crowns on a 16-tile square that
+// wraps seamlessly. Built once per forest type and resolution: double for
+// close zoom, a quarter for the whole-city view.
+const canopies = {};
+function canopy(ctx, woods, res) {
+  const key = `${woods}:${res}`;
+  if (canopies[key] !== undefined) return canopies[key];
+  canopies[key] = CANOPY_FLAT[woods];
+  if (typeof document === 'undefined') return canopies[key];
+  const S = 512;
+  const k = res;
+  const c = document.createElement('canvas');
+  c.width = S * k;
+  c.height = S * k;
+  const g = c.getContext('2d');
+  g.scale(k, k);
+  g.fillStyle = woods === 'pine' ? '#121f15' : '#182414';
+  g.fillRect(0, 0, S, S);
+  // Leaf litter and needles on the floor, seen through the gaps.
+  let s = woods === 'pine' ? 7771 : 4242;
+  const rnd = () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296);
+  for (let i = 0; i < 2500; i++) {
+    g.fillStyle = rnd() < 0.5 ? 'rgba(70,58,36,0.35)' : 'rgba(30,48,26,0.4)';
+    g.fillRect(rnd() * S, rnd() * S, 2, 2);
+  }
+  const pine = woods === 'pine' ? 0.82 : 0.35;
+  const crowns = [];
+  for (let i = 0; i < 640; i++) {
+    const roll = rnd();
+    const kind = roll < pine ? 'conifer' : roll < pine + 0.1 ? 'birch' : 'broadleaf';
+    const tones = TREE_TONES[kind];
+    crowns.push({
+      x: rnd() * S,
+      y: rnd() * S,
+      r: kind === 'conifer' ? 11 + rnd() * 9 : 13 + rnd() * 10,
+      kind,
+      tone: tones[Math.floor(rnd() * tones.length)],
+      seed: rnd() * 997,
+    });
+  }
+  crowns.sort((a, b) => a.y - b.y);
+  for (const t of crowns) {
+    for (const dx of [-S, 0, S]) {
+      for (const dy of [-S, 0, S]) {
+        const x = t.x + dx;
+        const y = t.y + dy;
+        if (x < -t.r * 2 || x > S + t.r * 2 || y < -t.r * 2 || y > S + t.r * 2) continue;
+        g.fillStyle = 'rgba(5,10,6,0.45)';
+        g.beginPath();
+        g.ellipse(x + t.r * 0.35, y + t.r * 0.5, t.r, t.r * 0.9, 0, 0, Math.PI * 2);
+        g.fill();
+        drawCrown(g, x, y, t.r, t.kind, t.tone, t.seed);
+      }
+    }
+  }
+  const pattern = ctx.createPattern(c, 'repeat');
+  if (pattern && k !== 1 && typeof DOMMatrix !== 'undefined') pattern.setTransform(new DOMMatrix().scale(1 / k));
+  canopies[key] = pattern ?? CANOPY_FLAT[woods];
+  return canopies[key];
+}
+
+// A junction with forest on three or four corners is a country crossroads:
+// no zebra crossings, no street lamps.
+function ruralJunction(city, vx, hy) {
+  const woods = city.woods;
+  if (!woods) return false;
+  let n = 0;
+  for (const [x, y] of [[vx - 1, hy - 1], [vx + 2, hy - 1], [vx - 1, hy + 2], [vx + 2, hy + 2]]) {
+    if (x >= 0 && y >= 0 && x < city.w && y < city.h && woods[y * city.w + x]) n++;
+  }
+  return n >= 3;
+}
+
+// Where a road runs past a forest, a grass verge and a dirt edge replace the
+// kerb, so it reads as a country road through the trees.
+function drawVerges(ctx, forests, z) {
+  const grassy = texture(ctx, 'verge', '#4b5a34', 900);
+  const vw = 8;
+  for (const a of forests) {
+    const x = a.x0 * TILE;
+    const y = a.y0 * TILE;
+    const w = (a.x1 - a.x0 + 1) * TILE;
+    const h = (a.y1 - a.y0 + 1) * TILE;
+    ctx.fillStyle = grassy;
+    ctx.fillRect(x, y - vw, w, vw);
+    ctx.fillRect(x, y + h, w, vw);
+    ctx.fillRect(x - vw, y, vw, h);
+    ctx.fillRect(x + w, y, vw, h);
+    if (z >= 0.6) {
+      ctx.strokeStyle = 'rgba(92,78,52,0.55)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(x, y - vw); ctx.lineTo(x + w, y - vw);
+      ctx.moveTo(x, y + h + vw); ctx.lineTo(x + w, y + h + vw);
+      ctx.moveTo(x - vw, y); ctx.lineTo(x - vw, y + h);
+      ctx.moveTo(x + w + vw, y); ctx.lineTo(x + w + vw, y + h);
+      ctx.stroke();
+    }
+  }
+}
+
+// A gravel footpath winding through each park.
+function drawParkPaths(ctx, parks, b) {
+  ctx.lineCap = 'round';
+  for (const p of parks) {
+    if (p.x1 < b.x0 || p.x0 > b.x1 || p.y1 < b.y0 || p.y0 > b.y1) continue;
+    const w = p.x1 - p.x0 + 1;
+    const h = p.y1 - p.y0 + 1;
+    if (w < 5 || h < 5) continue;
+    const seed = p.x0 * 13.1 + p.y0 * 7.7;
+    const x0 = p.x0 * TILE;
+    const y0 = p.y0 * TILE;
+    const ay = y0 + h * TILE * (0.3 + hash(seed) * 0.4);
+    const by = y0 + h * TILE * (0.3 + hash(seed + 1) * 0.4);
+    const cx = x0 + w * TILE * (0.3 + hash(seed + 2) * 0.4);
+    const cy = y0 + h * TILE * hash(seed + 3);
+    for (const [width, colour] of [[11, 'rgba(70,66,50,0.45)'], [8, '#a89c7e']]) {
+      ctx.strokeStyle = colour;
+      ctx.lineWidth = width;
+      ctx.beginPath();
+      ctx.moveTo(x0, ay);
+      ctx.quadraticCurveTo(cx, cy, x0 + w * TILE, by);
+      ctx.stroke();
+    }
+  }
+  ctx.lineCap = 'butt';
 }
 
 function drawHydrant(ctx, x, y, z) {
@@ -3024,15 +3305,15 @@ function miniStatic(state, mw, mh) {
 
   g.fillStyle = '#2f353c';
   g.fillRect(0, 0, mw, mh);
-  g.fillStyle = '#245b82';
+  g.fillStyle = '#28526a';
   g.fillRect(0, SEA_Y * TILE * sy, mw, mh - SEA_Y * TILE * sy);
-  g.fillStyle = '#2b6a94';
+  g.fillStyle = '#336676';
   for (let y = 0; y < SEA_Y; y += 2) {
     const c = riverCentre(y + 1);
     g.fillRect((c - RIVER_HALF_WIDTH) * TILE * sx, y * TILE * sy, RIVER_HALF_WIDTH * 2 * TILE * sx, 2 * TILE * sy + 1);
   }
-  g.fillStyle = '#33482a';
   for (const a of city.forestAreas ?? []) {
+    g.fillStyle = a.woods === 'pine' ? '#22382a' : '#2f4628';
     g.fillRect(a.x0 * TILE * sx, a.y0 * TILE * sy, (a.x1 - a.x0 + 1) * TILE * sx, (a.y1 - a.y0 + 1) * TILE * sy);
   }
   g.fillStyle = '#3c4a38';
