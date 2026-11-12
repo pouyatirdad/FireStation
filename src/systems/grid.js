@@ -7,22 +7,32 @@
 import { TILE } from '../core/config.js';
 import { distToRect } from '../core/math.js';
 
+// Four ways to move: vehicles `drive` on roads and aprons (bridges included),
+// crews `walk` on anything that is not a building or open water, boats `sail` on
+// water (under bridges too), and divers `swim` anywhere but through a building.
 export function buildNav(city) {
   const { w, h, blocked, road, apron } = city;
+  const water = city.water ?? new Uint8Array(w * h);
   const walk = new Uint8Array(w * h);
   const drive = new Uint8Array(w * h);
+  const sail = new Uint8Array(w * h);
+  const swim = new Uint8Array(w * h);
   for (let i = 0; i < w * h; i++) {
-    walk[i] = blocked[i] ? 0 : 1;
+    walk[i] = blocked[i] || (water[i] && !road[i]) ? 0 : 1;
     drive[i] = road[i] || apron[i] ? 1 : 0;
+    sail[i] = water[i] ? 1 : 0;
+    swim[i] = blocked[i] ? 0 : 1;
   }
-  return { w, h, walk, drive };
+  return { w, h, walk, drive, sail, swim, water };
 }
+
+const gridOf = (nav, mode) => (mode === 'drive' ? nav.drive : mode === 'sail' ? nav.sail : mode === 'swim' ? nav.swim : nav.walk);
 
 export const index = (nav, x, y) => y * nav.w + x;
 
 export function passable(nav, mode, x, y) {
   if (x < 0 || y < 0 || x >= nav.w || y >= nav.h) return false;
-  return (mode === 'drive' ? nav.drive : nav.walk)[y * nav.w + x] === 1;
+  return gridOf(nav, mode)[y * nav.w + x] === 1;
 }
 
 export const walkableAt = (nav, x, y) => passable(nav, 'walk', x, y);
@@ -152,7 +162,7 @@ export function nearestPassable(nav, mode, tx, ty, maxR = 8) {
 
 /** A* on tile coordinates. Returns tiles after the start, or null. */
 export function findPath(nav, mode, from, to) {
-  const grid = mode === 'drive' ? nav.drive : nav.walk;
+  const grid = gridOf(nav, mode);
   const start = passable(nav, mode, from.x, from.y)
     ? { x: from.x, y: from.y }
     : nearestPassable(nav, mode, from.x, from.y, 4);

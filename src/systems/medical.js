@@ -140,6 +140,7 @@ export function treatPatient(state, patient, engine) {
   patient.treated = true;
   patient.claimedBy = null;
   patient.leaveAt = state.time + 3;
+  engine.worked = true;
   state.stats.treated = (state.stats.treated ?? 0) + 1;
   state.rating = Math.min(CONFIG.rating.start, state.rating + 2);
   const fee = earn(state, CONFIG.economy.treated, 'treatment');
@@ -238,11 +239,14 @@ const distToBuilding = (x, y, b) => {
   return distToRect(x, y, r);
 };
 
+// A hospital belongs to the base it stands in, and is only there once that base is open.
+const hospitalOpen = (state, b) => b.state !== 'rubble' && (state.ownedStations?.[b.base ?? 0] ?? (b.base ?? 0) === 0);
+
 export function nearestHospital(state, x, y) {
   let best = null;
   let bestD = Infinity;
   for (const b of state.city.hospitals ?? []) {
-    if (b.state === 'rubble') continue;
+    if (!hospitalOpen(state, b)) continue;
     const d = distToBuilding(x, y, b);
     if (d < bestD) {
       bestD = d;
@@ -255,7 +259,7 @@ export function nearestHospital(state, x, y) {
 export function hospitalInReach(state, engine) {
   const range = CONFIG.medical.hospitalRange * TILE;
   for (const b of state.city.hospitals ?? []) {
-    if (b.state === 'rubble') continue;
+    if (!hospitalOpen(state, b)) continue;
     if (distToBuilding(engine.x, engine.y, b) <= range) return b;
   }
   return null;
@@ -267,6 +271,7 @@ export function unloadCargo(state, engine, hospital) {
   if (cargo.length === 0) return 0;
   const n = cargo.length;
   engine.cargo = [];
+  engine.worked = true;
   const fee = earn(state, n * CONFIG.medical.transportFee, 'transport');
   state.stats.transported = (state.stats.transported ?? 0) + n;
   state.rating = Math.min(CONFIG.rating.start, state.rating + 3 * n);

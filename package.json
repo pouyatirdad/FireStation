@@ -1,9 +1,9 @@
 {
   "name": "fire-station",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "private": true,
   "type": "module",
-  "description": "Top-down emergency-services game in the spirit of Emergency 4: a 520x384 city, buyable and upgradeable vehicles, two stations, pharmacies, injured civilians, a real budget and synthesised sound. One self-contained index.html.",
+  "description": "Top-down emergency-services game in the spirit of Emergency 4: a 520x384 city with a river and a harbour, thirteen vehicle types incl. boats and aircraft, three bases, pharmacies, injured civilians, a real budget and synthesised sound. One self-contained index.html.",
   "scripts": {
     "build": "node tools/build.mjs",
     "test": "node --test test/"

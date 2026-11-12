@@ -16,7 +16,7 @@ test('the map is ten times the area of the original 160x120 town', () => {
   assert.equal(city.w, CITY_W);
   assert.equal(city.h, CITY_H);
   assert.equal(V_ROADS.length, 17);
-  assert.equal(H_ROADS.length, 16);
+  assert.equal(H_ROADS.length, 15);
 });
 
 test('the big city has the buildings, hydrants, forests and pharmacies to fill it', () => {

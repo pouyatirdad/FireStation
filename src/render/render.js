@@ -6,7 +6,9 @@
 import { CONFIG, TILE } from '../core/config.js';
 import { clamp } from '../core/math.js';
 import { buildingRect } from '../systems/fire.js';
-import { V_ROADS, H_ROADS, APRON } from '../data/city.js';
+import {
+  V_ROADS, H_ROADS, APRON, SEA_Y, RIVER_HALF_WIDTH, riverCentre,
+} from '../data/city.js';
 
 const PALETTE = {
   sidewalk: '#8b9198',
@@ -157,6 +159,7 @@ export function render(ctx, state, cam, view, opts = {}) {
   drawOffscreenAlarms(ctx, state, cam, view, now);
   drawOffscreenPatients(ctx, state, cam, view, now);
   drawOffscreenWrecks(ctx, state, cam, view, now);
+  drawOffscreenVictims(ctx, state, cam, view, now);
   drawMinimap(ctx, state, cam, view);
   drawVignette(ctx, W, H);
 }
@@ -238,9 +241,12 @@ function drawGround(ctx, state, b, z) {
     ctx.stroke();
   }
 
-  // Streets.
+  drawWater(ctx, state, b, z);
+
+  // Streets stop at the quay.
+  const roadH = Math.max(0, Math.min(top + height, SEA_Y * TILE) - top);
   ctx.fillStyle = PALETTE.road;
-  for (const vx of vr) ctx.fillRect(vx * TILE, top, 2 * TILE, height);
+  for (const vx of vr) ctx.fillRect(vx * TILE, top, 2 * TILE, roadH);
   for (const hy of hr) ctx.fillRect(left, hy * TILE, width, 2 * TILE);
 
   // Centre lines, then intersections painted back over them so the dashes stop
@@ -253,7 +259,7 @@ function drawGround(ctx, state, b, z) {
     for (const vx of vr) {
       const x = (vx + 1) * TILE;
       ctx.moveTo(x, top);
-      ctx.lineTo(x, top + height);
+      ctx.lineTo(x, top + roadH);
     }
     for (const hy of hr) {
       const y = (hy + 1) * TILE;
@@ -345,6 +351,101 @@ function drawGround(ctx, state, b, z) {
       ctx.fillRect(-21, 2, 3, 4);
       ctx.restore();
     }
+  }
+}
+
+// The sea along the south, the river down the east, bridge rails where a street
+// crosses it, and the dock's jetties. Water is the one thing drawn row by row:
+// a few hundred fillRects at most.
+function drawWater(ctx, state, b, z) {
+  const city = state.city;
+  const left = b.x0 * TILE;
+  const right = (b.x1 + 1) * TILE;
+
+  // Sea.
+  if (b.y1 >= SEA_Y) {
+    const y0 = Math.max(b.y0, SEA_Y) * TILE;
+    const y1 = (b.y1 + 1) * TILE;
+    ctx.fillStyle = '#245b82';
+    ctx.fillRect(left, y0, right - left, y1 - y0);
+    ctx.fillStyle = '#1d4d70';
+    ctx.fillRect(left, Math.max(y0, (SEA_Y + 10) * TILE), right - left, Math.max(0, y1 - Math.max(y0, (SEA_Y + 10) * TILE)));
+    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+    ctx.fillRect(left, SEA_Y * TILE, right - left, 3); // the foam line on the quay
+  }
+
+  // River: one span per row of tiles.
+  const rowTop = Math.max(0, b.y0);
+  const rowBottom = Math.min(SEA_Y - 1, b.y1);
+  ctx.fillStyle = '#2b6a94';
+  for (let y = rowTop; y <= rowBottom; y++) {
+    const c = riverCentre(y + 0.5);
+    ctx.fillRect((c - RIVER_HALF_WIDTH) * TILE, y * TILE, RIVER_HALF_WIDTH * 2 * TILE, TILE + 1);
+  }
+  if (z >= 0.35) {
+    // Banks, and a few ripples so the water reads as moving.
+    ctx.strokeStyle = 'rgba(15,35,50,0.45)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    for (let y = rowTop; y <= rowBottom; y++) {
+      const c = riverCentre(y + 0.5);
+      ctx.moveTo((c - RIVER_HALF_WIDTH) * TILE, y * TILE);
+      ctx.lineTo((c - RIVER_HALF_WIDTH) * TILE, (y + 1) * TILE);
+      ctx.moveTo((c + RIVER_HALF_WIDTH) * TILE, y * TILE);
+      ctx.lineTo((c + RIVER_HALF_WIDTH) * TILE, (y + 1) * TILE);
+    }
+    ctx.stroke();
+  }
+  if (z >= 0.55) {
+    const t = state.time;
+    ctx.strokeStyle = 'rgba(210,235,250,0.22)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    for (let y = rowTop; y <= rowBottom; y += 2) {
+      const c = riverCentre(y + 0.5);
+      const off = ((y * 7.3 + t * 0.9) % 6) - 3;
+      ctx.moveTo((c + off - 1) * TILE, (y + 0.5) * TILE);
+      ctx.lineTo((c + off + 1) * TILE, (y + 0.5) * TILE);
+    }
+    if (b.y1 >= SEA_Y) {
+      for (let y = Math.max(SEA_Y + 2, b.y0); y <= b.y1; y += 3) {
+        for (let x = b.x0 - (b.x0 % 5); x <= b.x1; x += 5) {
+          const off = Math.sin(t * 0.8 + x * 0.5 + y) * 0.6;
+          ctx.moveTo((x + off) * TILE, (y + 0.5) * TILE);
+          ctx.lineTo((x + off + 1.2) * TILE, (y + 0.5) * TILE);
+        }
+      }
+    }
+    ctx.stroke();
+  }
+
+  // Bridges: the road is already drawn over the river; add the railings.
+  if (z >= 0.3) {
+    ctx.strokeStyle = '#c9ced3';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    for (const hy of H_ROADS) {
+      if (hy + 2 < b.y0 || hy > b.y1 + 1) continue;
+      const c = riverCentre(hy + 1);
+      const x0 = (c - RIVER_HALF_WIDTH - 0.5) * TILE;
+      const x1 = (c + RIVER_HALF_WIDTH + 0.5) * TILE;
+      ctx.moveTo(x0, hy * TILE + 2);
+      ctx.lineTo(x1, hy * TILE + 2);
+      ctx.moveTo(x0, (hy + 2) * TILE - 2);
+      ctx.lineTo(x1, (hy + 2) * TILE - 2);
+    }
+    ctx.stroke();
+  }
+
+  // The harbour dock: a jetty beside every berth.
+  const dock = city.stations?.[2];
+  if (dock && z >= 0.3 && b.y1 >= SEA_Y - 2) {
+    ctx.fillStyle = '#8a6a45';
+    for (const berth of dock.bays) {
+      ctx.fillRect(berth.x + 1.3 * TILE, SEA_Y * TILE, 7, 3.2 * TILE);
+    }
+    ctx.fillStyle = '#7a5d3b';
+    ctx.fillRect(dock.bays[0].x - 1.2 * TILE, SEA_Y * TILE, (dock.bays.length * 3 + 0.4) * TILE, 5);
   }
 }
 
@@ -482,12 +583,16 @@ function drawEntities(ctx, state, bounds, now, z) {
   for (const blockade of state.blockades ?? []) {
     list.push({ key: blockade.y - 40, blockade });
   }
+  for (const victim of state.victims ?? []) {
+    list.push({ key: victim.y + 6, victim });
+  }
   list.sort((a, b) => a.key - b.key);
   for (const item of list) {
     if (item.building) drawBuilding(ctx, state, item.building, now, z);
     else if (item.unit) drawUnit(ctx, item.unit, now, z);
     else if (item.patient) drawPatient(ctx, item.patient, now, z);
     else if (item.blockade) drawBlockade(ctx, item.blockade, now, z);
+    else if (item.victim) drawVictim(ctx, item.victim, now);
     else drawCivilian(ctx, item.person, now);
   }
 }
@@ -540,7 +645,10 @@ function drawBuilding(ctx, state, b, now, z) {
   if (detailed) drawRoofDetails(ctx, b, x, y - e, w, h);
   if (b.type === 'pharmacy') drawPharmacyMark(ctx, x, y - e, w, h);
   if (b.type === 'hospital') drawHospitalMark(ctx, x, y - e, w, h, detailed);
-  if (detailed && b.type === 'station') drawStationFace(ctx, b, x, facadeTop, w, e, z, b.id === 'station2' && !state.ownedStations?.[1]);
+  if (detailed && b.type === 'station') drawStationFace(
+    ctx, b, x, facadeTop, w, e, z,
+    (b.id === 'station2' && !state.ownedStations?.[1]) || (b.id === 'dock' && !state.ownedStations?.[2]),
+  );
 
   if (b.state === 'burning') {
     if (b.integrity < b.maxIntegrity * 0.75) {
@@ -794,9 +902,220 @@ function drawFire(ctx, b, now, z) {
 
 function drawUnit(ctx, u, now) {
   if (u.kind === 'engine') {
-    if (u.spec?.flying) drawHelicopter(ctx, u, now);
+    if (u.spec?.plane) drawAirtanker(ctx, u, now);
+    else if (u.spec?.flying) drawHelicopter(ctx, u, now);
+    else if (u.spec?.boat) drawBoat(ctx, u, now);
     else drawEngine(ctx, u, now);
   } else drawCrew(ctx, u, now);
+}
+
+// A scooping air tanker: twin-engine high wing, with its shadow far below.
+function drawAirtanker(ctx, e, now) {
+  const lift = 44;
+  ctx.save();
+  ctx.translate(e.x, e.y);
+  ctx.fillStyle = 'rgba(10,14,18,0.28)';
+  ctx.beginPath();
+  ctx.ellipse(18, 40, 46, 12, e.angle, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.translate(0, -lift);
+  ctx.rotate(e.angle);
+  // Wings, tailplane, fuselage.
+  ctx.fillStyle = '#e8e4d8';
+  ctx.fillRect(-6, -52, 18, 104);
+  ctx.fillStyle = '#c93a2f';
+  ctx.fillRect(-6, -52, 18, 7);
+  ctx.fillRect(-6, 45, 18, 7);
+  ctx.fillStyle = '#d9d5c8';
+  ctx.fillRect(-58, -20, 12, 40);
+  ctx.fillStyle = '#f2efe6';
+  ctx.beginPath();
+  ctx.moveTo(52, 0);
+  ctx.quadraticCurveTo(46, -11, 28, -11);
+  ctx.lineTo(-52, -6);
+  ctx.lineTo(-52, 6);
+  ctx.lineTo(28, 11);
+  ctx.quadraticCurveTo(46, 11, 52, 0);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#c93a2f';
+  ctx.fillRect(-40, -3, 70, 6);
+  ctx.fillStyle = '#1b2b3a';
+  ctx.beginPath();
+  ctx.ellipse(36, 0, 8, 6, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // Propellers, blurred.
+  const spin = now * 40;
+  for (const y of [-22, 22]) {
+    ctx.fillStyle = '#394048';
+    ctx.beginPath();
+    ctx.arc(14, y, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(40,46,52,0.55)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(14 + Math.cos(spin) * 2, y + Math.sin(spin) * 14);
+    ctx.lineTo(14 - Math.cos(spin) * 2, y - Math.sin(spin) * 14);
+    ctx.stroke();
+  }
+  // The water as it drops.
+  if (e.pumping) {
+    ctx.fillStyle = 'rgba(190,225,248,0.5)';
+    ctx.beginPath();
+    ctx.ellipse(-40, 0, 26, 7, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+  ctx.fillStyle = 'rgba(255,255,255,0.92)';
+  ctx.font = 'bold 10px "Segoe UI", system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(`${(e.spec?.label ?? 'A')[0]}${e.number}`, e.x, e.y - lift - 26);
+}
+
+// Boats: a fireboat with its monitor, and the orange rescue boat with its tubes.
+function drawBoat(ctx, e, now) {
+  const fire = e.type === 'fireboat';
+  ctx.save();
+  ctx.translate(e.x, e.y);
+  ctx.rotate(e.angle);
+
+  // Wake.
+  const moving = e.path.length > 0;
+  ctx.strokeStyle = 'rgba(235,245,252,0.55)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  const wake = moving ? 34 : 12;
+  ctx.moveTo(-34, -9);
+  ctx.lineTo(-34 - wake, -20 - Math.sin(now * 6) * 2);
+  ctx.moveTo(-34, 9);
+  ctx.lineTo(-34 - wake, 20 + Math.sin(now * 6) * 2);
+  ctx.stroke();
+
+  // Hull.
+  ctx.fillStyle = fire ? '#bf2f27' : '#e86f1f';
+  ctx.beginPath();
+  ctx.moveTo(48, 0);
+  ctx.quadraticCurveTo(38, -17, 8, -18);
+  ctx.lineTo(-38, -16);
+  ctx.lineTo(-38, 16);
+  ctx.lineTo(8, 18);
+  ctx.quadraticCurveTo(38, 17, 48, 0);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.18)';
+  ctx.fillRect(-36, -2, 70, 4);
+
+  if (fire) {
+    ctx.fillStyle = '#efece1';
+    rr(ctx, -22, -11, 30, 22, 4);
+    ctx.fill();
+    ctx.fillStyle = '#17222d';
+    ctx.fillRect(2, -8, 5, 16);
+    // Water monitor on the bow.
+    ctx.fillStyle = '#3a3f45';
+    ctx.beginPath();
+    ctx.arc(26, 0, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#3a3f45';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(26, 0);
+    ctx.lineTo(38, 0);
+    ctx.stroke();
+  } else {
+    // Inflatable tubes and a little console.
+    ctx.strokeStyle = '#2a2f35';
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(46, 0);
+    ctx.quadraticCurveTo(38, -17, 8, -18);
+    ctx.lineTo(-36, -16);
+    ctx.moveTo(46, 0);
+    ctx.quadraticCurveTo(38, 17, 8, 18);
+    ctx.lineTo(-36, 16);
+    ctx.stroke();
+    ctx.fillStyle = '#efece1';
+    rr(ctx, -10, -7, 18, 14, 3);
+    ctx.fill();
+    ctx.fillStyle = '#2d7fd0';
+    ctx.fillRect(-34, -4, 10, 8);
+  }
+
+  const busy = e.status === 'responding' || e.pumping;
+  ctx.fillStyle = busy && Math.floor(now * 6) % 2 === 0 ? '#ff4b3e' : '#58b8ff';
+  ctx.beginPath();
+  ctx.arc(-4, 0, 3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  ctx.fillStyle = 'rgba(255,255,255,0.92)';
+  ctx.font = 'bold 10px "Segoe UI", system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(`${(e.spec?.label ?? 'B')[0]}${e.number}`, e.x, e.y - 28);
+}
+
+// Someone in the water: head and arms, ripples, a life ring and the clock.
+function drawVictim(ctx, v, now) {
+  ctx.save();
+  ctx.translate(v.x, v.y);
+  ctx.strokeStyle = 'rgba(220,240,252,0.55)';
+  ctx.lineWidth = 2;
+  for (const k of [0, 0.5]) {
+    const r = 8 + ((now * 10 + k * 14) % 14);
+    ctx.globalAlpha = 1 - (r - 8) / 14;
+    ctx.beginPath();
+    ctx.arc(0, 2, r, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+
+  const flail = Math.sin(now * 9 + v.x) * 3;
+  ctx.fillStyle = '#efd3b4';
+  ctx.beginPath();
+  ctx.arc(0, -2, 3.6, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#efd3b4';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(-3, 1);
+  ctx.lineTo(-9, -5 + flail);
+  ctx.moveTo(3, 1);
+  ctx.lineTo(9, -5 - flail);
+  ctx.stroke();
+
+  const frac = clamp(v.life / v.maxLife, 0, 1);
+  ctx.strokeStyle = `hsla(${Math.round(frac * 110)},85%,55%,0.95)`;
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.arc(0, -2, 17, -Math.PI / 2, -Math.PI / 2 + frac * Math.PI * 2);
+  ctx.stroke();
+
+  // A bouncing life ring, so they can be found on a big river.
+  const bob = Math.sin(now * 6 + v.y) * 2.5;
+  ctx.strokeStyle = '#ff6a3d';
+  ctx.lineWidth = 5;
+  ctx.beginPath();
+  ctx.arc(0, -30 + bob, 6, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([4, 5]);
+  ctx.beginPath();
+  ctx.arc(0, -30 + bob, 6, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  if (v.rescueTimer > 0) {
+    const prog = Math.min(1, v.rescueTimer / 5);
+    ctx.fillStyle = 'rgba(8,12,16,0.7)';
+    ctx.fillRect(-14, 12, 28, 4);
+    ctx.fillStyle = '#7cc8ff';
+    ctx.fillRect(-14, 12, 28 * prog, 4);
+  }
+  ctx.restore();
 }
 
 // A water-bombing helicopter: a shadow on the ground, the airframe lifted above
@@ -900,14 +1219,36 @@ function drawEngine(ctx, e, now) {
     }
   }
 
-  const body = type === 'command' ? '#f2f0ea' : type === 'tanker' ? '#a9b1b8'
+  // Small and large relatives of the ambulance reuse its art, scaled.
+  if (type === 'medcar') ctx.scale(0.62, 0.78);
+  else if (type === 'ambubus') ctx.scale(1.38, 1.04);
+  const body = type === 'divetruck' ? '#f0f2f2' : type === 'command' ? '#f2f0ea' : type === 'tanker' ? '#a9b1b8'
     : type === 'rescue' ? '#d97a2b'
       : type === 'ambulance' ? '#f1efe8' : '#bf2f27';
   ctx.fillStyle = body;
   rr(ctx, -42, -19, 84, 38, 6);
   ctx.fill();
 
-  if (type === 'command') {
+  if (type === 'divetruck') {
+    // A white van with a blue stripe, a rooftop rack and a dive flag.
+    ctx.fillStyle = '#f0f2f2';
+    rr(ctx, -40, -17, 60, 34, 5);
+    ctx.fill();
+    ctx.fillStyle = '#2d7fd0';
+    ctx.fillRect(-40, 2, 60, 7);
+    ctx.fillStyle = '#e04a2f';
+    ctx.fillRect(-30, -13, 14, 8);
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(-27, -11.5, 8, 2);
+    ctx.fillStyle = '#e8e5dc';
+    rr(ctx, 14, -17, 27, 34, 4);
+    ctx.fill();
+    ctx.fillStyle = '#17222d';
+    ctx.fillRect(31, -13, 7, 26);
+    ctx.fillStyle = '#c9ced3';
+    ctx.fillRect(-14, -16, 22, 3);
+    ctx.fillRect(-14, 13, 22, 3);
+  } else if (type === 'command') {
     // A white-and-red command SUV with a roof light bar and a mast.
     ctx.fillStyle = '#f2f0ea';
     rr(ctx, -36, -16, 74, 32, 7);
@@ -927,7 +1268,7 @@ function drawEngine(ctx, e, now) {
     ctx.stroke();
     ctx.fillStyle = '#2d7fd0';
     ctx.fillRect(-2, -12, 5, 24);
-  } else if (type === 'ambulance') {
+  } else if (type === 'ambulance' || type === 'medcar' || type === 'ambubus') {
     // White box body, a red stripe and a cross on the side, light bar on the cab.
     ctx.fillStyle = '#f7f5ee';
     rr(ctx, -40, -17, 60, 34, 5);
@@ -1082,6 +1423,20 @@ function drawEngine(ctx, e, now) {
 }
 
 function drawCrew(ctx, c, now) {
+  if (c.diver && (c.status === 'swimming' || c.status === 'rescuing')) {
+    ctx.strokeStyle = 'rgba(220,240,252,0.5)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(c.x, c.y + 2, 10 + ((now * 8) % 6), 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(220,240,252,0.6)';
+    for (let i = 0; i < 3; i++) {
+      const t = (now * 1.4 + i * 0.33) % 1;
+      ctx.beginPath();
+      ctx.arc(c.x + 8 + Math.sin(now * 5 + i) * 2, c.y - 6 - t * 18, 1.6, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
   const bob = c.status === 'moving' ? Math.sin(now * 12 + c.x * 0.1) * 1.2 : 0;
   ctx.save();
   ctx.translate(c.x, c.y + bob);
@@ -1093,21 +1448,22 @@ function drawCrew(ctx, c, now) {
 
   ctx.rotate(c.angle + Math.PI / 2);
 
-  // Jacket: yellow for firefighters, white and green for paramedics.
-  ctx.fillStyle = c.medic ? '#f1f4f0' : '#e0ae3c';
+  // Jacket: yellow for firefighters, white and green for paramedics, a black
+  // wetsuit and an orange tank for divers.
+  ctx.fillStyle = c.diver ? '#20262c' : c.medic ? '#f1f4f0' : '#e0ae3c';
   ctx.beginPath();
   ctx.arc(0, 0, 7.2, 0, Math.PI * 2);
   ctx.fill();
-  ctx.strokeStyle = c.medic ? '#3a9d6a' : '#8f6a1e';
+  ctx.strokeStyle = c.diver ? '#e86f1f' : c.medic ? '#3a9d6a' : '#8f6a1e';
   ctx.lineWidth = 1.4;
   ctx.stroke();
 
   // Reflective band.
-  ctx.fillStyle = c.medic ? '#3a9d6a' : '#ece8d9';
+  ctx.fillStyle = c.diver ? '#e86f1f' : c.medic ? '#3a9d6a' : '#ece8d9';
   ctx.fillRect(-7.2, -2, 14.4, 2.4);
 
   // Helmet toward the direction of travel.
-  ctx.fillStyle = c.medic ? '#e6f1ea' : '#f3d34a';
+  ctx.fillStyle = c.diver ? '#2d7fd0' : c.medic ? '#e6f1ea' : '#f3d34a';
   ctx.beginPath();
   ctx.arc(0, -4.8, 3.8, 0, Math.PI * 2);
   ctx.fill();
@@ -1545,6 +1901,17 @@ function drawWorldSelection(ctx, state, now, z) {
   const entity = lookup(state, selected);
   if (!entity) return;
 
+  if (selected.kind === 'victim') {
+    ctx.strokeStyle = PALETTE.select;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([7, 6]);
+    ctx.beginPath();
+    ctx.arc(entity.x, entity.y, 26, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    return;
+  }
+
   if (selected.kind === 'blockade') {
     ctx.strokeStyle = PALETTE.select;
     ctx.lineWidth = 2;
@@ -1658,6 +2025,7 @@ function lookup(state, ref) {
   if (ref.kind === 'wildfire') return (state.wildfires ?? []).find((w) => w.id === ref.id) ?? null;
   if (ref.kind === 'patient') return (state.patients ?? []).find((q) => q.id === ref.id) ?? null;
   if (ref.kind === 'blockade') return (state.blockades ?? []).find((q) => q.id === ref.id) ?? null;
+  if (ref.kind === 'victim') return (state.victims ?? []).find((q) => q.id === ref.id) ?? null;
   if (ref.kind === 'unit') return state.units.find((u) => u.id === ref.id) ?? null;
   return state.buildings.find((b) => b.id === ref.id) ?? null;
 }
@@ -1810,7 +2178,10 @@ function drawSelectedLabel(ctx, state, cam, view) {
   const isUnit = selected.kind === 'unit';
   const isPatient = selected.kind === 'patient';
   const isBlockade = selected.kind === 'blockade';
-  const p = isBlockade
+  const isVictim = selected.kind === 'victim';
+  const p = isVictim
+    ? worldToScreen(cam, entity.x, entity.y - 48, view)
+    : isBlockade
     ? worldToScreen(cam, entity.x, entity.y - entity.h / 2 - 30, view)
     : isPatient
     ? worldToScreen(cam, entity.x, entity.y - 46, view)
@@ -1827,7 +2198,9 @@ function drawSelectedLabel(ctx, state, cam, view) {
 
   const title = entity.name;
   let detail;
-  if (isBlockade) {
+  if (isVictim) {
+    detail = `IN THE WATER · ${Math.ceil(entity.life)}s LEFT · DIVERS NEEDED`;
+  } else if (isBlockade) {
     detail = `ROAD BLOCKED · ${Math.round(entity.progress * 100)}% CLEARED`;
   } else if (isPatient) {
     detail = entity.treated ? 'STABILISED' : `${entity.critical ? 'CRITICAL · ' : ''}NEEDS AMBULANCE · ${Math.ceil(entity.life)}s LEFT`;
@@ -1838,7 +2211,9 @@ function drawSelectedLabel(ctx, state, cam, view) {
       ? entity.status.toUpperCase()
       : entity.spec.medical
         ? `${entity.status.toUpperCase()} · ${entity.kits}/${entity.spec.kits} KITS${(entity.cargo?.length ?? 0) > 0 ? ` · ${entity.cargo.length} ABOARD` : ''}`
-        : `${entity.status.toUpperCase()} · ${Math.round((entity.water / entity.capacity) * 100)}% WATER${entity.supply ? ' · HYDRANT' : ''}`;
+        : !(entity.capacity > 0) || entity.capacity >= 50000
+          ? entity.status.toUpperCase()
+          : `${entity.status.toUpperCase()} · ${Math.round((entity.water / entity.capacity) * 100)}% WATER${entity.supply ? ' · HYDRANT' : ''}`;
   } else if (entity.state === 'burning') {
     detail = `BURNING · ${Math.round(entity.fire * 100)}% · ${Math.round((entity.integrity / entity.maxIntegrity) * 100)}% STANDING`;
   } else if (entity.state === 'rubble') {
@@ -1898,6 +2273,28 @@ function drawOffscreenAlarms(ctx, state, cam, view, now) {
     ctx.moveTo(10, 0);
     ctx.lineTo(-6, -7);
     ctx.lineTo(-6, 7);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+function drawOffscreenVictims(ctx, state, cam, view, now) {
+  const pad = 34;
+  const pulse = 0.6 + 0.4 * Math.sin(now * 7);
+  for (const v of state.victims ?? []) {
+    const p = worldToScreen(cam, v.x, v.y, view);
+    if (p.x > -20 && p.x < view.width + 20 && p.y > -20 && p.y < view.height + 20) continue;
+    const cx = clamp(p.x, pad, view.width - pad);
+    const cy = clamp(p.y, pad, view.height - pad);
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(Math.atan2(p.y - cy, p.x - cx));
+    ctx.fillStyle = `rgba(80,190,255,${0.55 + pulse * 0.4})`;
+    ctx.beginPath();
+    ctx.moveTo(9, 0);
+    ctx.lineTo(-5, -6);
+    ctx.lineTo(-5, 6);
     ctx.closePath();
     ctx.fill();
     ctx.restore();
@@ -1970,6 +2367,13 @@ function miniStatic(state, mw, mh) {
 
   g.fillStyle = '#2f353c';
   g.fillRect(0, 0, mw, mh);
+  g.fillStyle = '#245b82';
+  g.fillRect(0, SEA_Y * TILE * sy, mw, mh - SEA_Y * TILE * sy);
+  g.fillStyle = '#2b6a94';
+  for (let y = 0; y < SEA_Y; y += 2) {
+    const c = riverCentre(y + 1);
+    g.fillRect((c - RIVER_HALF_WIDTH) * TILE * sx, y * TILE * sy, RIVER_HALF_WIDTH * 2 * TILE * sx, 2 * TILE * sy + 1);
+  }
   g.fillStyle = '#33482a';
   for (const a of city.forestAreas ?? []) {
     g.fillRect(a.x0 * TILE * sx, a.y0 * TILE * sy, (a.x1 - a.x0 + 1) * TILE * sx, (a.y1 - a.y0 + 1) * TILE * sy);
@@ -1979,7 +2383,7 @@ function miniStatic(state, mw, mh) {
     g.fillRect(pk.x0 * TILE * sx, pk.y0 * TILE * sy, (pk.x1 - pk.x0 + 1) * TILE * sx, (pk.y1 - pk.y0 + 1) * TILE * sy);
   }
   g.fillStyle = '#5a626b';
-  for (const vx of V_ROADS) g.fillRect(vx * TILE * sx, 0, Math.max(1, 2 * TILE * sx), mh);
+  for (const vx of V_ROADS) g.fillRect(vx * TILE * sx, 0, Math.max(1, 2 * TILE * sx), SEA_Y * TILE * sy);
   for (const hy of H_ROADS) g.fillRect(0, hy * TILE * sy, mw, Math.max(1, 2 * TILE * sy));
   for (const b of state.buildings) {
     g.fillStyle = b.state === 'rubble' ? '#4d4a44' : b.type === 'pharmacy' ? '#7fcf9c' : b.type === 'hospital' ? '#ff8f8f' : '#7d848d';
@@ -2035,6 +2439,11 @@ function drawMinimap(ctx, state, cam, view) {
   for (const wreck of state.blockades ?? []) {
     ctx.fillStyle = `rgba(255,190,40,${0.7 + pulse * 0.3})`;
     ctx.fillRect(x + wreck.x * sx - 2.5, y + wreck.y * sy - 2.5, 5, 5);
+  }
+
+  for (const v of state.victims ?? []) {
+    ctx.fillStyle = `rgba(80,190,255,${0.7 + pulse * 0.3})`;
+    ctx.fillRect(x + v.x * sx - 2, y + v.y * sy - 2, 4, 4);
   }
 
   for (const patient of state.patients ?? []) {

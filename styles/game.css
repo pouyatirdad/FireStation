@@ -1243,3 +1243,330 @@ button { font-family: inherit; }
 .contract p { margin: 4px 0 8px; font-size: 12.5px; }
 .contract__meta { display: block; margin-bottom: 8px; font-size: 10.5px; color: var(--muted); }
 .contract .btn { margin-top: 2px; }
+
+/* =========================================================================
+   Layout v2: a unit dock on the left, incidents and the log on the right, the
+   selection card and the action bar between them. Everything scrolls with a
+   very thin bar and nothing can be pushed off a small screen.
+   ========================================================================= */
+
+:root { --dock-l: 252px; --dock-r: 300px; }
+
+/* Very thin scrollbars, everywhere. */
+* { scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.22) transparent; }
+*::-webkit-scrollbar { width: 4px; height: 4px; }
+*::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.22); border-radius: 4px; }
+*::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.4); }
+*::-webkit-scrollbar-track,
+*::-webkit-scrollbar-corner { background: transparent; }
+
+/* Full-screen menus scroll instead of clipping, and centre only when they fit. */
+.screen {
+  display: flex;
+  overflow-y: auto;
+  padding: 20px;
+}
+.screen > * { margin: auto; }
+.menu { max-width: 100%; }
+.menu__cta {
+  position: sticky;
+  bottom: -1px;
+  margin: 8px -4px -6px;
+  padding: 12px 4px 6px;
+  background: linear-gradient(to top, rgba(9, 13, 18, 0.98) 70%, rgba(9, 13, 18, 0));
+}
+.menu__cta .btn + .btn { margin-top: 8px; }
+.card--help { max-height: calc(100% - 20px); overflow-y: auto; }
+
+/* ---- docks ----------------------------------------------------------------- */
+
+.dock {
+  position: absolute;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: none;
+}
+.dock .panel {
+  position: relative;
+  top: auto;
+  right: auto;
+  left: auto;
+  pointer-events: auto;
+  width: auto;
+  max-height: none;
+}
+.dock--left { top: 12px; left: 12px; bottom: 12px; width: var(--dock-l); }
+.dock--right { top: 12px; right: 12px; width: var(--dock-r); bottom: calc(var(--mini-h, 210px) + 40px); }
+.dock[hidden] { display: none; }
+
+.panel__title { display: flex; align-items: center; gap: 8px; }
+.count {
+  display: inline-block;
+  min-width: 20px;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 700;
+  text-align: center;
+  letter-spacing: 0;
+}
+.count[data-on="1"] { background: rgba(255, 122, 31, 0.28); color: #ffc79a; }
+
+.panel--units {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 12px 8px 8px 12px;
+}
+.units__head { display: flex; align-items: center; justify-content: space-between; padding-right: 4px; }
+.units__head .panel__title { margin: 0 0 8px; }
+.icon-btn {
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+.icon-btn:hover { background: rgba(255, 255, 255, 0.12); }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 4px 8px 0; }
+.chip {
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 10.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.chip:hover { color: var(--text); }
+.chip.is-active { background: rgba(95, 208, 255, 0.16); border-color: rgba(95, 208, 255, 0.5); color: #c6ecff; }
+
+.units__list { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding-right: 4px; }
+.units__empty { margin: 8px 4px; font-size: 11.5px; color: var(--muted); }
+
+.ugroup { margin: 0 0 6px; }
+.ugroup__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.ugroup__head b { font-weight: 800; }
+.ugroup__head:hover { color: var(--text); }
+.ugroup__chev { width: 10px; }
+.ugroup__count { margin-left: auto; font-variant-numeric: tabular-nums; }
+.ugroup__list { display: flex; flex-direction: column; gap: 3px; }
+
+.unit {
+  display: grid;
+  grid-template-columns: 16px 9px minmax(0, 1fr);
+  align-items: center;
+  column-gap: 7px;
+  width: 100%;
+  padding: 6px 8px 5px;
+  border-radius: 9px;
+}
+.unit__key { font-size: 10px; text-align: center; opacity: 0.7; }
+.unit__text { display: flex; flex-direction: column; min-width: 0; }
+.unit__name { font-size: 12px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.unit__status { font-size: 10.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.unit__bar {
+  grid-column: 3;
+  display: block;
+  height: 3px;
+  margin-top: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+.unit__bar[hidden] { display: none; }
+.unit__bar i { display: block; height: 100%; width: 0; background: #5fb8ff; transition: width 0.3s ease; }
+.unit[data-cat="medical"] .unit__bar i { background: #7be0a8; }
+.unit__bar[data-low="1"] i { background: #ff8b86; }
+.unit__dot[data-tone="bad"] { background: #ff6b63; }
+
+.dock-tab {
+  position: absolute;
+  z-index: 6;
+  top: 12px;
+  left: 12px;
+  padding: 7px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.dock-tab[hidden] { display: none; }
+
+/* The incident list. */
+.panel--incidents {
+  flex: 1 1 55%;
+  min-height: 96px;
+  display: flex;
+  flex-direction: column;
+  padding: 12px 8px 8px 12px;
+}
+.panel--incidents .panel__title { margin: 0 0 8px; }
+.incident-list { list-style: none; margin: 0; padding: 0 4px 0 0; overflow-y: auto; flex: 1 1 auto; min-height: 0; }
+.incident-list li { margin: 0 0 4px; }
+.incident {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.incident:hover { background: rgba(255, 255, 255, 0.1); border-color: rgba(255, 255, 255, 0.14); }
+.incident__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.incident[data-tone="fire"] .incident__dot { background: var(--fire); box-shadow: 0 0 8px rgba(255, 122, 31, 0.8); }
+.incident[data-tone="bad"] .incident__dot { background: #ff6b63; }
+.incident[data-tone="water"] .incident__dot { background: #4cb8ff; box-shadow: 0 0 8px rgba(76, 184, 255, 0.8); }
+.incident[data-tone="medic"] .incident__dot { background: #e8f1ff; }
+.incident[data-tone="warn"] .incident__dot { background: var(--warn); }
+.incident__text { display: flex; flex-direction: column; min-width: 0; }
+.incident__text b { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.incident__text span { font-size: 10.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.incident__tag {
+  padding: 2px 7px;
+  border-radius: 9px;
+  background: rgba(255, 107, 99, 0.18);
+  color: #ffaaa5;
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.incident__tag[data-handled="1"] { background: rgba(123, 224, 168, 0.16); color: #9be8bc; }
+.incident__none, .incident__more { padding: 6px 4px; font-size: 11.5px; color: var(--muted); }
+
+.dock .panel--log {
+  flex: 0 1 34%;
+  min-height: 84px;
+  display: flex;
+  flex-direction: column;
+  padding: 12px 8px 8px 14px;
+}
+.dock .panel--log .panel__title { margin: 0 0 6px; }
+.dock .panel--log .log { overflow-y: auto; min-height: 0; padding-right: 4px; }
+
+/* The selection card sits beside the unit dock, scrolls, and never covers the toolbar. */
+.panel--selection {
+  top: 12px;
+  left: calc(var(--dock-l) + 24px);
+  width: 308px;
+  max-height: calc(100% - 90px);
+  overflow-y: auto;
+}
+.stage.units-collapsed .panel--selection { left: 12px; top: 52px; max-height: calc(100% - 130px); }
+
+/* The action bar, centred between the docks. */
+.roster {
+  left: calc(var(--dock-l) + 24px);
+  right: calc(var(--dock-r) + 24px);
+  bottom: 14px;
+  transform: none;
+  max-width: none;
+  justify-content: center;
+  padding: 0;
+  background: none;
+  border: 0;
+  box-shadow: none;
+  backdrop-filter: none;
+  pointer-events: none;
+}
+.stage.units-collapsed .roster { left: 12px; }
+.roster__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel);
+  backdrop-filter: blur(16px);
+  box-shadow: 0 20px 55px rgba(0, 0, 0, 0.45);
+  pointer-events: auto;
+}
+.hints { left: calc(var(--dock-l) + 24px); bottom: 70px; }
+.stage.units-collapsed .hints { left: 12px; }
+
+/* ---- responsive --------------------------------------------------------------- */
+
+@media (max-width: 1280px) {
+  :root { --dock-l: 224px; --dock-r: 268px; }
+  .panel--selection { width: 284px; }
+}
+@media (max-width: 1050px) {
+  :root { --dock-l: 200px; --dock-r: 232px; }
+  .panel--selection { width: 262px; }
+  .hints { display: none; }
+}
+@media (max-width: 860px) {
+  :root { --dock-r: 200px; }
+  .dock .panel--log { display: none; }
+  .panel--incidents { flex: 1 1 auto; }
+  .panel--selection {
+    top: auto;
+    bottom: 64px;
+    left: calc(var(--dock-l) + 20px);
+    width: min(300px, calc(100% - var(--dock-l) - var(--dock-r) - 40px));
+    max-height: 46%;
+  }
+}
+@media (max-width: 700px) {
+  .dock--right { display: none; }
+  .roster { right: 12px; }
+  .panel--selection { right: 12px; width: auto; }
+  .stage.units-collapsed .panel--selection { left: 12px; top: auto; bottom: 64px; }
+}
+/* Short screens (a laptop with browser bars): tighter chrome, smaller menu. */
+@media (max-height: 760px) {
+  .menu { padding: 22px 26px 18px; }
+  .menu__title { font-size: 40px; margin-bottom: 8px; }
+  .menu__lead { margin-bottom: 14px; font-size: 13.5px; }
+  .menu__grid { grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .menu__grid > div { padding: 9px 11px; }
+  .menu__grid span { font-size: 11.5px; }
+  .hints { display: none; }
+  .card { padding: 18px 20px; }
+  .station__balance { font-size: 28px; margin-bottom: 10px; }
+}
+@media (max-height: 600px) {
+  .menu__grid { grid-template-columns: repeat(4, 1fr); }
+  .menu__grid span { display: none; }
+  .menu__lead { display: none; }
+  .panel--incidents { min-height: 70px; }
+}

@@ -3,7 +3,7 @@
 //
 //   income   incident rewards (with a speed bonus), knockdown fees, treatment
 //            fees, the hourly city subsidy, and the odd donation
-//   costs    crew wages and vehicle upkeep every game hour, medical kits, and the
+//   costs    vehicle upkeep every game hour, medical kits, and the
 //            penalties for losing a building or a life
 //
 // Credits may go negative (the city never closes the station) but nothing can be
@@ -21,7 +21,7 @@ export function createLedger() {
     spent: 0,
     hourAcc: 0,
     hours: 0,
-    lastBudget: null, // { subsidy, wages, upkeep, net }
+    lastBudget: null, // { subsidy, upkeep, premium, interest, net }
     nextDonationAt: 0,
   };
 }
@@ -66,8 +66,6 @@ export function speedBonus(state, building) {
   return max * clamp(1 - (elapsed - fast) / (slow - fast), 0, 1);
 }
 
-export const trainingLevels = (state) => Object.values(state.training ?? {}).reduce((a, b) => a + b, 0);
-
 /** Share of a building loss you still pay: 40% with insurance, all of it without. */
 export const lossShare = (state) => (state.insured ? CONFIG.economy.insurance.lossShare : 1);
 
@@ -78,13 +76,10 @@ export function hourlyBudget(state) {
   const subsidy = Math.round(
     budget.subsidy * (budget.subsidyFloor + (1 - budget.subsidyFloor) * rating),
   );
-  // Trained crews cost more to keep.
-  const wageRise = 1 + CONFIG.economy.training.wageRise * trainingLevels(state);
-  const wages = Math.round(state.crew.length * budget.wage * wageRise);
   const upkeep = state.engines.reduce((sum, e) => sum + (e.spec?.upkeep ?? 0), 0);
   const premium = state.insured ? CONFIG.economy.insurance.premium : 0;
   const interest = Math.round((state.loan ?? 0) * CONFIG.economy.loan.rate);
-  return { subsidy, wages, upkeep, premium, interest, net: subsidy - wages - upkeep - premium - interest };
+  return { subsidy, upkeep, premium, interest, net: subsidy - upkeep - premium - interest };
 }
 
 // ------------------------------------------------------------- finance ---
@@ -168,7 +163,6 @@ export function updateEconomy(state, dt) {
     ledger.hours += 1;
     const b = hourlyBudget(state);
     earn(state, b.subsidy, 'subsidy');
-    spend(state, b.wages, 'wages');
     spend(state, b.upkeep, 'upkeep');
     spend(state, b.premium, 'insurance');
     spend(state, b.interest, 'interest');
@@ -177,7 +171,7 @@ export function updateEconomy(state, dt) {
     const extra = (b.premium ? `, insurance ${money(b.premium)}` : '') + (b.interest ? `, interest ${money(b.interest)}` : '');
     addEvent(
       state,
-      `Hourly budget ${sign}${money(Math.abs(b.net))} — subsidy ${money(b.subsidy)}, wages ${money(b.wages)}, upkeep ${money(b.upkeep)}${extra}`,
+      `Hourly budget ${sign}${money(Math.abs(b.net))} — subsidy ${money(b.subsidy)}, upkeep ${money(b.upkeep)}${extra}`,
       b.net >= 0 ? 'info' : 'warn',
     );
   }

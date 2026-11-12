@@ -21,7 +21,7 @@ export const CONFIG = {
 
   // The money model. Income is incident rewards, a knockdown fee, treatment fees
   // and an hourly city subsidy that shrinks as the rating falls. Costs are crew
-  // wages, vehicle upkeep, medical kits and the penalties for losing buildings
+  // vehicle upkeep, medical kits and the penalties for losing buildings
   // or people. Fees and penalties are scaled by the building's `value` factor.
   economy: {
     start: 3000,
@@ -39,7 +39,6 @@ export const CONFIG = {
       hourEvery: 120, // real seconds per game hour (60 / clockRate)
       subsidy: 260, // per game hour at full rating
       subsidyFloor: 0.4, // share of the subsidy paid at rating 0
-      wage: 14, // per firefighter or paramedic, per game hour
     },
     kitPrice: 12, // per medical kit bought at a pharmacy
     donation: { every: [420, 700], min: 300, max: 900, minRating: 60 },
@@ -52,21 +51,10 @@ export const CONFIG = {
       fire: 0.12, // extra spray power per level
       medic: 0.15, // faster treatment per level
       rescue: 0.12, // faster rescue per level
-      wageRise: 0.08, // wages rise per level taken
     },
     contracts: { every: [300, 480], maxOffers: 3, maxActive: 2, failPenalty: 0.25 },
     stationPrice: 9000, // buying Station 2
-  },
-
-  // Upgrades bought per vehicle in the apparatus panel, three levels each.
-  upgrades: {
-    tank: { label: 'Bigger tank', for: 'fire', cost: [450, 800, 1250], tank: 0.25 },
-    pump: { label: 'High-pressure pump', for: 'fire', cost: [500, 900, 1400], power: 0.15 },
-    hose: { label: 'Longer hose', for: 'fire', cost: [350, 650, 1000], hose: 2, turret: 1 },
-    speed: { label: 'Tuned engine', for: 'all', cost: [400, 700, 1100], speed: 0.1 },
-    kits: { label: 'Medical stock', for: 'medical', cost: [300, 550, 850], kits: 3 },
-    stretcher: { label: 'Extra stretcher', for: 'medical', cost: [700, 1300, 2000], carry: 1 },
-    upkeep: 0.08, // upkeep rises by this share per level bought
+    dockPrice: 6500, // buying the Harbour Dock (berths for boats)
   },
 
   command: { aura: 0.2, range: 26 }, // tiles; extra spray power for crews near a parked command car
@@ -103,6 +91,52 @@ export const CONFIG = {
       refillRate: 0, rescueTime: 3, refund: 0.6,
       medical: true, kits: 8, treatTime: 4, medRange: 22, carry: 2,
     },
+    // A small, fast medic car: one paramedic, four kits, one stretcher. Gets to a
+    // call sooner than an ambulance but cannot carry much.
+    medcar: {
+      label: 'Paramedic car', cost: 750, crew: 1, speed: 12.5, capacity: 0, upkeep: 12,
+      hoseRange: 0, turretRange: 0, turretPower: 0, turretWater: 0,
+      refillRate: 0, rescueTime: 3, refund: 0.6,
+      medical: true, kits: 4, treatTime: 3.2, medRange: 18, carry: 1,
+    },
+    // A bus fitted out for mass casualties: eight stretchers, sixteen kits, four
+    // paramedics, and slow.
+    ambubus: {
+      label: 'Ambulance bus', cost: 3400, crew: 4, speed: 6.8, capacity: 0, upkeep: 48,
+      hoseRange: 0, turretRange: 0, turretPower: 0, turretWater: 0,
+      refillRate: 0, rescueTime: 3, refund: 0.6,
+      medical: true, kits: 16, treatTime: 3.6, medRange: 24, carry: 8,
+    },
+    // Divers by road: park on the bank and they swim out to people in the water.
+    divetruck: {
+      label: 'Dive team', cost: 2300, crew: 2, speed: 8, capacity: 0, upkeep: 30,
+      hoseRange: 0, turretRange: 0, turretPower: 0, turretWater: 0,
+      refillRate: 0, rescueTime: 5, refund: 0.6,
+      diver: true, diveRange: 24,
+    },
+    // Divers by water: sails to the casualty and puts them over the side.
+    rescueboat: {
+      label: 'Rescue boat', cost: 2800, crew: 2, speed: 11, capacity: 0, upkeep: 34,
+      hoseRange: 0, turretRange: 0, turretPower: 0, turretWater: 0,
+      refillRate: 0, rescueTime: 4.2, refund: 0.6,
+      diver: true, diveRange: 20, boat: true,
+    },
+    // A fireboat pumps river or sea water without limit, from up to 18 tiles
+    // out, but can only work buildings and forests close to the water.
+    fireboat: {
+      label: 'Fireboat', cost: 6200, crew: 0, speed: 9, capacity: 100000, upkeep: 70,
+      hoseRange: 0, turretRange: 18, turretPower: 0.06, turretWater: 80,
+      refillRate: 100000, rescueTime: 3, refund: 0.55,
+      boat: true,
+    },
+    // A scooping air tanker: very fast, circles the target dropping water, and
+    // skims the sea to refill. Strong, but it needs a fire to circle.
+    airtanker: {
+      label: 'Air tanker', cost: 11000, crew: 0, speed: 30, capacity: 5000, upkeep: 140,
+      hoseRange: 0, turretRange: 8, turretPower: 0.07, turretWater: 110,
+      refillRate: 1200, rescueTime: 3, refund: 0.55,
+      flying: true, plane: true,
+    },
     // The chief's car: no hose, no water. Parked, it boosts every crew within
     // range (spray power +20%), so it earns its place on a big fire.
     command: {
@@ -121,6 +155,13 @@ export const CONFIG = {
       refillRate: 300, rescueTime: 3, refund: 0.55,
       flying: true,
     },
+  },
+
+  // People in the river or the sea: a clock, and divers to bring them out.
+  water: {
+    survive: [80, 130], // seconds a person lasts in the water
+    reward: 420, // per person brought out
+    maxVictims: 6,
   },
 
   // Roads blocked by wrecks and debris, and the traffic that queues behind them.
@@ -200,6 +241,7 @@ export const CONFIG = {
       crash: 250, chain: 700, pileup: 1800,
     },
     crashCall: 0.16, // share of small calls that are a traffic accident
+    drownCall: 0.1, // share of small calls that are someone in the water
   },
 
   clockStart: 7 * 60, // 07:00

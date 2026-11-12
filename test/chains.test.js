@@ -236,10 +236,16 @@ test('a hot warehouse fire eventually triggers the explosion by itself', () => {
 
 // ------------------------------------------------------------- hospitals ---
 
-test('every commercial centre has a hospital', () => {
+test('the hospitals stand in the bases, not scattered round the city', () => {
   const state = shift();
-  assert.ok(state.city.hospitals.length >= 6, `${state.city.hospitals.length} hospitals`);
-  assert.ok(state.city.hospitals.every((b) => b.type === 'hospital'));
+  const hospitals = state.city.hospitals;
+  assert.equal(hospitals.length, 2);
+  assert.equal(state.buildings.filter((b) => b.type === 'hospital').length, 2, 'a hospital outside a base');
+  hospitals.forEach((h, i) => {
+    const st = state.city.stations[i].building;
+    assert.ok(Math.hypot(h.x - st.x, h.y - st.y) < 25, `hospital ${i} is not at its station`);
+    assert.equal(h.base, i);
+  });
 });
 
 test('a critical patient is stabilised, carried to a hospital, and paid for', () => {

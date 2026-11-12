@@ -2,7 +2,8 @@
 
 A top-down emergency-services management game for Windows, in the spirit of **Emergency 4**: a
 520×384 city (ten times the area of the first version) with forests, pharmacies and a waterfront,
-seven kinds of apparatus you buy, upgrade and sell — engines, ladders, tankers, rescue units and
+a fleet of thirteen kinds of apparatus you buy and sell — engines, ladders, tankers, rescue units,
+paramedic cars, ambulances and ambulance buses, divers, fireboats, a helicopter, an air tanker and
 **ambulances** — small calls and major incidents, injured civilians, forest fires, a real budget,
 synthesised sound, hospitals, blocked roads with live traffic, wind that drives the fire, chained incidents and a day/night cycle. Vanilla JavaScript, no dependencies; one self-contained
 `index.html`.
@@ -44,10 +45,10 @@ the night.
 | **Respond** | Select a vehicle (click it or press <kbd>1</kbd>–<kbd>6</kbd>) and right-click a fire. It takes the fastest road route and parks on the nearest street. With nothing selected, <kbd>D</kbd> sends the nearest idle vehicle. |
 | **Deploy** | The crew ride along. On scene they dismount, walk to the fire and attack it on their own. <kbd>E</kbd> deploys them by hand, <kbd>R</kbd> packs them up. |
 | **Rescue** | A fire leaves people trapped — a red badge on the building shows how many. A crew at the building brings one person out at a time. If it collapses first, they are lost. Small rescue jobs exist too. |
-| **Headquarters** | <kbd>B</kbd> opens a four-tab panel: **Fleet** (buy and sell, pick which station gets the vehicle, open Station 2), **Upgrades**, **Finance** and **Contracts**. |
+| **Headquarters** | <kbd>B</kbd> opens a three-tab panel: **Fleet** (buy and sell, pick which station gets the vehicle, open Station 2 and the Harbour Dock), **Finance** and **Contracts**. |
 | **Injured** | People hurt in a fire lie on the street with a countdown ring and a red cross. Right-click them or press <kbd>D</kbd> with an ambulance selected. Medical emergencies also come in as calls of their own. |
 | **Pharmacy** | An ambulance carries 8 medical kits (one per patient). Restock slowly and free on the station apron, or fast beside any pharmacy for $12 a kit. <kbd>P</kbd> sends the selected ambulance to the nearest one. |
-| **Hospital** | Seven hospitals, one in every commercial centre. A **critical** patient (flagged on their card) is stabilised on the spot, put on a stretcher (two per ambulance) and driven to the nearest hospital automatically, for $260 each. <kbd>K</kbd> sends the ambulance by hand. |
+| **Hospital** | Each base has its own hospital beside the apron (Station 2's opens with the station). A **critical** patient (flagged on their card) is stabilised on the spot, put on a stretcher (two per ambulance, eight on a bus) and driven to the base hospital automatically, for $260 each. <kbd>K</kbd> sends the ambulance by hand. **When an ambulance has finished its work it drives back to the base hospital by itself.** |
 | **Roads** | Wrecks and debris **block the street**: those tiles are closed to the fleet until a deployed crew clears them (rescue units twice as fast). Engines on the move re-plan round a new blockage. Traffic fills every avenue, queues behind a wreck, and in rush hour (07–09 and 16:30–18:30) slows your response by 20%. |
 | **Wind** | The top bar shows the wind. Fire spreads up to ~2.5× as often downwind and barely crosses upwind; a forest fire creeps downwind and throws embers further that way; smoke and sparks lean with it. It shifts every few minutes. |
 | **Find it** | <kbd>Tab</kbd> jumps to the next incident (fire, forest fire, trapped people or an injured person), <kbd>Home</kbd> back to the station. Off-screen incidents get an arrow on the edge of the screen and a dot on the minimap. |
@@ -56,7 +57,7 @@ the night.
 | **Water** | Tanks run from 600 L (rescue) to 6,000 L (tanker). The station apron refills; anywhere else you need the hydrant line. |
 | **Calls** | Small jobs start arriving after 20 seconds, roughly every 38–60, about one in five a medical emergency. **Major incidents start after four minutes** and pay far more. |
 | **Night** | The shift starts at 07:00. Dusk comes at 18:00 and it is dark from 21:00 to 05:00. |
-| **Save** | The shift autosaves every 30 seconds. <kbd>Ctrl</kbd>+<kbd>S</kbd> saves by hand; the apparatus panel has Save, Load and New shift. A saved shift appears as **Continue** on the start screen. |
+| **Save** | The shift autosaves every 30 seconds. <kbd>Ctrl</kbd>+<kbd>S</kbd> saves by hand; Headquarters has Save, Load and New shift. A saved shift appears as **Continue** on the start screen. |
 
 ### Apparatus and credits
 
@@ -69,11 +70,17 @@ the night.
 | **Ambulance** | 2 paramedics | 8 kits | walks 22 tiles | — | $1,400 | $22 |
 | **Command** | 2 | — | — | — | $2,600 | $40 |
 | **Helicopter** | none | 2,600 L | — | 11 (from the air) | $8,000 | $95 |
+| **Air tanker** | none | 5,000 L | — | 8 (circling) | $11,000 | $140 |
+| **Fireboat** | none | unlimited | — | 18 (from the water) | $6,200 | $70 |
+| **Rescue boat** | 2 divers | — | — | — | $2,800 | $34 |
+| **Dive team** | 2 divers | — | — | — | $2,300 | $30 |
+| **Paramedic car** | 1 paramedic | 4 kits | walks 18 tiles | — | $750 | $12 |
+| **Ambulance bus** | 4 paramedics | 16 kits, 8 stretchers | walks 24 tiles | — | $3,400 | $48 |
 
 - **Command car:** no hose, no water. Parked, it makes every crew within 26 tiles spray 20% harder.
 - **Helicopter:** flies in a straight line over roads, wrecks and traffic and hovers over the target, dropping water on buildings and forest fires alike. It refills on any station apron or by dipping in the harbour (the south edge of the map), so it is fast but never close to the water. It is the first choice when you right-click a forest fire.
 - **Station 2:** a second station in the Civic Quarter, for sale at $9,000. It adds eight bays and a second helipad, its apron refills and restocks like Station 1's, and calls begin to come from its district too.
-- **Upgrades:** each vehicle takes up to three levels of bigger tank, high-pressure pump, longer hose and tuned engine (speed applies to every vehicle), plus medical stock and an extra stretcher for ambulances. Each level adds 8% to upkeep and is half refunded if you sell.
+
 
 Selling returns 60% of the price. Every incident carries its own reward:
 
@@ -92,10 +99,19 @@ The **Finance** tab holds the levers:
 
 - **Loans** in $5,000 steps up to $30,000, at 3% of what you owe per game hour.
 - **Insurance** for $70 an hour: a lost building costs 40% instead of all of it.
-- **Training** for fire attack, paramedics and rescue, three levels each (+12% spray power, 15% faster treatment, 12% faster rescue per level), at the price of 8% higher wages per level.
+- **Training** for fire attack, paramedics and rescue, three levels each (+12% spray power, 15% faster treatment, 12% faster rescue per level).
 - A breakdown of everything you earned and spent this shift, and a **day report** in the log every midnight.
 
 **Contracts:** every five to eight minutes a sponsor offers a side job (knock down N fires, treat N people, reopen N roads, deliver critical patients, or go a stretch with no casualties). Accept up to two; finish in time and they pay, miss the deadline and you forfeit a quarter of the fee.
+
+### Water: the river, the harbour and the dock
+
+The south of the map is the **harbour** and a **river** runs down through the east, crossed by every street on a bridge. People go into the water (a car off a bridge, someone off the quay) and have about 80–130 seconds.
+
+- **Dive team** drives to the bank and its divers swim out; the **rescue boat** sails to the casualty and puts them over the side. Right-click the person (or press <kbd>D</kbd> with a diver vehicle selected). Someone brought out is a critical patient: the ambulances and the hospital take over.
+- **Fireboat** pumps river or harbour water without limit from 18 tiles out, but only works fires near the water. **Air tanker** circles a fire dropping water and skims the sea to refill. Both are strong, and neither is any use inland.
+- Boats berth at the **Harbour Dock** ($6,500, eight berths on the quay), which has to be bought first.
+- A fire that nobody is fighting spreads more and further the longer it burns dry, and is flagged **out of control** after a minute. Get water on it early.
 
 ### Chained incidents
 
@@ -108,14 +124,13 @@ One call can become several if you are slow:
 
 ### The money
 
-There is a real budget now, shown in the top bar and in the apparatus panel.
+There is a real budget, shown in the top bar and in Headquarters.
 
 - **Income:** incident rewards (with up to **+50% for a fast knockdown**), a knockdown fee of $260
   scaled by what the building is worth (a hotel pays 1.8× a shop, a house 0.8×), $120 per rescue, $160
   per treated patient, the odd community donation, and an **hourly city subsidy** of $260 that shrinks to
   40% as the city rating falls.
-- **Costs:** every game hour (two real minutes) the city deducts **$14 wages per crew member** and the
-  **upkeep** of every vehicle. A lost building costs $350 (scaled the same way), a life $700, and kits
+- **Costs:** every game hour (two real minutes) the city deducts the **upkeep** of every vehicle (there are no crew wages). A lost building costs $350 (scaled the same way), a life $700, and kits
   bought at a pharmacy $12 each.
 - The balance can go negative; you just cannot buy anything until it recovers. A full eight-bay fleet
   costs more than the subsidy pays, so it has to earn its keep.
@@ -165,7 +180,7 @@ lists the pointer controls. <kbd>F1</kbd> opens the full list.
 | <kbd>M</kbd> | Sound on or off |
 | <kbd>E</kbd> / <kbd>R</kbd> | Deploy / recall the crew |
 | <kbd>G</kbd> | Connect or detach the hydrant supply line |
-| <kbd>B</kbd> | Headquarters (fleet, upgrades, finance, contracts) |
+| <kbd>B</kbd> | Headquarters (fleet, finance, contracts) |
 | <kbd>H</kbd> | Send the selected vehicle back to the station |
 | <kbd>C</kbd> | Center on the selection |
 | <kbd>Ctrl</kbd>+<kbd>S</kbd> | Save the shift |
@@ -217,7 +232,7 @@ simulation knows about the DOM, and nothing in the renderer changes the simulati
   are drawn, level-of-detail drops detail when zoomed out, district labels scale with the zoom and a
   cached minimap shows the whole map, the station, fires and patients. A day/night tint follows the clock.
 - **UI** (`src/ui/hud.js`) is plain DOM over the canvas: the top bar, selection card, dispatch log,
-  roster, apparatus panel and overlays.
+  unit dock, incident list, Headquarters and overlays.
 
 ### Tuning
 
@@ -235,7 +250,9 @@ needs editing.
 ?buy=ladder     buy one vehicle of that type
 ?fleet=ladder,tanker,rescue   buy several
 ?credits=20000  override the starting credits
-?station        open the apparatus panel
+?station        open Headquarters
+?water          start, open the Harbour Dock and buy boats, divers, an air tanker and the medic cars
+?drown          start, and put people in the river or the harbour
 ?injured        start, and put two injured people near the station
 ?crash          start, and cause a traffic accident
 ?heli           start, and buy a helicopter and a command car
@@ -262,7 +279,7 @@ src/data/city.js        seeded Harbor City with its forest
 src/systems/            navigation, fire, civilians, fleet, incidents, wildfires,
                         effects, events, game rules and save state
 src/render/render.js    the 2.5D canvas renderer
-src/ui/hud.js           DOM HUD, apparatus panel and screens
+src/ui/hud.js           DOM HUD, unit dock, incident list and screens
 test/                   city, navigation, fire, rescue, fleet, incidents, medical, economy,
                         world (map size, sound mapping, daylight) and save tests
 tools/build.mjs         bundles src/ and the CSS into index.html
@@ -277,4 +294,4 @@ attachment; it needs no other file and no network.
 
 ## Not built yet
 
-A second station, police units, vehicle upgrades, rain and an isometric art pass. The simulation was written so those can be added without rewriting the core.
+Police units, rain and an isometric art pass. The simulation was written so those can be added without rewriting the core.

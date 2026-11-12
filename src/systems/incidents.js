@@ -11,6 +11,7 @@ import { buildingRect, ignite } from './fire.js';
 import { startWildfire } from './wildfire.js';
 import { spawnPatient } from './medical.js';
 import { pileUp, trafficAccident } from './chains.js';
+import { drowningCall } from './water.js';
 
 const SMALL = () => ['structure', 'structure', 'structure', 'rescue', 'block'];
 const BIG = ['industrial', 'bigBlock', 'forest', 'pileup'];
@@ -36,6 +37,7 @@ function candidates(state, types = null) {
   const pool = state.buildings.filter((b) => (
     b.state === 'ok'
     && b.type !== 'station'
+    && b.type !== 'hospital'
     && (!types || types.includes(b.type))
   ));
   const near = pool.filter((b) => inCoverage(state, b.x + b.w / 2, b.y + b.h / 2));
@@ -150,6 +152,10 @@ function medicalCall(state) {
 const roadAllowed = (state) => (x, y) => inCoverage(state, x, y);
 
 function spawnSmall(state) {
+  if (state.rng.chance(CONFIG.incidents.drownCall)) {
+    const made = drowningCall(state, (x, y) => inCoverage(state, x, y));
+    if (made) return made;
+  }
   if (state.rng.chance(CONFIG.incidents.crashCall)) {
     return trafficAccident(state, roadAllowed(state));
   }

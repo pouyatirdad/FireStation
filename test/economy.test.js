@@ -13,13 +13,13 @@ function shift() {
   return state;
 }
 
-test('the hourly budget is subsidy minus wages and upkeep, and the subsidy follows the rating', () => {
+test('the hourly budget is subsidy minus upkeep, and the subsidy follows the rating', () => {
   const state = shift();
   const full = hourlyBudget(state);
   assert.equal(full.subsidy, CONFIG.economy.budget.subsidy);
-  assert.equal(full.wages, 3 * CONFIG.economy.budget.wage);
+  assert.equal(full.wages, undefined, 'there are no wages any more');
   assert.equal(full.upkeep, CONFIG.vehicles.engine.upkeep);
-  assert.equal(full.net, full.subsidy - full.wages - full.upkeep);
+  assert.equal(full.net, full.subsidy - full.upkeep);
 
   state.rating = 0;
   const broke = hourlyBudget(state);
@@ -33,7 +33,6 @@ test('a bigger fleet costs more per hour', () => {
   commandBuyVehicle(state, 'ladder');
   commandBuyVehicle(state, 'ambulance');
   const after = hourlyBudget(state);
-  assert.equal(after.wages, before.wages + (3 + 2) * CONFIG.economy.budget.wage);
   assert.equal(after.upkeep, before.upkeep + CONFIG.vehicles.ladder.upkeep + CONFIG.vehicles.ambulance.upkeep);
   assert.ok(after.net < before.net);
 });

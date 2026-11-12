@@ -25,6 +25,8 @@ export function activeFires(state) {
 export function ignite(state, building, cause = 'alarm') {
   if (!building || building.state !== 'ok') return false;
   building.state = 'burning';
+  building.dryTime = 0;
+  building.runaway = false;
   building.fire = Math.max(building.fire, 0.1);
   building.spreadTimer = CONFIG.fire.spreadEvery;
   building.ignitedAt = state.time;
@@ -87,12 +89,26 @@ function destroy(state, building) {
   state.onDestroyed?.(building);
 }
 
+/**
+ * A fire nobody is fighting gets worse: the longer it burns dry, the more
+ * often it lights its neighbours and the further it throws. Water on it cools
+ * that down again at twice the pace.
+ */
+export const unattendedFactor = (building) => 1 + Math.min(3, (building.dryTime ?? 0) / 35);
+
 function trySpread(state, building) {
-  if (building.fire < 0.6) return;
+  const dry = building.dryTime ?? 0;
+  // A fire that has been left alone spreads even when it is not yet roaring.
+  if (building.fire < (dry > 40 ? 0.4 : 0.6)) return;
+  if (dry > 60 && !building.runaway) {
+    building.runaway = true;
+    addEvent(state, `${building.name} is out of control — no one is fighting it and it is spreading`, 'bad');
+  }
   const rect = buildingRect(building);
   const wind = state.wind;
-  // Downwind the fire reaches further; upwind it barely crosses the gap.
-  const reach = CONFIG.fire.spreadRange * TILE * (1 + 0.9 * (wind?.speed ?? 0));
+  // Downwind the fire reaches further; upwind it barely crosses the gap. An
+  // unattended fire reaches further still.
+  const reach = CONFIG.fire.spreadRange * TILE * (1 + 0.9 * (wind?.speed ?? 0)) * (1 + Math.min(0.6, dry / 150));
   const cx = rect.x + rect.w / 2;
   const cy = rect.y + rect.h / 2;
   for (const other of state.buildings) {
@@ -104,7 +120,7 @@ function trySpread(state, building) {
     const factor = downwindFactor(state, cx, cy, ox, oy);
     // The extended reach is only available downwind.
     if (!rectsTouch(rect, o, CONFIG.fire.spreadRange * TILE) && factor <= 1) continue;
-    if (state.rng.float() < CONFIG.fire.spreadChance * building.fire * factor) {
+    if (state.rng.float() < CONFIG.fire.spreadChance * building.fire * factor * unattendedFactor(building)) {
       ignite(state, other, 'spread');
     }
   }
@@ -122,6 +138,9 @@ export function updateFire(state, dt) {
     if (b.state !== 'burning') continue;
 
     const water = wet.get(b.id) ?? 0;
+    // Time spent burning with no water on it.
+    b.dryTime = water > 0 ? Math.max(0, (b.dryTime ?? 0) - dt * 2) : (b.dryTime ?? 0) + dt;
+    if (b.dryTime < 20) b.runaway = false;
     b.fire = Math.min(
       1,
       b.fire + CONFIG.fire.growth * dt * (0.75 + 0.5 * (1 - b.fire)) * b.risk,

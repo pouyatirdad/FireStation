@@ -4,7 +4,7 @@
 import { CONFIG } from '../core/config.js';
 import { formatClock } from '../core/math.js';
 import {
-  availableUpgrades, hydrantInReach, ownsStation, totalBays, upgradeCost, upgradeLevel,
+  freeBay, hydrantInReach, ownsStation, totalBays, totalBerths,
 } from '../systems/units.js';
 import { contractProgress } from '../systems/contracts.js';
 import { TRAINING_LABEL, hourlyBudget } from '../systems/economy.js';
@@ -35,6 +35,7 @@ const STATUS_TONE = {
   restocking: 'good',
   treating: 'good',
   clearing: 'good',
+  swimming: 'good',
   transporting: 'warn',
   blocked: 'bad',
   'no kits': 'bad',
@@ -68,6 +69,7 @@ const SHORT_STATUS = {
   restocking: 'Restocking',
   treating: 'Treating',
   clearing: 'Clearing',
+  swimming: 'Swimming',
   transporting: 'To hospital',
   blocked: 'Blocked',
   'no kits': 'No kits',
@@ -93,10 +95,18 @@ export function mount(state, callbacks) {
   buildSpeeds(state);
   buildRoster(state);
 
+  currentState = state;
   document.addEventListener('click', (ev) => {
+    const incident = ev.target.closest('[data-incident]');
+    if (incident) {
+      ev.preventDefault();
+      handlers.onIncident?.(incident.dataset.incident, incident.dataset.id);
+      return;
+    }
     const button = ev.target.closest('[data-action]');
     if (button) {
       ev.preventDefault();
+      if (localAction(button)) return;
       handlers.onAction?.(button.dataset.action, button.dataset);
       return;
     }
@@ -106,6 +116,14 @@ export function mount(state, callbacks) {
       handlers.onUnit?.(unit.dataset.unit);
     }
   });
+
+  document.addEventListener('dblclick', (ev) => {
+    const unit = ev.target.closest('[data-unit]');
+    if (unit) handlers.onUnitCenter?.(unit.dataset.unit);
+  });
+
+  // Small screens start with the unit list tucked away.
+  if (window.matchMedia?.('(max-width: 760px)').matches) setUnitsCollapsed(true);
 
   $('btn-pause').addEventListener('click', () => handlers.onPause?.());
   $('btn-help').addEventListener('click', () => handlers.onHelp?.());
@@ -133,23 +151,100 @@ function buildSpeeds(state) {
   }
 }
 
-function buildRoster(state) {
+let currentState = null;
+let unitFilter = 'all';
+let unitsCollapsed = false;
+const collapsedGroups = new Set();
+let rosterKey = '';
+
+const GROUPS = [
+  ['fire', 'Fire'],
+  ['medical', 'Medical'],
+  ['air', 'Air'],
+  ['water', 'Water rescue'],
+];
+
+/** Which group of the unit list a vehicle belongs to. */
+export function categoryOf(engine) {
+  const spec = engine.spec;
+  if (spec.medical) return 'medical';
+  if (spec.flying) return 'air';
+  if (spec.boat || spec.diver) return 'water';
+  return 'fire';
+}
+
+function localAction(button) {
+  const action = button.dataset.action;
+  if (action === 'units-filter') {
+    unitFilter = button.dataset.filter ?? 'all';
+    rosterKey = '';
+    if (currentState) renderRoster(currentState);
+    return true;
+  }
+  if (action === 'units-collapse') {
+    setUnitsCollapsed(!unitsCollapsed);
+    return true;
+  }
+  if (action === 'group-toggle') {
+    const group = button.dataset.group;
+    if (collapsedGroups.has(group)) collapsedGroups.delete(group);
+    else collapsedGroups.add(group);
+    rosterKey = '';
+    if (currentState) renderRoster(currentState);
+    return true;
+  }
+  return false;
+}
+
+function setUnitsCollapsed(collapsed) {
+  unitsCollapsed = collapsed;
+  $('dock-left').hidden = collapsed;
+  $('units-open').hidden = !collapsed;
+  $('stage').classList.toggle('units-collapsed', collapsed);
+}
+
+const unitKey = (index) => (index < 9 ? String(index + 1) : '');
+
+function renderRoster(state) {
   const box = $('roster-units');
-  box.innerHTML = '';
-  state.engines.forEach((engine, index) => {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'unit';
-    button.dataset.unit = engine.id;
-    button.innerHTML =
-      `<span class="unit__key">${index + 1}</span>` +
-      '<span class="unit__dot"></span>' +
-      '<span class="unit__text">' +
-      `<span class="unit__name">${esc(engine.name)}</span>` +
-      `<span class="unit__status">—</span>` +
-      '</span>';
-    box.append(button);
-  });
+  const sig = [
+    unitFilter, unitsCollapsed, [...collapsedGroups].join(','),
+    state.engines.map((e) => e.id + e.name).join(','),
+  ].join('|');
+  if (sig === rosterKey) return;
+  rosterKey = sig;
+
+  $('units-count').textContent = String(state.engines.length);
+  for (const chip of $('units-filters').children) {
+    chip.classList.toggle('is-active', chip.dataset.filter === unitFilter);
+  }
+
+  let html = '';
+  for (const [group, label] of GROUPS) {
+    if (unitFilter !== 'all' && unitFilter !== group) continue;
+    const members = state.engines
+      .map((engine, index) => ({ engine, index }))
+      .filter(({ engine }) => categoryOf(engine) === group);
+    if (members.length === 0) continue;
+    const folded = collapsedGroups.has(group);
+    html += '<section class="ugroup" data-group="' + group + '">' +
+      '<button type="button" class="ugroup__head" data-action="group-toggle" data-group="' + group + '" aria-expanded="' + (!folded) + '">' +
+      '<span class="ugroup__chev">' + (folded ? '▸' : '▾') + '</span><b>' + label + '</b><span class="ugroup__count">' + members.length + '</span></button>';
+    if (!folded) {
+      html += '<div class="ugroup__list">' + members.map(({ engine, index }) =>
+        '<button type="button" class="unit" data-cat="' + group + '" data-unit="' + engine.id + '" title="Click to select · double-click to find">' +
+        '<span class="unit__key">' + unitKey(index) + '</span><span class="unit__dot"></span>' +
+        '<span class="unit__text"><span class="unit__name">' + esc(engine.name) + '</span><span class="unit__status">—</span></span>' +
+        '<span class="unit__bar"><i></i></span></button>').join('') + '</div>';
+    }
+    html += '</section>';
+  }
+  box.innerHTML = html || '<p class="units__empty">No units in this group.</p>';
+}
+
+function buildRoster(state) {
+  rosterKey = '';
+  renderRoster(state);
 }
 
 export function reset(state) {
@@ -184,7 +279,7 @@ export function update(state, force = false) {
   const budgetEl = $('stat-budget');
   budgetEl.textContent = `${budget.net >= 0 ? '+' : '−'}$${Math.abs(budget.net)}/h`;
   budgetEl.dataset.tone = budget.net >= 0 ? 'good' : 'bad';
-  budgetEl.title = `Subsidy ${money(budget.subsidy)} − wages ${money(budget.wages)} − upkeep ${money(budget.upkeep)} per game hour`;
+  budgetEl.title = `Subsidy ${money(budget.subsidy)} − upkeep ${money(budget.upkeep)} per game hour`;
   $('stat-injured').textContent = String(state.patients.filter((q) => !q.treated).length);
   $('stat-wind').textContent = windLabel(state.wind);
   $('wind-arrow').style.transform = `rotate(${state.wind.dir}rad)`;
@@ -219,6 +314,9 @@ export function update(state, force = false) {
   }
 
   updateRoster(state);
+  updateIncidents(state);
+  const mini = state.ui.minimap;
+  if (mini) $('stage').style.setProperty('--mini-h', Math.round(mini.h) + 'px');
   updateSelection(state);
   updateLog(state);
   updateToasts(state);
@@ -227,28 +325,116 @@ export function update(state, force = false) {
   if (!$('screen-station').hidden) updateStation(state);
 }
 
-function updateRoster(state) {
-  const box = $('roster-units');
-  if (box.children.length !== state.engines.length) buildRoster(state);
+function unitLevel(engine) {
+  if (engine.spec.medical) return engine.kits / (engine.spec.kits || 1);
+  if (engine.capacity > 0 && engine.capacity < 50000) return engine.water / engine.capacity;
+  return null;
+}
 
-  for (const button of box.children) {
+function updateRoster(state) {
+  currentState = state;
+  renderRoster(state);
+  const box = $('roster-units');
+  for (const button of box.querySelectorAll('.unit')) {
     const engine = state.engines.find((e) => e.id === button.dataset.unit);
     if (!engine) continue;
-    button.classList.toggle('is-active', state.activeEngineId === engine.id);
-    const dot = button.querySelector('.unit__dot');
-    dot.dataset.tone = engineTone(engine);
+    const selected = state.selected?.id === engine.id
+      || (state.selected?.kind === 'unit' && state.units.find((u) => u.id === state.selected.id)?.engineId === engine.id);
+    button.classList.toggle('is-active', state.activeEngineId === engine.id || selected);
+    button.querySelector('.unit__dot').dataset.tone = engineTone(engine);
     button.querySelector('.unit__status').textContent = SHORT_STATUS[engine.status] ?? title(engine.status);
+    const level = unitLevel(engine);
+    const bar = button.querySelector('.unit__bar');
+    bar.hidden = level == null;
+    if (level != null) {
+      bar.firstChild.style.width = Math.round(Math.max(0, Math.min(1, level)) * 100) + '%';
+      bar.dataset.low = level < 0.2 ? '1' : '';
+    }
   }
 }
 
 function engineTone(engine) {
   if (engine.pumping) return 'fire';
-  if (engine.status === 'responding') return 'warn';
-  if (engine.refilling) return 'good';
+  if (engine.status === 'responding' || engine.status === 'transporting') return 'warn';
+  if (engine.status === 'blocked') return 'bad';
+  if (engine.refilling || engine.status === 'treating' || engine.status === 'rescuing' || engine.status === 'clearing') return 'good';
   return '';
 }
 
+// ---- incidents: every call that needs someone, most urgent first ---------------
+let incidentKey = '';
+
+function collectIncidents(state) {
+  const list = [];
+  const claimed = (pred) => state.engines.some(pred);
+  for (const v of state.victims ?? []) {
+    list.push({
+      kind: 'victim', id: v.id, tone: 'water', urgency: 1000 - v.life,
+      title: 'Person in the water', meta: Math.ceil(v.life) + ' s · ' + (v.label ?? ''),
+      handled: Boolean(v.diverId) || claimed((e) => e.victimId === v.id),
+    });
+  }
+  for (const b of state.buildings) {
+    if (b.state === 'burning') {
+      list.push({
+        kind: 'building', id: b.id, tone: 'fire', urgency: 600 + b.fire * 100 + (b.trapped ?? 0) * 40 + (b.dryTime ?? 0) / 4,
+        title: b.name, meta: Math.round(b.fire * 100) + '% burning' + ((b.trapped ?? 0) > 0 ? ' · ' + b.trapped + ' trapped' : '') + (b.runaway ? ' · out of control' : ''),
+        handled: claimed((e) => e.targetId === b.id) || state.streams.some((st) => st.targetId === b.id),
+      });
+    } else if ((b.trapped ?? 0) > 0 && b.state !== 'rubble') {
+      list.push({
+        kind: 'building', id: b.id, tone: 'bad', urgency: 700,
+        title: b.name, meta: b.trapped + ' trapped inside', handled: claimed((e) => e.targetId === b.id),
+      });
+    }
+  }
+  for (const w of state.wildfires ?? []) {
+    list.push({
+      kind: 'wildfire', id: w.id, tone: 'fire', urgency: 650 + w.intensity * 100,
+      title: 'Forest fire', meta: Math.round(w.intensity * 100) + '% · ' + Math.round(w.radius / 32) + ' tiles across',
+      handled: claimed((e) => e.wildfireId === w.id) || state.streams.some((st) => st.wildfireId === w.id),
+    });
+  }
+  for (const q of state.patients) {
+    if (q.treated) continue;
+    list.push({
+      kind: 'patient', id: q.id, tone: 'medic', urgency: 500 - q.life + (q.critical ? 80 : 0),
+      title: q.critical ? 'Critically injured' : 'Injured person', meta: Math.ceil(q.life) + ' s · ' + q.buildingName,
+      handled: Boolean(q.claimedBy),
+    });
+  }
+  for (const wreck of state.blockades) {
+    list.push({
+      kind: 'blockade', id: wreck.id, tone: 'warn', urgency: 300 + (wreck.big ? 50 : 0),
+      title: wreck.name, meta: Math.round(wreck.progress * 100) + '% cleared',
+      handled: claimed((e) => e.blockadeId === wreck.id),
+    });
+  }
+  list.sort((a, b) => b.urgency - a.urgency);
+  return list;
+}
+
+function updateIncidents(state) {
+  const list = collectIncidents(state);
+  const shown = list.slice(0, 40);
+  const sig = shown.map((i) => [i.kind, i.id, i.meta, i.handled].join(':')).join('|') + list.length;
+  $('incident-count').textContent = String(list.length);
+  $('incident-count').dataset.on = list.length > 0 ? '1' : '';
+  if (sig === incidentKey) return;
+  incidentKey = sig;
+  $('incident-list').innerHTML = shown.length
+    ? shown.map((i) =>
+      '<li><button type="button" class="incident" data-tone="' + i.tone + '" data-incident="' + i.kind + '" data-id="' + i.id + '">' +
+      '<span class="incident__dot"></span><span class="incident__text"><b>' + esc(i.title) + '</b><span>' + esc(i.meta) + '</span></span>' +
+      '<span class="incident__tag" data-handled="' + (i.handled ? '1' : '') + '">' + (i.handled ? 'En route' : 'Open') + '</span></button></li>').join('') +
+      (list.length > shown.length ? '<li class="incident__more">+' + (list.length - shown.length) + ' more</li>' : '')
+    : '<li class="incident__none">All quiet. No incidents.</li>';
+}
+
 function selectionSignature(state, entity) {
+  if (state.selected.kind === 'victim') {
+    return [entity.id, Math.ceil(entity.life / 5), Math.round(entity.rescueTimer)].join(':');
+  }
   if (state.selected.kind === 'blockade') {
     return [entity.id, Math.round(entity.progress * 50)].join(':');
   }
@@ -278,6 +464,7 @@ function updateSelection(state) {
   else if (selected?.kind === 'wildfire') entity = (state.wildfires ?? []).find((w) => w.id === selected.id);
   else if (selected?.kind === 'patient') entity = state.patients.find((q) => q.id === selected.id);
   else if (selected?.kind === 'blockade') entity = state.blockades.find((q) => q.id === selected.id);
+  else if (selected?.kind === 'victim') entity = state.victims.find((q) => q.id === selected.id);
   else entity = state.buildings.find((b) => b.id === selected?.id);
 
   if (!entity) {
@@ -294,7 +481,9 @@ function updateSelection(state) {
   panel.hidden = false;
   panel.innerHTML = selected.kind === 'wildfire'
     ? wildfireCard(state, entity)
-    : selected.kind === 'blockade'
+    : selected.kind === 'victim'
+      ? victimCard(state, entity)
+      : selected.kind === 'blockade'
       ? blockadeCard(state, entity)
       : selected.kind === 'patient'
       ? patientCard(state, entity)
@@ -315,6 +504,24 @@ function wildfireCard(state, wildfire) {
     <p class="sel__meta">Crews have to reach the tree line on foot.<br>Incident reward $${reward.toLocaleString('en-US')}.</p>
     <div class="sel__actions">
       <button type="button" class="btn" data-action="dispatch">Dispatch<kbd>D</kbd></button>
+      <button type="button" class="btn" data-action="center">Locate<kbd>C</kbd></button>
+    </div>`;
+}
+
+function victimCard(state, victim) {
+  const frac = Math.max(0, Math.min(1, victim.life / victim.maxLife));
+  const divers = state.engines.some((e) => e.spec.diver);
+  return `
+    <div class="sel__kind">Water rescue</div>
+    <h2 class="sel__name">Person in the water</h2>
+    <div class="sel__status" data-tone="bad"><i></i>Drowning</div>
+    <div class="bar__label"><span>Time left</span><span>${Math.ceil(victim.life)} s</span></div>
+    <div class="bar bar--health"><i style="width:${Math.round(frac * 100)}%"></i></div>
+    <p class="sel__meta">Near ${esc(victim.label ?? 'the water')}.<br>${divers
+      ? 'Divers swim out from a dive team on the bank or a rescue boat on the water. Once out they need an ambulance.'
+      : 'No divers — buy a dive team or a rescue boat in Headquarters (B).'}</p>
+    <div class="sel__actions">
+      <button type="button" class="btn" data-action="dispatch">Send divers<kbd>D</kbd></button>
       <button type="button" class="btn" data-action="center">Locate<kbd>C</kbd></button>
     </div>`;
 }
@@ -386,22 +593,31 @@ function ambulanceCard(state, engine) {
 
 function specialCard(state, engine) {
   const flying = Boolean(engine.spec.flying);
+  const diver = Boolean(engine.spec.diver);
+  const boat = Boolean(engine.spec.boat);
   const crew = state.crew.filter((c) => c.engineId === engine.id);
-  const water = flying
+  const water = flying || (boat && !diver)
     ? '<div class="bar__label"><span>Water</span><span>' + Math.round(engine.water) + ' / ' + engine.capacity + ' L</span></div><div class="bar"><i style="width:' + pct(engine.water, engine.capacity) + '"></i></div>'
     : '';
-  const note = flying
-    ? 'Flies straight to the target over roads, wrecks and traffic and drops water from ' + engine.spec.turretRange + ' tiles, forest fires included. Refills at a station apron or by dipping in the harbour, along the south edge of the map.'
-    : 'Park it near the fight: every crew within ' + CONFIG.command.range + ' tiles sprays ' + Math.round(CONFIG.command.aura * 100) + '% harder while it stands still.';
+  const note = engine.spec.plane
+    ? 'Circles its target dropping water, and skims the sea to refill when it runs low. Very fast; it needs something burning to circle. Right-click a fire to send it.'
+    : flying
+      ? 'Flies straight to the target over roads, wrecks and traffic and drops water from ' + engine.spec.turretRange + ' tiles, forest fires included. Refills at a station apron or by dipping in the river or the harbour.'
+      : diver
+        ? (boat ? 'Sails to the casualty and puts divers over the side.' : 'Drives to the bank nearest the casualty; divers swim out up to ' + engine.spec.diveRange + ' tiles.') + ' Right-click someone in the water to send it.'
+        : boat
+          ? 'Pumps river or sea water without limit from ' + engine.spec.turretRange + ' tiles out, but only works fires near the water. Right-click a fire to send it.'
+          : 'Park it near the fight: every crew within ' + CONFIG.command.range + ' tiles sprays ' + Math.round(CONFIG.command.aura * 100) + '% harder while it stands still.';
   return '<div class="sel__kind">' + esc(engine.spec.label) + '</div><h2 class="sel__name">' + esc(engine.name) + '</h2>' + statusChip(engine.status) + water +
     '<p class="sel__meta">' + crew.length + ' crew<br>' + note + '</p>' +
-    '<div class="sel__actions">' + (flying ? '<button type="button" class="btn" data-action="dispatch">Dispatch<kbd>D</kbd></button>' : '') +
-    '<button type="button" class="btn" data-action="home">Station<kbd>H</kbd></button></div>';
+    '<div class="sel__actions">' + (!engine.spec.command ? '<button type="button" class="btn" data-action="dispatch">Dispatch<kbd>D</kbd></button>' : '') +
+    (diver ? '<button type="button" class="btn" data-action="deploy">Dive<kbd>E</kbd></button><button type="button" class="btn" data-action="recall">Recall<kbd>R</kbd></button>' : '') +
+    '<button type="button" class="btn" data-action="home">Base<kbd>H</kbd></button></div>';
 }
 
 function engineCard(state, engine) {
   if (engine.spec.medical) return ambulanceCard(state, engine);
-  if (engine.spec.flying || engine.spec.command) return specialCard(state, engine);
+  if (engine.spec.flying || engine.spec.command || engine.spec.boat || engine.spec.diver) return specialCard(state, engine);
   const crew = state.crew.filter((c) => c.engineId === engine.id);
   const aboard = crew.filter((c) => c.riding).length;
   const deployed = crew.length - aboard;
@@ -531,13 +747,17 @@ function updateTooltip(state) {
         ? state.patients.find((q) => q.id === hover.id)
         : hover.kind === 'blockade'
           ? state.blockades.find((q) => q.id === hover.id)
-          : state.buildings.find((b) => b.id === hover.id);
+          : hover.kind === 'victim'
+            ? state.victims.find((q) => q.id === hover.id)
+            : state.buildings.find((b) => b.id === hover.id);
   if (!entity) {
     tip.hidden = true;
     return;
   }
   let detail;
-  if (hover.kind === 'blockade') {
+  if (hover.kind === 'victim') {
+    detail = `In the water · ${Math.ceil(entity.life)} s left`;
+  } else if (hover.kind === 'blockade') {
     detail = `Road blocked · ${Math.round(entity.progress * 100)}% cleared`;
   } else if (hover.kind === 'patient') {
     detail = entity.treated ? 'Stabilised' : `Needs an ambulance · ${Math.ceil(entity.life)} s`;
@@ -548,7 +768,9 @@ function updateTooltip(state) {
       ? SHORT_STATUS[entity.status] ?? entity.status
       : entity.spec.medical
         ? `${SHORT_STATUS[entity.status] ?? entity.status} · ${Math.floor(entity.kits)} kits`
-        : `${SHORT_STATUS[entity.status] ?? entity.status} · ${Math.round(entity.water / entity.capacity * 100)}% water`;
+        : !(entity.capacity > 0) || entity.capacity >= 50000
+          ? SHORT_STATUS[entity.status] ?? entity.status
+          : `${SHORT_STATUS[entity.status] ?? entity.status} · ${Math.round(entity.water / entity.capacity * 100)}% water`;
   } else if (entity.state === 'burning') {
     detail = `Burning · ${Math.round(entity.integrity / entity.maxIntegrity * 100)}% standing`;
     if ((entity.trapped ?? 0) > 0) detail += ` · ${entity.trapped} trapped`;
@@ -595,21 +817,14 @@ export const getBuyStation = () => buyStation;
 
 const TABS = [
   ['fleet', 'Fleet'],
-  ['upgrades', 'Upgrades'],
   ['finance', 'Finance'],
   ['contracts', 'Contracts'],
 ];
 
-const UPGRADE_TEXT = {
-  tank: '+25% water',
-  pump: '+15% pressure',
-  hose: '+2 hose, +1 deck gun',
-  speed: '+10% speed',
-  kits: '+3 medical kits',
-  stretcher: '+1 stretcher',
-};
-
 const vehicleBlurb = (spec) => {
+  if (spec.plane) return 'no crew · ' + spec.capacity.toLocaleString('en-US') + ' L · circles the fire, skims the sea to refill';
+  if (spec.diver) return spec.crew + ' divers · swim ' + spec.diveRange + ' tiles' + (spec.boat ? ' · sails to the casualty' : ' · drives to the bank');
+  if (spec.boat) return 'no crew · pumps water without limit · reaches ' + spec.turretRange + ' tiles from the water';
   if (spec.medical) return spec.crew + ' paramedics · ' + spec.kits + ' kits · ' + spec.carry + ' stretchers';
   if (spec.flying) return 'no crew · ' + spec.capacity.toLocaleString('en-US') + ' L · flies over roads · dips in the harbour';
   if (spec.command) return spec.crew + ' crew · parked, boosts crews within ' + CONFIG.command.range + ' tiles by ' + Math.round(CONFIG.command.aura * 100) + '%';
@@ -618,13 +833,15 @@ const vehicleBlurb = (spec) => {
 
 function fleetTab(state) {
   const bays = totalBays(state);
-  const maxed = state.engines.length >= bays;
+  const landCount = state.engines.filter((e) => !e.spec.boat).length;
+  const maxed = freeBay(state, null, false) < 0;
+  const dockOpen = ownsStation(state, 2);
   const stationName = (engine) => state.city.stations[state.city.bays[engine.bayIndex]?.station ?? 0]?.name ?? 'Station 1';
 
   const engines = state.engines.map((engine, index) => {
     const crew = state.crew.filter((c) => c.engineId === engine.id);
     const aboard = crew.filter((c) => c.riding).length;
-    const refund = Math.round(engine.spec.cost * engine.spec.refund + (engine.invested ?? 0) * 0.5);
+    const refund = Math.round(engine.spec.cost * engine.spec.refund);
     const load = engine.spec.medical
       ? Math.floor(engine.kits) + '/' + engine.spec.kits + ' kits'
       : engine.capacity > 0
@@ -642,44 +859,31 @@ function fleetTab(state) {
   const open2 = ownsStation(state, 1);
   const stationBox = open2
     ? '<div class="station__chooser"><span>Deliver new vehicles to</span>' +
-      state.city.stations.map((st, i) => '<button type="button" class="btn btn--small' + (buyStation === i ? ' is-active' : '') + '" data-action="deliver-to" data-station="' + i + '">' + esc(st.name) + '</button>').join('') +
+      state.city.stations.map((st, i) => st.sea ? '' : '<button type="button" class="btn btn--small' + (buyStation === i ? ' is-active' : '') + '" data-action="deliver-to" data-station="' + i + '">' + esc(st.name) + '</button>').join('') +
       '</div>'
     : '<div class="station__expand"><div><b>' + esc(two.name) + ' · Civic Quarter</b><span>Eight more bays and a second helipad, deep in the city. Calls start coming from its district too.</span></div>' +
       '<button type="button" class="btn btn--small btn--primary" data-action="buy-station"' + (state.credits < CONFIG.economy.stationPrice ? ' disabled' : '') + '>Open $' + CONFIG.economy.stationPrice.toLocaleString('en-US') + '</button></div>';
 
+  const dock = state.city.stations[2];
+  const dockBox = dockOpen
+    ? '<div class="station__chooser"><span>' + esc(dock.name) + ' · ' + state.engines.filter((e) => e.spec.boat).length + '/' + totalBerths(state) + ' berths</span></div>'
+    : '<div class="station__expand"><div><b>' + esc(dock.name) + '</b><span>Eight berths on the harbour. Needed for fireboats and rescue boats, which can sail the river and the bay.</span></div>' +
+      '<button type="button" class="btn btn--small btn--primary" data-action="buy-dock"' + (state.credits < CONFIG.economy.dockPrice ? ' disabled' : '') + '>Open $' + CONFIG.economy.dockPrice.toLocaleString('en-US') + '</button></div>';
+
   const buys = Object.entries(CONFIG.vehicles).map(([type, spec]) => {
-    const disabled = maxed || state.credits < spec.cost;
+    const noRoom = spec.boat ? !dockOpen || freeBay(state, 2, true) < 0 : maxed;
+    const disabled = noRoom || state.credits < spec.cost;
     return '<button type="button" class="station__buybtn" data-action="buy-vehicle" data-type="' + type + '"' + (disabled ? ' disabled' : '') + '>' +
       '<span class="station__buyhead"><b>' + esc(spec.label) + '</b><i>$' + spec.cost.toLocaleString('en-US') + '</i></span>' +
       '<span>' + esc(vehicleBlurb(spec)) + '</span>' +
       '<span class="station__upkeep">upkeep $' + spec.upkeep + '/h</span></button>';
   }).join('');
 
-  return '<div class="station__balance">$' + state.credits.toLocaleString('en-US') + '<span>credits · ' + state.engines.length + '/' + bays + ' bays</span></div>' +
+  return '<div class="station__balance">$' + state.credits.toLocaleString('en-US') + '<span>credits · ' + landCount + '/' + bays + ' bays</span></div>' +
     '<div class="station__list">' + engines + '</div>' +
     (maxed ? '<p class="station__full">Every bay you own is full' + (open2 ? '.' : ' — open Station 2 for eight more.') + '</p>' : '') +
-    stationBox +
+    stationBox + dockBox +
     '<div class="station__buys">' + buys + '</div>';
-}
-
-function upgradesTab(state) {
-  const rows = state.engines.map((engine) => {
-    const kinds = availableUpgrades(engine);
-    const total = Object.values(engine.upgrades ?? {}).reduce((a, b) => a + b, 0);
-    const lines = kinds.map((kind) => {
-      const cfg = CONFIG.upgrades[kind];
-      const level = upgradeLevel(engine, kind);
-      const cost = upgradeCost(engine, kind);
-      const pips = cfg.cost.map((_, i) => '<i class="pip' + (i < level ? ' is-on' : '') + '"></i>').join('');
-      const button = cost == null
-        ? '<span class="upgrade__max">Max</span>'
-        : '<button type="button" class="btn btn--small" data-action="upgrade" data-engine="' + engine.id + '" data-kind="' + kind + '"' + (state.credits < cost ? ' disabled' : '') + '>$' + cost.toLocaleString('en-US') + '</button>';
-      return '<div class="upgrade"><div class="upgrade__text"><b>' + esc(cfg.label) + '</b><span>' + esc(UPGRADE_TEXT[kind]) + ' per level</span></div><span class="pips">' + pips + '</span>' + button + '</div>';
-    }).join('');
-    return '<div class="upgrade__vehicle"><header><b>' + esc(engine.name) + '</b><span>' + total + ' levels · upkeep $' + engine.spec.upkeep + '/h</span></header>' + lines + '</div>';
-  }).join('');
-  return '<div class="station__balance">$' + state.credits.toLocaleString('en-US') + '<span>credits</span></div>' +
-    '<p class="station__note">Each level costs more upkeep (+' + Math.round(CONFIG.upgrades.upkeep * 100) + '%) and is half refunded when you sell the vehicle.</p>' + rows;
 }
 
 function financeTab(state) {
@@ -713,7 +917,6 @@ function financeTab(state) {
   return '<div class="station__balance">$' + state.credits.toLocaleString('en-US') + '<span>credits' + (owed ? ' · owe ' + money(owed) : '') + '</span></div>' +
     '<div class="budget"><p class="menu__eyebrow">Budget · per game hour</p>' +
     line('City subsidy (scales with rating)', '+' + money(b.subsidy), 'good') +
-    line('Wages · ' + state.crew.length + ' crew', '−' + money(b.wages), 'bad') +
     line('Upkeep · ' + state.engines.length + ' vehicles', '−' + money(b.upkeep), 'bad') +
     (b.premium ? line('Insurance premium', '−' + money(b.premium), 'bad') : '') +
     (b.interest ? line('Loan interest', '−' + money(b.interest), 'bad') : '') +
@@ -728,7 +931,7 @@ function financeTab(state) {
     '<p class="budget__total">' + money(ins.premium) + ' an hour. Buildings you lose cost ' + Math.round(ins.lossShare * 100) + '% instead of 100%.</p>' +
     '<div class="finance__buttons"><button type="button" class="btn btn--small' + (state.insured ? ' is-active' : '') + '" data-action="toggle-insurance">' + (state.insured ? 'Insured — cancel' : 'Take out insurance') + '</button></div></div>' +
 
-    '<div class="budget"><p class="menu__eyebrow">Crew training · wages rise ' + Math.round(train.wageRise * 100) + '% per level</p>' + trainRows + '</div>' +
+    '<div class="budget"><p class="menu__eyebrow">Crew training</p>' + trainRows + '</div>' +
 
     '<div class="budget"><p class="menu__eyebrow">This shift · earned ' + money(ledger.earned) + ' · spent ' + money(ledger.spent) + '</p>' + ledgerRows + '</div>';
 }
@@ -760,8 +963,7 @@ function contractsTab(state) {
 export function updateStation(state) {
   const tabs = '<div class="tabs" role="tablist">' + TABS.map(([id, label]) =>
     '<button type="button" role="tab" class="tab' + (stationTab === id ? ' is-active' : '') + '" data-action="station-tab" data-tab="' + id + '">' + label + '</button>').join('') + '</div>';
-  const body = stationTab === 'upgrades' ? upgradesTab(state)
-    : stationTab === 'finance' ? financeTab(state)
+  const body = stationTab === 'finance' ? financeTab(state)
       : stationTab === 'contracts' ? contractsTab(state)
         : fleetTab(state);
 

@@ -2,11 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  createGame, startShift, update, commandBuyVehicle, commandBuyStation, commandUpgrade,
+  createGame, startShift, update, commandBuyVehicle, commandBuyStation,
   commandLoan, commandRepay, commandInsurance, commandTrain, commandAcceptContract,
   commandDispatch, commandDispatchWildfire, commandSellVehicle, selectUnit, serialize, loadState,
 } from '../src/systems/game.js';
-import { firePower, freeBay, totalBays, upgradeCost, applyUpgrades } from '../src/systems/units.js';
+import { firePower, freeBay, totalBays } from '../src/systems/units.js';
 import { hourlyBudget } from '../src/systems/economy.js';
 import { updateContracts } from '../src/systems/contracts.js';
 import { ignite, updateFire } from '../src/systems/fire.js';
@@ -21,82 +21,7 @@ function shift() {
   return state;
 }
 
-const burnable = (state) => state.buildings.find((b) => b.type !== 'station' && b.type !== 'warehouse' && b.state === 'ok');
-
-// -------------------------------------------------------------- upgrades ---
-
-test('an upgrade costs credits, changes the stats and raises upkeep; levels cap at three', () => {
-  const state = shift();
-  const engine = state.engines[0];
-  const credits = state.credits;
-  const cost = upgradeCost(engine, 'tank');
-  assert.equal(commandUpgrade(state, engine.id, 'tank'), true);
-  assert.equal(state.credits, credits - cost);
-  assert.equal(engine.upgrades.tank, 1);
-  assert.equal(engine.capacity, Math.round(1800 * 1.25));
-  assert.ok(engine.water > 1800, 'the new tank came full');
-  assert.ok(engine.spec.upkeep > CONFIG.vehicles.engine.upkeep);
-  // The shared config is never mutated by an upgrade.
-  assert.equal(CONFIG.vehicles.engine.capacity, 1800);
-
-  commandUpgrade(state, engine.id, 'tank');
-  commandUpgrade(state, engine.id, 'tank');
-  assert.equal(commandUpgrade(state, engine.id, 'tank'), false);
-  assert.equal(engine.upgrades.tank, 3);
-});
-
-test('upgrades only apply to the right vehicles and need the money', () => {
-  const state = shift();
-  const engine = state.engines[0];
-  const ambulance = commandBuyVehicle(state, 'ambulance');
-  assert.equal(commandUpgrade(state, engine.id, 'kits'), false, 'an engine got medical stock');
-  assert.equal(commandUpgrade(state, ambulance.id, 'tank'), false, 'an ambulance got a water tank');
-  assert.equal(commandUpgrade(state, ambulance.id, 'kits'), true);
-  assert.equal(ambulance.spec.kits, CONFIG.vehicles.ambulance.kits + 3);
-  assert.equal(ambulance.kits, CONFIG.vehicles.ambulance.kits + 3);
-  assert.equal(commandUpgrade(state, ambulance.id, 'stretcher'), true);
-  assert.equal(ambulance.spec.carry, CONFIG.vehicles.ambulance.carry + 1);
-
-  state.credits = 10;
-  assert.equal(commandUpgrade(state, engine.id, 'speed'), false);
-});
-
-test('hose and speed upgrades extend the reach and the pace', () => {
-  const state = shift();
-  const engine = state.engines[0];
-  commandUpgrade(state, engine.id, 'hose');
-  commandUpgrade(state, engine.id, 'speed');
-  assert.equal(engine.spec.hoseRange, CONFIG.vehicles.engine.hoseRange + 2);
-  assert.equal(engine.spec.turretRange, CONFIG.vehicles.engine.turretRange + 1);
-  assert.ok(Math.abs(engine.spec.speed - CONFIG.vehicles.engine.speed * 1.1) < 1e-9);
-});
-
-test('selling refunds half of what was spent on upgrades', () => {
-  const state = shift();
-  const second = commandBuyVehicle(state, 'engine');
-  const plain = commandSellVehicle(state, second.id);
-  assert.equal(plain, Math.round(CONFIG.vehicles.engine.cost * CONFIG.vehicles.engine.refund));
-
-  const third = commandBuyVehicle(state, 'engine');
-  commandUpgrade(state, third.id, 'pump');
-  const spent = third.invested;
-  const refund = commandSellVehicle(state, third.id);
-  assert.equal(refund, plain + Math.round(spent * 0.5));
-});
-
-test('upgrades survive a save', () => {
-  const state = shift();
-  const engine = state.engines[0];
-  commandUpgrade(state, engine.id, 'tank');
-  commandUpgrade(state, engine.id, 'hose');
-  engine.water = 1000;
-  const loaded = loadState(JSON.parse(JSON.stringify(serialize(state))));
-  const e = loaded.engines[0];
-  assert.deepEqual(e.upgrades, { tank: 1, hose: 1 });
-  assert.equal(e.capacity, Math.round(1800 * 1.25));
-  assert.equal(e.spec.hoseRange, CONFIG.vehicles.engine.hoseRange + 2);
-  assert.equal(e.water, 1000);
-});
+const burnable = (state) => state.buildings.find((b) => b.type !== 'station' && b.type !== 'hospital' && b.type !== 'warehouse' && b.state === 'ok' && Math.hypot(b.x - 54, b.y - 47) > 30);
 
 // -------------------------------------------------------------- stations ---
 
@@ -188,7 +113,7 @@ test('a helicopter fights a forest fire from the air and refills in the harbour'
   const start = wf.intensity;
   assert.equal(commandDispatchWildfire(state, wf.id), true);
   assert.equal(state.selected.id, heli.id, 'the helicopter was not chosen');
-  for (let i = 0; i < 30 * 40; i++) update(state, 1 / 30);
+  for (let i = 0; i < 30 * 120; i++) update(state, 1 / 30);
   assert.ok(wf.intensity < start || !state.wildfires.includes(wf), 'the wildfire was not touched');
 
   heli.water = 0;
@@ -293,14 +218,14 @@ test('insurance cuts the cost of a lost building and costs a premium', () => {
   assert.equal(hourlyBudget(state).net, plain - CONFIG.economy.insurance.premium);
 });
 
-test('training raises wages and makes crews better at their jobs', () => {
+test('training makes crews better at their jobs, and costs no extra wages', () => {
   const state = shift();
-  const plain = hourlyBudget(state).wages;
+  const plain = hourlyBudget(state).net;
   const engine = state.engines[0];
   assert.equal(firePower(state, engine.x, engine.y), 1);
   assert.equal(commandTrain(state, 'fire'), true);
   assert.ok(Math.abs(firePower(state, engine.x, engine.y) - (1 + CONFIG.economy.training.fire)) < 1e-9);
-  assert.ok(hourlyBudget(state).wages > plain);
+  assert.equal(hourlyBudget(state).net, plain, 'training changed the hourly budget');
   commandTrain(state, 'fire');
   commandTrain(state, 'fire');
   assert.equal(commandTrain(state, 'fire'), false, 'a fourth level');
@@ -386,7 +311,6 @@ test('finance state survives a save', () => {
   assert.equal(loaded.loan, CONFIG.economy.loan.step);
   assert.equal(loaded.insured, true);
   assert.equal(loaded.training.medic, 1);
-  assert.deepEqual(loaded.ownedStations, [true, true]);
+  assert.deepEqual(loaded.ownedStations, [true, true, false]);
   assert.equal(loaded.contracts.offers.length, 1);
-  assert.equal(applyUpgrades(loaded.engines[0]).capacity, 1800);
 });

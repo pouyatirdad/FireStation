@@ -16,7 +16,14 @@ export const CITY_NAME = 'Harbor City';
 
 // Avenues run north–south, streets east–west. Each is two tiles wide.
 export const V_ROADS = Array.from({ length: 17 }, (_, i) => 12 + i * 30);
-export const H_ROADS = Array.from({ length: 16 }, (_, i) => 12 + i * 24);
+export const H_ROADS = Array.from({ length: 15 }, (_, i) => 12 + i * 24);
+
+// The sea fills everything south of the last street (the harbour quay). A river
+// meanders down through the east of the city inside one column of blocks, so it
+// only ever crosses the streets (as bridges) and never a street's length.
+export const SEA_Y = 350;
+export const RIVER_HALF_WIDTH = 3.5;
+export const riverCentre = (y) => 357 + 8 * Math.sin(y / 55);
 
 // Station 1 sits in the middle of the map and opens south onto 70th Street.
 const STATION = { x: 50, y: 44, w: 8, h: 6 };
@@ -195,8 +202,6 @@ const DOWNTOWNS = [
   { col: 7, row: 14, name: 'SOUTH BANK' },
 ];
 
-const HOSPITAL_BLOCKS = new Set(['3,2', ...DOWNTOWNS.slice(1).map((d) => `${d.col},${d.row}`)]);
-
 const FOREST_NAMES = ['NORTH WOODS', 'PINE RIDGE', 'GREEN HOLLOW', 'EASTWOOD', 'BIRCH FOREST', 'OLD GROWTH', 'FERN VALLEY'];
 
 /** The road grid, cut into blocks, with a district kind for each. */
@@ -249,12 +254,13 @@ function buildBlocks(seed = 7) {
       const roll = rng.float();
       let kind;
       let zone;
-      if (row === lastRow) kind = 'park'; // the waterfront band
+      if (row === lastRow) kind = 'sea';
       else if (forestBlocks.has(key)) {
         kind = 'forest';
         zone = forestBlocks.get(key);
       } else if (parks.has(key)) kind = 'park';
       else if ((col === 2 && row === 2) || (col === 8 && row === 6)) kind = 'station';
+      else if (col === 9 && row === 14) kind = 'dock';
       else if (near === 0 && roll < 0.02) kind = 'park';
       else if (near <= 1) kind = 'downtown';
       else if (row >= lastRow - 2 || (row >= 4 && (col * 5 + row * 3) % 7 === 0)) kind = 'industry';
@@ -289,6 +295,26 @@ export function createCity(seed = 7) {
       road[at(x, y + 1)] = 1;
     }
   }
+
+  // Water: the sea to the south and the river. Streets stop at the quay, and a
+  // street that crosses the river carries on over it as a bridge.
+  const water = new Uint8Array(w * h);
+  const bridge = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const sea = y >= SEA_Y;
+      const river = !sea && Math.abs(x + 0.5 - riverCentre(y)) <= RIVER_HALF_WIDTH;
+      if (sea || river) water[at(x, y)] = 1;
+      if (sea) road[at(x, y)] = 0;
+      else if (river && road[at(x, y)]) bridge[at(x, y)] = 1;
+    }
+  }
+  const waterIn = (x, y, wid, hei) => {
+    for (let ty = y - 1; ty <= y + hei; ty++) {
+      for (let tx = x - 1; tx <= x + wid; tx++) if (inb(tx, ty) && water[at(tx, ty)]) return true;
+    }
+    return false;
+  };
 
   const buildings = [];
   const parks = [];
@@ -361,9 +387,10 @@ export function createCity(seed = 7) {
     name: 'Station 1',
     floors: 2,
   });
-  // The maintenance workshop in the same block, so the station yard is not a
-  // bare concrete square.
-  addBuilding(63, 52, 5, 4, 'warehouse', { name: 'Station Workshop', floors: 1 });
+  // The base hospital, right beside the apron: ambulances unload here and return
+  // here when a job is done.
+  const hospital1 = addBuilding(63, 51, 7, 8, 'hospital', { name: 'Base Hospital', floors: 3 });
+  hospital1.base = 0;
   for (let ty = APRON.y0; ty <= APRON.y1; ty++) {
     for (let tx = APRON.x0; tx <= APRON.x1; tx++) apron[at(tx, ty)] = 1;
   }
@@ -387,7 +414,7 @@ export function createCity(seed = 7) {
       const tx = Math.floor(wx);
       const ty = Math.floor(wy);
       if (!inb(tx, ty)) continue;
-      if (road[at(tx, ty)] || blocked[at(tx, ty)]) continue;
+      if (road[at(tx, ty)] || blocked[at(tx, ty)] || water[at(tx, ty)]) continue;
       trees.push({
         x: wx * TILE,
         y: wy * TILE,
@@ -403,7 +430,7 @@ export function createCity(seed = 7) {
       forestAreas.push({ x0, y0, x1, y1 });
       for (let y = y0 + 1; y <= y1 - 1; y++) {
         for (let x = x0 + 1; x <= x1 - 1; x++) {
-          if (road[at(x, y)] || blocked[at(x, y)]) continue;
+          if (road[at(x, y)] || blocked[at(x, y)] || water[at(x, y)]) continue;
           forest[at(x, y)] = 1;
           forestTiles.push({ x, y });
           if (rng.chance(0.16)) {
@@ -423,7 +450,7 @@ export function createCity(seed = 7) {
       scatterTrees(x0, y0, x1, y1);
       return;
     }
-    if (kind === 'station') return;
+    if (kind === 'station' || kind === 'dock' || kind === 'sea') return;
 
     const ax0 = x0 + 1;
     const ax1 = x1 - 1;
@@ -442,9 +469,6 @@ export function createCity(seed = 7) {
     const xs = splitCells(ax0, ax1, cols);
     const ys = splitCells(ay0, ay1, rows);
 
-    // Every commercial centre has a hospital, plus one next to the old town.
-    let wantsHospital = HOSPITAL_BLOCKS.has(`${block.col},${block.row}`);
-
     // A quarter of the residential and commercial blocks have a pharmacy.
     let wantsPharmacy = kind !== 'industry' && (block.col * 2 + block.row) % 4 === 0;
 
@@ -458,14 +482,11 @@ export function createCity(seed = 7) {
         if (bhei >= 5 && rng.chance(0.4)) bhei -= 1;
         if (bwid < 3 || bhei < 3) continue;
         let type = weightedPick(rng, KIND_TYPES[kind]);
-        if (wantsHospital && bwid >= 4 && bhei >= 4) {
-          type = 'hospital';
-          wantsHospital = false;
-          wantsPharmacy = false;
-        } else if (wantsPharmacy) {
+        if (wantsPharmacy) {
           type = 'pharmacy';
           wantsPharmacy = false;
         }
+        if (waterIn(bx, by, bwid, bhei)) continue;
         addBuilding(bx, by, bwid, bhei, type);
       }
     }
@@ -481,6 +502,8 @@ export function createCity(seed = 7) {
     name: 'Station 2',
     floors: 2,
   });
+  const hospital2 = addBuilding(b2.x0 + 19, b2.y0 + 13, 7, 8, 'hospital', { name: 'Civic Base Hospital', floors: 3 });
+  hospital2.base = 1;
   const apron2 = {
     x0: APRON.x0 - 44 + b2.x0,
     y0: APRON.y0 - 38 + b2.y0,
@@ -506,7 +529,7 @@ export function createCity(seed = 7) {
 
   // --- hydrants ----------------------------------------------------------
   const isHydrantSpot = (x, y) => {
-    if (!inb(x, y) || blocked[at(x, y)] || road[at(x, y)] || apron[at(x, y)]) return false;
+    if (!inb(x, y) || blocked[at(x, y)] || road[at(x, y)] || apron[at(x, y)] || water[at(x, y)]) return false;
     return (
       (inb(x + 1, y) && road[at(x + 1, y)]) ||
       (inb(x - 1, y) && road[at(x - 1, y)]) ||
@@ -551,7 +574,7 @@ export function createCity(seed = 7) {
   for (let ty = 1; ty < h - 1; ty++) {
     for (let tx = 1; tx < w - 1; tx++) {
       const i = at(tx, ty);
-      if (road[i] || blocked[i] || apron[i] || park[i]) continue;
+      if (road[i] || blocked[i] || apron[i] || park[i] || water[i]) continue;
       if (hydrantAt.has(`${tx},${ty}`)) continue;
       const kerb =
         road[at(tx + 1, ty)] || road[at(tx - 1, ty)] ||
@@ -574,7 +597,7 @@ export function createCity(seed = 7) {
 
   const tryCar = (tx, ty, x, y, angle) => {
     if (cars.length >= 1100) return;
-    if (!inb(tx, ty) || blocked[at(tx, ty)] || road[at(tx, ty)] || apron[at(tx, ty)] || park[at(tx, ty)]) return;
+    if (!inb(tx, ty) || blocked[at(tx, ty)] || road[at(tx, ty)] || apron[at(tx, ty)] || park[at(tx, ty)] || water[at(tx, ty)]) return;
     cars.push({ x, y, angle: rng.chance(0.5) ? angle : angle + Math.PI, color: rng.pick(CAR_COLORS) });
   };
 
@@ -607,6 +630,25 @@ export function createCity(seed = 7) {
     });
   }
 
+  // --- the harbour dock: a base on the quay with berths on the water -----------
+  const bd = blocks.find((b) => b.col === 9 && b.row === 14);
+  const dockBuilding = addBuilding(bd.x0 + 12, bd.y0 + 6, 8, 5, 'station', {
+    id: 'dock',
+    name: 'Harbour Dock',
+    floors: 2,
+  });
+  const apronD = { x0: bd.x0 + 2, y0: bd.y1 - 5, x1: bd.x0 + 25, y1: bd.y1 };
+  for (let ty = apronD.y0; ty <= apronD.y1; ty++) {
+    for (let tx = apronD.x0; tx <= apronD.x1; tx++) apron[at(tx, ty)] = 1;
+  }
+  // Eight berths in a row on the water, two tiles beyond the quay road.
+  const berths = Array.from({ length: 8 }, (_, i) => ({
+    x: (bd.x0 + 3.6 + i * 3) * TILE,
+    y: (SEA_Y + 2.5) * TILE,
+    station: 2,
+    sea: true,
+  }));
+
   // Map labels: one per commercial centre, forest, and the harbour belts.
   const blockCentre = (col, row) => {
     const b = blocks.find((x) => x.col === col && x.row === row);
@@ -625,10 +667,9 @@ export function createCity(seed = 7) {
     const avg = (list) => list.reduce((s, v) => s + v, 0) / list.length;
     districts.push({ name: zone.name, x: avg(zone.xs) * TILE, y: avg(zone.ys) * TILE });
   }
-  const lastBlock = blocks[blocks.length - 1];
-  districts.push({ name: 'WATERFRONT', x: (w / 2) * TILE, y: ((lastBlock.y0 + lastBlock.y1 + 1) / 2) * TILE });
-  districts.push({ name: 'HARBOR', x: 60 * TILE, y: (h - 60) * TILE });
-  districts.push({ name: 'DOCKLANDS', x: (w - 90) * TILE, y: (h - 60) * TILE });
+  districts.push({ name: 'HARBOR BAY', x: (w / 2) * TILE, y: (SEA_Y + 20) * TILE });
+  districts.push({ name: 'RIVER', x: riverCentre(120) * TILE, y: 120 * TILE });
+  districts.push({ name: 'RIVER MOUTH', x: riverCentre(320) * TILE, y: 320 * TILE });
 
   const bays1 = BAYS.map((b) => ({ x: b.x * TILE, y: b.y * TILE, station: 0 }));
   const bays2 = BAYS.map((b) => ({
@@ -639,6 +680,7 @@ export function createCity(seed = 7) {
   const stations = [
     { id: 'station', name: 'Station 1', building: station, apron: { ...APRON }, bays: bays1 },
     { id: 'station2', name: 'Station 2', building: station2, apron: apron2, bays: bays2 },
+    { id: 'dock', name: 'Harbour Dock', building: dockBuilding, apron: apronD, bays: berths, sea: true },
   ];
 
   return {
@@ -650,6 +692,8 @@ export function createCity(seed = 7) {
     blocked,
     park,
     forest,
+    water,
+    bridge,
     forestAreas,
     forestTiles,
     buildings,
@@ -660,11 +704,11 @@ export function createCity(seed = 7) {
     cars,
     lot: stationLot,
     // Every bay of every station, Station 1's first so existing indexes hold.
-    bays: [...bays1, ...bays2],
+    bays: [...bays1, ...bays2, ...berths],
     stations,
     districts,
     pharmacies: buildings.filter((b) => b.type === 'pharmacy'),
-    hospitals: buildings.filter((b) => b.type === 'hospital'),
+    hospitals: [hospital1, hospital2],
     spawn: { x: BAYS[0].x * TILE, y: BAYS[0].y * TILE, angle: Math.PI / 2 },
     startHour: START_HOUR,
   };

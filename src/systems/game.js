@@ -11,8 +11,12 @@ import {
   engineForUnit, orderAmbulanceToPatient, orderCrew, orderEngine, orderEngineToWildfire,
   orderEngineToBlockade, pickAmbulanceFor, pickEngineForBlockade, recallCrew, repathEngines,
   restoreFleet, sellVehicle, sendEngineHome, sendToHospital, sendToPharmacy,
-  toggleHydrant, updateUnits, isFirefighter, upgradeVehicle,
+  toggleHydrant, updateUnits, isFirefighter,
+  boatCanReach, diveVehiclesFor, orderEngineToVictim,
 } from './units.js';
+import {
+  findVictim, nearestVictim, restoreVictims, updateVictims,
+} from './water.js';
 import {
   repayLoan, takeLoan, toggleInsurance, trainCrew,
 } from './economy.js';
@@ -56,7 +60,8 @@ export function createGame(seed = CONFIG.city.seed) {
     credits: CONFIG.economy.start,
     stats: { saved: 0, lost: 0, alarms: 0, rescued: 0, casualties: 0, escaped: 0, treated: 0 },
     ledger: createLedger(),
-    ownedStations: [true, false],
+    ownedStations: [true, false, false],
+    victims: [],
     loan: 0,
     insured: false,
     training: { fire: 0, medic: 0, rescue: 0 },
@@ -113,6 +118,7 @@ export function update(state, dt) {
   updateEconomy(state, dt);
   updateContracts(state);
   updatePatients(state, dt);
+  updateVictims(state, dt);
   updateUnits(state, dt);
   updateFire(state, dt);
   updateWildfires(state, dt);
@@ -127,6 +133,7 @@ export function getSelected(state) {
   if (!sel) return null;
   if (sel.kind === 'patient') return findPatient(state, sel.id);
   if (sel.kind === 'blockade') return findBlockade(state, sel.id);
+  if (sel.kind === 'victim') return findVictim(state, sel.id);
   if (sel.kind === 'wildfire') {
     return (state.wildfires ?? []).find((w) => w.id === sel.id) ?? null;
   }
@@ -136,6 +143,10 @@ export function getSelected(state) {
 
 export function selectWildfire(state, id) {
   state.selected = id ? { kind: 'wildfire', id } : null;
+}
+
+export function selectVictim(state, id) {
+  state.selected = id ? { kind: 'victim', id } : null;
 }
 
 export function selectBlockade(state, id) {
@@ -180,6 +191,11 @@ export function pickAt(state, wx, wy, pad = 0) {
     }
   }
   if (best) return best;
+
+  // Someone in the water: a generous target, picked before anything else on the ground.
+  for (const v of state.victims ?? []) {
+    if (Math.hypot(v.x - wx, v.y - wy) <= 20 + pad) return { kind: 'victim', id: v.id };
+  }
 
   // Wrecks and debris: the whole blocked rectangle is the target.
   for (const b of state.blockades ?? []) {
@@ -233,6 +249,7 @@ export function commandMove(state, wx, wy, buildingId = null) {
   if (selected.kind === 'wildfire') return commandDispatchWildfire(state, selected.id);
   if (selected.kind === 'patient') return commandDispatchPatient(state, selected.id);
   if (selected.kind === 'blockade') return commandDispatchBlockade(state, selected.id);
+  if (selected.kind === 'victim') return commandDispatchVictim(state, selected.id);
   if (selected.kind === 'engine') return orderEngine(state, selected, wx, wy, buildingId);
   if (selected.kind === 'crew') return orderCrew(state, selected, wx, wy, buildingId);
   // A building is selected: send the active engine to it if it is alight.
@@ -240,14 +257,16 @@ export function commandMove(state, wx, wy, buildingId = null) {
   return false;
 }
 
-function closestIdleEngine(state, x, y) {
+function closestIdleEngine(state, x, y, radiusTiles = 0) {
   let idle = null;
   let idleD = Infinity;
   let near = null;
   let nearD = Infinity;
   for (const engine of state.engines) {
     if (!isFirefighter(engine)) continue;
-    // A helicopter is the right tool for a forest fire, wherever it is parked.
+    // A fireboat only helps where there is water in reach of the fire.
+    if (engine.spec.boat && !boatCanReach(state, engine, x, y, radiusTiles)) continue;
+    // Aircraft are the right tool for a forest fire, wherever they are parked.
     const d = Math.hypot(engine.x - x, engine.y - y) * (engine.spec.flying ? 0.45 : 1);
     if (d < nearD) {
       nearD = d;
@@ -268,7 +287,7 @@ export function commandDispatchWildfire(state, id) {
   if (!wildfire) return false;
   const selected = getSelected(state);
   const engine = selected && selected.kind !== 'wildfire' ? engineForUnit(state, selected) : null;
-  const chosen = engine ?? closestIdleEngine(state, wildfire.x, wildfire.y);
+  const chosen = engine ?? closestIdleEngine(state, wildfire.x, wildfire.y, wildfire.radius / TILE);
   if (!chosen) return false;
   selectUnit(state, chosen.id);
   return orderEngineToWildfire(state, chosen, wildfire);
@@ -288,6 +307,26 @@ export function commandDispatchPatient(state, id) {
   if (!orderAmbulanceToPatient(state, engine, patient)) return false;
   selectUnit(state, engine.id);
   return true;
+}
+
+/** Send divers to someone in the water: the selected diver vehicle, else the nearest that can get there. */
+export function commandDispatchVictim(state, id) {
+  const victim = findVictim(state, id);
+  if (!victim) return false;
+  const selected = getSelected(state);
+  const picked = selected && selected.kind !== 'victim' ? engineForUnit(state, selected) : null;
+  const candidates = picked?.spec?.diver ? [picked] : diveVehiclesFor(state, victim);
+  if (candidates.length === 0) {
+    addEvent(state, 'No divers — buy a dive team or a rescue boat', 'warn');
+    return false;
+  }
+  for (const engine of candidates) {
+    if (orderEngineToVictim(state, engine, victim)) {
+      selectUnit(state, engine.id);
+      return true;
+    }
+  }
+  return false;
 }
 
 /** Send a crew to clear a wreck: the selected fire vehicle, else the best free one. */
@@ -335,7 +374,16 @@ export function commandDispatch(state, buildingId = null) {
   if (selected?.kind === 'wildfire') return commandDispatchWildfire(state, selected.id);
   if (selected?.kind === 'patient') return commandDispatchPatient(state, selected.id);
   if (selected?.kind === 'blockade') return commandDispatchBlockade(state, selected.id);
+  if (selected?.kind === 'victim') return commandDispatchVictim(state, selected.id);
   const engine = selected ? engineForUnit(state, selected) : null;
+  if (engine?.spec?.diver) {
+    const victim = nearestVictim(state, engine.x, engine.y, { unclaimed: true }) ?? nearestVictim(state, engine.x, engine.y);
+    if (!victim) {
+      addEvent(state, 'Nobody is in the water', 'info');
+      return false;
+    }
+    return commandDispatchVictim(state, victim.id);
+  }
   if (engine && isMedical(engine)) {
     if ((engine.cargo?.length ?? 0) > 0) return commandHospital(state);
     const patient = nearestPatient(state, engine.x, engine.y, { unclaimed: true })
@@ -348,6 +396,8 @@ export function commandDispatch(state, buildingId = null) {
   }
   if (!engine && !buildingId && activeFires(state).length === 0) {
     const hq = state.city.station;
+    const swimmer = nearestVictim(state, (hq.x + hq.w / 2) * TILE, (hq.y + hq.h / 2) * TILE, { unclaimed: true });
+    if (swimmer) return commandDispatchVictim(state, swimmer.id);
     const patient = nearestPatient(state, (hq.x + hq.w / 2) * TILE, (hq.y + hq.h / 2) * TILE, { unclaimed: true });
     if (patient) return commandDispatchPatient(state, patient.id);
     const wreck = state.blockades[0];
@@ -411,26 +461,27 @@ export function commandBuyVehicle(state, type = 'engine', station = null) {
   return engine;
 }
 
-/** Open Station 2: a second set of bays and a second helipad. */
-export function commandBuyStation(state) {
-  if (state.ownedStations[1]) {
-    addEvent(state, 'Station 2 is already open', 'info');
+/** Open Station 2 (index 1) or the Harbour Dock (index 2). */
+export function commandBuyStation(state, index = 1) {
+  const station = state.city.stations[index];
+  if (!station || index === 0) return false;
+  if (state.ownedStations[index]) {
+    addEvent(state, `${station.name} is already open`, 'info');
     return false;
   }
-  const price = CONFIG.economy.stationPrice;
+  const price = index === 2 ? CONFIG.economy.dockPrice : CONFIG.economy.stationPrice;
   if (state.credits < price) {
-    addEvent(state, `Not enough credits — $${price.toLocaleString('en-US')} for Station 2`, 'warn');
+    addEvent(state, `Not enough credits — $${price.toLocaleString('en-US')} for ${station.name}`, 'warn');
     return false;
   }
   spend(state, price, 'station');
-  state.ownedStations[1] = true;
-  addEvent(state, 'Station 2 is open — eight more bays across the city', 'good');
+  state.ownedStations[index] = true;
+  addEvent(
+    state,
+    index === 2 ? 'The Harbour Dock is open — eight berths for boats' : 'Station 2 is open — eight more bays across the city',
+    'good',
+  );
   return true;
-}
-
-export function commandUpgrade(state, engineId, kind) {
-  const engine = state.engines.find((e) => e.id === engineId);
-  return upgradeVehicle(state, engine, kind);
 }
 
 export const commandLoan = (state, amount) => takeLoan(state, amount);
@@ -458,7 +509,7 @@ export { orderEngine, orderCrew };
 
 export function serialize(state) {
   return {
-    version: 4,
+    version: 5,
     seed: state.seed,
     time: state.time,
     clock: state.clock,
@@ -496,8 +547,6 @@ export function serialize(state) {
       supply: e.supply,
       kits: e.kits,
       cargo: (e.cargo ?? []).map((c) => ({ ...c })),
-      upgrades: { ...(e.upgrades ?? {}) },
-      invested: e.invested ?? 0,
     })),
     crews: state.crew.map((c) => ({
       id: c.id,
@@ -530,6 +579,9 @@ export function serialize(state) {
     })),
     wind: { ...state.wind },
     ownedStations: [...state.ownedStations],
+    victims: state.victims.map((v) => ({
+      id: v.id, x: v.x, y: v.y, label: v.label, life: v.life, maxLife: v.maxLife,
+    })),
     loan: state.loan,
     insured: state.insured,
     training: { ...state.training },
@@ -566,7 +618,8 @@ export function loadState(data) {
     b.big = Boolean(saved.big);
   }
 
-  state.ownedStations = data.ownedStations ?? [true, false];
+  state.ownedStations = [...(data.ownedStations ?? [true, false]), false, false].slice(0, 3);
+  restoreVictims(state, data.victims ?? []);
   state.loan = data.loan ?? 0;
   state.insured = Boolean(data.insured);
   state.training = { fire: 0, medic: 0, rescue: 0, ...(data.training ?? {}) };
