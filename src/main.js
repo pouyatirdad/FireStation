@@ -11,7 +11,7 @@ import {
   commandDispatchPatient, commandDispatchBlockade, commandPharmacy, commandHospital,
   selectPatient, selectBlockade, selectVictim, commandDispatchVictim,
   commandBuyStation, commandLoan, commandRepay, commandInsurance,
-  commandTrain, commandAcceptContract,
+  commandTrain, commandAcceptContract, commandEquip,
   selectWildfire, getSelected, serialize, loadState,
 } from './systems/game.js';
 import { createAudio } from './systems/audio.js';
@@ -391,6 +391,7 @@ function onAction(action, data = {}) {
     }
     case 'center': centerOnSelected(); break;
     case 'hydrant': commandHydrant(state); break;
+    case 'equip': if (commandEquip(state, data.tool)) audio.play('select'); break;
     case 'open-station': toggleStation(); break;
     case 'close-station': hideOverlay(stationScreen); break;
     case 'buy-vehicle': buyApparatus(data.type ?? 'engine'); break;
@@ -471,7 +472,7 @@ function sellApparatus(id) {
 
 // ------------------------------------------------------------------- save ---
 
-const SAVE_KEY = 'firestation.save.v6';
+const SAVE_KEY = 'firestation.save.v7';
 
 function hasSave() {
   try {
@@ -622,6 +623,11 @@ window.addEventListener('keydown', (ev) => {
     case 'p': commandPharmacy(state); break;
     case 'k': commandHospital(state); break;
     case 'c': centerOnSelected(); break;
+    // Equipment: hose, chainsaw, diving gear, rescue cutter.
+    case 'f': commandEquip(state, 'hose'); break;
+    case 'x': commandEquip(state, 'chainsaw'); break;
+    case 'v': commandEquip(state, 'diving'); break;
+    case 't': commandEquip(state, 'cutter'); break;
     case '+':
     case '=':
       cam.zoom = clamp(cam.zoom * 1.15, CONFIG.camera.minZoom, CONFIG.camera.maxZoom);
@@ -804,7 +810,7 @@ if (params.has('pileup')) {
 if (params.has('water')) {
   startGame();
   commandBuyStation(state, 2);
-  for (const t of ['fireboat', 'rescueboat', 'divetruck', 'airtanker', 'medcar', 'ambubus']) commandBuyVehicle(state, t);
+  for (const t of ['fireboat', 'rescueboat', 'rescue', 'airtanker', 'medcar', 'ambubus']) commandBuyVehicle(state, t);
 }
 if (params.has('drown')) {
   startGame();

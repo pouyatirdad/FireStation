@@ -420,6 +420,45 @@ button { font-family: inherit; }
   grid-column: 1 / -1;
 }
 
+/* Equipment: one button per tool in the vehicle's lockers. */
+.sel__label {
+  margin: -4px 0 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.sel__tools {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin: 0 0 12px;
+}
+
+.btn--tool {
+  justify-content: space-between;
+  padding: 7px 8px;
+  font-size: 11px;
+}
+
+.btn--tool.is-active {
+  border-color: var(--warn);
+  background: rgba(217, 164, 65, 0.16);
+}
+
+.btn--tool:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.sel__count {
+  margin-left: 4px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .supply {
   display: flex;
   align-items: center;

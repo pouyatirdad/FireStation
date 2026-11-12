@@ -481,7 +481,7 @@ export function createCity(seed = 7) {
       const pine = block.woods === 'pine' ? 0.8 : 0.35;
       forestAreas.push({ x0, y0, x1, y1, woods: block.woods });
       for (let y = y0; y <= y1; y++) {
-        for (let x = x0; x <= x1; x++) woods[at(x, y)] = 1;
+        for (let x = x0; x <= x1; x++) woods[at(x, y)] = block.woods === 'pine' ? 2 : 1;
       }
       for (let y = y0 + 1; y <= y1 - 1; y++) {
         for (let x = x0 + 1; x <= x1 - 1; x++) {
@@ -567,6 +567,106 @@ export function createCity(seed = 7) {
   }
 
   for (const block of blocks) fillBlock(block);
+
+  // --- no streets in the woods --------------------------------------------
+  // A road with forest on both sides is not a street: the trees grow over it.
+  // Those tiles become forest, so the only way in by vehicle is a track a crew
+  // cuts with a chainsaw. What is left of each avenue and street is kept as
+  // runs, for the traffic and the renderer.
+  const wooded = (x, y) => inb(x, y) && woods[at(x, y)] !== 0;
+  const cleared = [];
+  const clearRun = (x0, y0, x1, y1, type) => {
+    forestAreas.push({ x0, y0, x1, y1, woods: type === 2 ? 'pine' : 'mixed', cleared: true });
+  };
+  for (const vx of V_ROADS) {
+    let start = -1;
+    for (let y = 0; y <= h; y++) {
+      let inside = false;
+      if (y < h && road[at(vx, y)]) {
+        const hy = H_ROADS.find((r) => y >= r && y <= r + 1);
+        inside = hy != null
+          ? wooded(vx - 1, hy - 1) && wooded(vx + 2, hy - 1) && wooded(vx - 1, hy + 2) && wooded(vx + 2, hy + 2)
+          : wooded(vx - 1, y) && wooded(vx + 2, y);
+      }
+      if (inside) {
+        if (start < 0) start = y;
+        cleared.push([vx, y, woods[at(vx - 1, y)] || woods[at(vx - 1, y - 2)]], [vx + 1, y, woods[at(vx + 2, y)] || woods[at(vx + 2, y - 2)]]);
+      } else if (start >= 0) {
+        clearRun(vx, start, vx + 1, y - 1, woods[at(vx - 1, start)] || woods[at(vx - 1, start - 2)]);
+        start = -1;
+      }
+    }
+  }
+  for (const hy of H_ROADS) {
+    let start = -1;
+    for (let x = 0; x <= w; x++) {
+      const junction = V_ROADS.some((vx) => x >= vx && x <= vx + 1);
+      const inside = x < w && !junction && road[at(x, hy)] && wooded(x, hy - 1) && wooded(x, hy + 2);
+      if (inside) {
+        if (start < 0) start = x;
+        cleared.push([x, hy, woods[at(x, hy - 1)]], [x, hy + 1, woods[at(x, hy + 2)]]);
+      } else if (start >= 0) {
+        clearRun(start, hy, x - 1, hy + 1, woods[at(start, hy - 1)]);
+        start = -1;
+      }
+    }
+  }
+  for (const [x, y, type] of cleared) {
+    const i = at(x, y);
+    road[i] = 0;
+    bridge[i] = 0;
+    woods[i] = type || 1;
+  }
+  // The cleared strips, and a forest block's rim wherever it no longer meets a
+  // street, are forest like the rest.
+  for (const [x, y] of cleared) {
+    const i = at(x, y);
+    if (forest[i] || water[i] || blocked[i]) continue;
+    forest[i] = 1;
+    forestTiles.push({ x, y });
+    if (tileHash(x, y, 21) < 0.16) {
+      trees.push({
+        x: (x + 0.2 + tileHash(x, y, 22) * 0.6) * TILE,
+        y: (y + 0.2 + tileHash(x, y, 23) * 0.6) * TILE,
+        r: 14 + tileHash(x, y, 24) * 8,
+        ...species(x, y, woods[i] === 2 ? 0.8 : 0.35),
+      });
+    }
+  }
+  for (const block of blocks) {
+    if (block.kind !== 'forest') continue;
+    for (let y = block.y0; y <= block.y1; y++) {
+      for (let x = block.x0; x <= block.x1; x++) {
+        const i = at(x, y);
+        if (forest[i] || water[i] || blocked[i]) continue;
+        let byRoad = false;
+        for (let dy = -1; dy <= 1 && !byRoad; dy++) {
+          for (let dx = -1; dx <= 1; dx++) if (inb(x + dx, y + dy) && road[at(x + dx, y + dy)]) byRoad = true;
+        }
+        if (byRoad) continue;
+        forest[i] = 1;
+        forestTiles.push({ x, y });
+      }
+    }
+  }
+
+  const spans = (n, test) => {
+    const out = [];
+    let start = -1;
+    for (let i = 0; i <= n; i++) {
+      if (i < n && test(i)) {
+        if (start < 0) start = i;
+      } else if (start >= 0) {
+        out.push([start, i - 1]);
+        start = -1;
+      }
+    }
+    return out;
+  };
+  const roadRuns = {
+    v: V_ROADS.map((vx) => ({ line: vx, spans: spans(h, (y) => road[at(vx, y)] && road[at(vx + 1, y)]) })),
+    h: H_ROADS.map((hy) => ({ line: hy, spans: spans(w, (x) => road[at(x, hy)] && road[at(x, hy + 1)]) })),
+  };
 
   // --- Station 2: the same layout as Station 1, in the Civic Quarter. It is
   // for sale; its apron and bays only count once it has been bought. ----------
@@ -762,6 +862,7 @@ export function createCity(seed = 7) {
     w,
     h,
     road,
+    roadRuns,
     apron,
     blocked,
     park,

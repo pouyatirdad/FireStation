@@ -51,6 +51,12 @@ export function pickRoadSpot(state, allowed = () => true, from = null) {
       if (crossesRoad(V_ROADS, tx, tx + 2)) continue;
     }
     if (rect.tx < 2 || rect.ty < 2 || rect.tx + rect.tw > city.w - 2 || rect.ty + rect.th > city.h - 2) continue;
+    // Only where there is a street: not in the woods, not in the sea.
+    let onRoad = true;
+    for (let y = rect.ty; y < rect.ty + rect.th && onRoad; y++) {
+      for (let x = rect.tx; x < rect.tx + rect.tw; x++) if (!city.road[y * city.w + x]) onRoad = false;
+    }
+    if (!onRoad) continue;
     const cx = rect.tx + rect.tw / 2;
     const cy = rect.ty + rect.th / 2;
     if (Math.hypot(cx - sx, cy - sy) < CONFIG.blockade.minStationDist) continue;

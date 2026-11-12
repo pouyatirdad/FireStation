@@ -3,7 +3,7 @@
 A top-down emergency-services management game for Windows, in the spirit of **Emergency 4**: a
 520×384 city (ten times the area of the first version) with forests, pharmacies and a waterfront,
 a fleet of thirteen kinds of apparatus you buy and sell — engines, ladders, tankers, rescue units,
-paramedic cars, ambulances and ambulance buses, divers, fireboats, a helicopter, an air tanker and
+paramedic cars, ambulances and ambulance buses, rescue boats, fireboats, a helicopter, an air tanker and
 **ambulances** — small calls and major incidents, injured civilians, forest fires, a real budget,
 synthesised sound, hospitals, blocked roads with live traffic, wind that drives the fire, chained incidents and a day/night cycle. Vanilla JavaScript, no dependencies; one self-contained
 `index.html`.
@@ -44,12 +44,14 @@ the night.
 |---|---|
 | **Respond** | Select a vehicle (click it or press <kbd>1</kbd>–<kbd>6</kbd>) and right-click a fire. It takes the fastest road route and parks on the nearest street. With nothing selected, <kbd>D</kbd> sends the nearest idle vehicle. |
 | **Deploy** | The crew ride along. On scene they dismount, walk to the fire and attack it on their own. <kbd>E</kbd> deploys them by hand, <kbd>R</kbd> packs them up. |
+| **Equipment** | Each vehicle carries tools in its lockers, and a firefighter takes one at a time: **hose** (<kbd>F</kbd>), **chainsaw** (<kbd>X</kbd>), **diving gear** (<kbd>V</kbd>) or **rescue cutter** (<kbd>T</kbd>). Select a firefighter, or a vehicle (someone aboard steps out with it), and press the key or the button on the card. The card shows how many of each are left. Climbing back aboard puts the tool away. |
+| **Chainsaw** | There are no roads inside the forests. With a chainsaw selected, right-click in the woods: the firefighter cuts a two-tile track from the nearest road toward that point, tree by tree, leaving stumps and log piles. Vehicles can drive the track, so an engine can reach a fire deep in the forest. |
 | **Rescue** | A fire leaves people trapped — a red badge on the building shows how many. A crew at the building brings one person out at a time. If it collapses first, they are lost. Small rescue jobs exist too. |
 | **Headquarters** | <kbd>B</kbd> opens a three-tab panel: **Fleet** (buy and sell, pick which station gets the vehicle, open Station 2 and the Harbour Dock), **Finance** and **Contracts**. |
 | **Injured** | People hurt in a fire lie on the street with a countdown ring and a red cross. Right-click them or press <kbd>D</kbd> with an ambulance selected. Medical emergencies also come in as calls of their own. |
 | **Pharmacy** | An ambulance carries 8 medical kits (one per patient). Restock slowly and free on the station apron, or fast beside any pharmacy for $12 a kit. <kbd>P</kbd> sends the selected ambulance to the nearest one. |
 | **Hospital** | Each base has its own hospital beside the apron (Station 2's opens with the station). A **critical** patient (flagged on their card) is stabilised on the spot, put on a stretcher (two per ambulance, eight on a bus) and driven to the base hospital automatically, for $260 each. <kbd>K</kbd> sends the ambulance by hand. **When an ambulance has finished its work it drives back to the base hospital by itself.** |
-| **Roads** | Wrecks and debris **block the street**: those tiles are closed to the fleet until a deployed crew clears them (rescue units twice as fast). Engines on the move re-plan round a new blockage. Traffic fills every avenue, queues behind a wreck, and in rush hour (07–09 and 16:30–18:30) slows your response by 20%. |
+| **Roads** | Wrecks and debris **block the street**: those tiles are closed to the fleet until a deployed crew clears them (a firefighter with a rescue cutter works 1.8× as fast). Engines on the move re-plan round a new blockage. Traffic fills every avenue, queues behind a wreck, and in rush hour (07–09 and 16:30–18:30) slows your response by 20%. |
 | **Wind** | The top bar shows the wind. Fire spreads up to ~2.5× as often downwind and barely crosses upwind; a forest fire creeps downwind and throws embers further that way; smoke and sparks lean with it. It shifts every few minutes. |
 | **Find it** | <kbd>Tab</kbd> jumps to the next incident (fire, forest fire, trapped people or an injured person), <kbd>Home</kbd> back to the station. Off-screen incidents get an arrow on the edge of the screen and a dot on the minimap. |
 | **Hose** | Water only flows within the vehicle's hose range — the dashed circle around it. |
@@ -73,11 +75,12 @@ the night.
 | **Air tanker** | none | 5,000 L | — | 8 (circling) | $11,000 | $140 |
 | **Fireboat** | none | unlimited | — | 18 (from the water) | $6,200 | $70 |
 | **Rescue boat** | 2 divers | — | — | — | $2,800 | $34 |
-| **Dive team** | 2 divers | — | — | — | $2,300 | $30 |
 | **Paramedic car** | 1 paramedic | 4 kits | walks 18 tiles | — | $750 | $12 |
 | **Ambulance bus** | 4 paramedics | 16 kits, 8 stretchers | walks 24 tiles | — | $3,400 | $48 |
 
 - **Command car:** no hose, no water. Parked, it makes every crew within 26 tiles spray 20% harder.
+- **Lockers:** an **engine** carries a chainsaw and two sets of diving gear; a **ladder** one chainsaw; a
+  **rescue** unit two chainsaws, two rescue cutters and two sets of diving gear; a **tanker** only hose.
 - **Helicopter:** flies in a straight line over roads, wrecks and traffic and hovers over the target, dropping water on buildings and forest fires alike. It refills on any station apron or by dipping in the harbour (the south edge of the map), so it is fast but never close to the water. It is the first choice when you right-click a forest fire.
 - **Station 2:** a second station in the Civic Quarter, for sale at $9,000. It adds eight bays and a second helipad, its apron refills and restocks like Station 1's, and calls begin to come from its district too.
 
@@ -108,7 +111,7 @@ The **Finance** tab holds the levers:
 
 The south of the map is the **harbour** and a **river** runs down through the east, crossed by every street on a bridge. People go into the water (a car off a bridge, someone off the quay) and have about 80–130 seconds.
 
-- **Dive team** drives to the bank and its divers swim out; the **rescue boat** sails to the casualty and puts them over the side. Right-click the person (or press <kbd>D</kbd> with a diver vehicle selected). Someone brought out is a critical patient: the ambulances and the hospital take over.
+- **No special vehicle is needed to dive.** An engine or rescue unit drives to the bank, the firefighters it has diving gear for suit up and swim out, and the others stay aboard; the **rescue boat** sails to the casualty and puts its divers over the side. Right-click the person, or give a firefighter diving gear (<kbd>V</kbd>) yourself. Someone brought out is a critical patient: the ambulances and the hospital take over.
 - **Fireboat** pumps river or harbour water without limit from 18 tiles out, but only works fires near the water. **Air tanker** circles a fire dropping water and skims the sea to refill. Both are strong, and neither is any use inland.
 - Boats berth at the **Harbour Dock** ($6,500, eight berths on the quay), which has to be bought first.
 - A fire that nobody is fighting spreads more and further the longer it burns dry, and is flagged **out of control** after a minute. Get water on it early.
@@ -130,6 +133,10 @@ There is a real budget, shown in the top bar and in Headquarters.
   scaled by what the building is worth (a hotel pays 1.8× a shop, a house 0.8×), $120 per rescue, $160
   per treated patient, the odd community donation, and an **hourly city subsidy** of $260 that shrinks to
   40% as the city rating falls.
+- **Volunteers' grant:** very rarely a volunteers' foundation gives **$20,000–$50,000**. It can only
+  happen after a run of 10–20 successful missions, only while the city is doing well (rating 85 or more,
+  no forest fire, at most one building alight), and even then only on a lucky roll — a miss pushes the
+  next chance a few missions on.
 - **Costs:** every game hour (two real minutes) the city deducts the **upkeep** of every vehicle (there are no crew wages). A lost building costs $350 (scaled the same way), a life $700, and kits
   bought at a pharmacy $12 each.
 - The balance can go negative; you just cannot buy anything until it recovers. A full eight-bay fleet
@@ -144,9 +151,9 @@ multi-building block fire, or a forest fire in one of the woods. Only one major 
 time, and the small calls keep coming in the background.
 
 The biggest woodland is the **Southeast Forest**: a pine forest of twenty-five blocks east of the river,
-from the Eastside district down to the quay. The roads through it are country roads with grass verges,
-no street lamps and no parked cars, and it is a long drive from Station 1, so a fire there is a job
-for the helicopter or the air tanker first.
+from the Eastside district down to the quay. No road runs through any forest, only round it, so a fire
+deep inside is out of hose reach from the street: send the helicopter or the air tanker, or give a
+firefighter the chainsaw and cut a track in for an engine.
 
 A forest fire is an area, not a building. It grows, throws embers into any building it reaches, and
 has to be fought on foot from the tree line: park on the nearest street, deploy the crew, and let
@@ -185,6 +192,8 @@ lists the pointer controls. <kbd>F1</kbd> opens the full list.
 | <kbd>M</kbd> | Sound on or off |
 | <kbd>E</kbd> / <kbd>R</kbd> | Deploy / recall the crew |
 | <kbd>G</kbd> | Connect or detach the hydrant supply line |
+| <kbd>F</kbd> / <kbd>X</kbd> / <kbd>V</kbd> / <kbd>T</kbd> | Hose / chainsaw / diving gear / rescue cutter for the selected firefighter (or someone from the selected vehicle) |
+| Right-click with a chainsaw | Cut a track into the woods toward that point |
 | <kbd>B</kbd> | Headquarters (fleet, finance, contracts) |
 | <kbd>H</kbd> | Send the selected vehicle back to the station |
 | <kbd>C</kbd> | Center on the selection |

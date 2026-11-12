@@ -256,7 +256,7 @@ function drawStreetLights(ctx, city, b, z, glowPass) {
   const hr = H_ROADS.filter((hy) => hy + 2 >= b.y0 - 1 && hy <= b.y1 + 1);
   for (const vx of vr) {
     for (const hy of hr) {
-      if (hy >= SEA_Y - 1 || ruralJunction(city, vx, hy)) continue;
+      if (hy >= SEA_Y - 1 || !city.road[hy * city.w + vx] || ruralJunction(city, vx, hy)) continue;
       for (const [cx, cy] of [[vx - 0.35, hy - 0.35], [vx + 2.35, hy + 2.35]]) {
         const px = cx * TILE;
         const py = cy * TILE;
@@ -312,14 +312,19 @@ function drawGround(ctx, state, b, z) {
   // a whole forest costs one fill. The trees drawn on top break up the repeat
   // and give the edges their ragged line.
   const forests = (city.forestAreas ?? []).filter((a) => !(a.x1 < b.x0 - 1 || a.x0 > b.x1 + 1 || a.y1 < b.y0 - 1 || a.y0 > b.y1 + 1));
-  for (const area of forests) {
-    ctx.fillStyle = canopy(ctx, area.woods ?? 'mixed', z >= 0.7 ? 2 : z >= 0.24 ? 1 : 0.25);
-    ctx.fillRect(
-      area.x0 * TILE,
-      area.y0 * TILE,
-      (area.x1 - area.x0 + 1) * TILE,
-      (area.y1 - area.y0 + 1) * TILE,
-    );
+  // One path per forest type, so neighbouring blocks and the strips where
+  // streets used to run join without a seam.
+  for (const woods of ['mixed', 'pine']) {
+    ctx.beginPath();
+    let any = false;
+    for (const area of forests) {
+      if ((area.woods ?? 'mixed') !== woods) continue;
+      ctx.rect(area.x0 * TILE, area.y0 * TILE, (area.x1 - area.x0 + 1) * TILE, (area.y1 - area.y0 + 1) * TILE);
+      any = true;
+    }
+    if (!any) continue;
+    ctx.fillStyle = canopy(ctx, woods, z >= 0.7 ? 2 : z >= 0.24 ? 1 : 0.25);
+    ctx.fill();
   }
   ctx.fillStyle = grass;
   for (const p of city.parks) {
@@ -350,24 +355,31 @@ function drawGround(ctx, state, b, z) {
 
   drawWater(ctx, state, b, z);
 
-  // Streets stop at the quay.
-  const roadH = Math.max(0, Math.min(top + height, SEA_Y * TILE) - top);
+  // Streets: only the stretches that are left of each avenue and street — none
+  // in the woods, none in the sea.
+  const vRuns = runsInView(city, 'v', vr, b.y0, b.y1);
+  const hRuns = runsInView(city, 'h', hr, b.x0, b.x1);
+  const roadAt = (x, y) => city.road[y * city.w + x] === 1;
   ctx.fillStyle = asphalt;
-  for (const vx of vr) ctx.fillRect(vx * TILE, top, 2 * TILE, roadH);
-  for (const hy of hr) ctx.fillRect(left, hy * TILE, width, 2 * TILE);
+  for (const r of vRuns) ctx.fillRect(r.line * TILE, r.a * TILE, 2 * TILE, (r.b - r.a + 1) * TILE);
+  for (const r of hRuns) ctx.fillRect(r.a * TILE, r.line * TILE, (r.b - r.a + 1) * TILE, 2 * TILE);
 
-  // Kerbs: a pale lip and a dark gutter line along both sides of every street.
+  // Kerbs: a dark gutter line along both sides of every street.
   if (z >= 0.5) {
     ctx.lineWidth = 2;
     ctx.strokeStyle = 'rgba(20,20,20,0.35)';
     ctx.beginPath();
-    for (const vx of vr) {
-      ctx.moveTo(vx * TILE + 1, top); ctx.lineTo(vx * TILE + 1, top + roadH);
-      ctx.moveTo((vx + 2) * TILE - 1, top); ctx.lineTo((vx + 2) * TILE - 1, top + roadH);
+    for (const r of vRuns) {
+      const y0 = r.a * TILE;
+      const y1 = (r.b + 1) * TILE;
+      ctx.moveTo(r.line * TILE + 1, y0); ctx.lineTo(r.line * TILE + 1, y1);
+      ctx.moveTo((r.line + 2) * TILE - 1, y0); ctx.lineTo((r.line + 2) * TILE - 1, y1);
     }
-    for (const hy of hr) {
-      ctx.moveTo(left, hy * TILE + 1); ctx.lineTo(left + width, hy * TILE + 1);
-      ctx.moveTo(left, (hy + 2) * TILE - 1); ctx.lineTo(left + width, (hy + 2) * TILE - 1);
+    for (const r of hRuns) {
+      const x0 = r.a * TILE;
+      const x1 = (r.b + 1) * TILE;
+      ctx.moveTo(x0, r.line * TILE + 1); ctx.lineTo(x1, r.line * TILE + 1);
+      ctx.moveTo(x0, (r.line + 2) * TILE - 1); ctx.lineTo(x1, (r.line + 2) * TILE - 1);
     }
     ctx.stroke();
   }
@@ -378,15 +390,15 @@ function drawGround(ctx, state, b, z) {
     ctx.strokeStyle = PALETTE.centre;
     ctx.lineWidth = 1.6;
     ctx.beginPath();
-    for (const vx of vr) {
-      const x = (vx + 1) * TILE;
-      ctx.moveTo(x - 2, top); ctx.lineTo(x - 2, top + roadH);
-      ctx.moveTo(x + 2, top); ctx.lineTo(x + 2, top + roadH);
+    for (const r of vRuns) {
+      const x = (r.line + 1) * TILE;
+      ctx.moveTo(x - 2, r.a * TILE); ctx.lineTo(x - 2, (r.b + 1) * TILE);
+      ctx.moveTo(x + 2, r.a * TILE); ctx.lineTo(x + 2, (r.b + 1) * TILE);
     }
-    for (const hy of hr) {
-      const y = (hy + 1) * TILE;
-      ctx.moveTo(left, y - 2); ctx.lineTo(left + width, y - 2);
-      ctx.moveTo(left, y + 2); ctx.lineTo(left + width, y + 2);
+    for (const r of hRuns) {
+      const y = (r.line + 1) * TILE;
+      ctx.moveTo(r.a * TILE, y - 2); ctx.lineTo((r.b + 1) * TILE, y - 2);
+      ctx.moveTo(r.a * TILE, y + 2); ctx.lineTo((r.b + 1) * TILE, y + 2);
     }
     ctx.stroke();
   }
@@ -394,18 +406,21 @@ function drawGround(ctx, state, b, z) {
   ctx.fillStyle = asphalt;
   for (const vx of vr) {
     for (const hy of hr) {
-      ctx.fillRect(vx * TILE, hy * TILE, 2 * TILE, 2 * TILE);
+      if (roadAt(vx, hy)) ctx.fillRect(vx * TILE, hy * TILE, 2 * TILE, 2 * TILE);
     }
   }
 
   if (z >= 0.7) {
     for (const vx of vr) {
-      for (const hy of hr) if (!ruralJunction(city, vx, hy)) drawCrosswalks(ctx, vx * TILE, hy * TILE);
+      for (const hy of hr) {
+        if (roadAt(vx, hy) && !ruralJunction(city, vx, hy)) drawCrosswalks(ctx, vx * TILE, hy * TILE);
+      }
     }
   }
 
   drawBridges(ctx, b, z);
-  if (z >= 0.3) drawVerges(ctx, forests, z);
+  if (z >= 0.3) drawVerges(ctx, city, forests, z);
+  drawTracks(ctx, state, b, z);
 
   // The station apron and its parking bays.
   for (const st of city.stations ?? [{ apron: APRON }]) {
@@ -445,7 +460,7 @@ function drawGround(ctx, state, b, z) {
     ctx.stroke();
   }
 
-  if (z >= 0.7) drawRoadWear(ctx, vr, hr, b);
+  if (z >= 0.7) drawRoadWear(ctx, city, vr, hr, b);
   drawStreetLights(ctx, city, b, z, false);
 
   // Trees and hydrants sit on the ground, in front of the streets.
@@ -462,6 +477,7 @@ function drawGround(ctx, state, b, z) {
         for (const tree of city.trees) {
           if ((tree.kind ?? 'broadleaf') !== kind) continue;
           if (tree.x < x0 || tree.x > x1 || tree.y < y0 || tree.y > y1) continue;
+          if (felled(state, tree)) continue;
           ctx.moveTo(tree.x + tree.r, tree.y);
           ctx.arc(tree.x, tree.y, tree.r, 0, Math.PI * 2);
         }
@@ -470,7 +486,7 @@ function drawGround(ctx, state, b, z) {
     } else {
       // All the shadows in one path (overlapping shade does not double up),
       // then each crown as a cached sprite.
-      const visible = city.trees.filter((t) => t.x >= x0 && t.x <= x1 && t.y >= y0 && t.y <= y1);
+      const visible = city.trees.filter((t) => t.x >= x0 && t.x <= x1 && t.y >= y0 && t.y <= y1 && !felled(state, t));
       const rot = Math.atan2(currentSun.dy, currentSun.dx);
       const stretch = 1 + 0.25 * Math.abs(currentSun.dx);
       ctx.fillStyle = `rgba(10,18,10,${0.32 * (1 - currentDark * 0.85)})`;
@@ -660,10 +676,11 @@ function drawWater(ctx, state, b, z) {
 
 // Patches, cracks, oil stains and manhole covers, scattered deterministically
 // along each street so the asphalt looks used.
-function drawRoadWear(ctx, vr, hr, b) {
+function drawRoadWear(ctx, city, vr, hr, b) {
   const mark = (px, py, along, id) => {
     const r = hash(id);
     if (r > 0.42) return;
+    if (!city.road[Math.floor(py / TILE) * city.w + Math.floor(px / TILE)]) return;
     const kind = Math.floor(r * 10) % 4;
     if (kind === 0) { // manhole
       ctx.fillStyle = 'rgba(18,19,21,0.55)';
@@ -769,6 +786,9 @@ function drawDistrictLabels(ctx, state, z) {
 }
 
 // ----------------------------------------------------------------- trees ---
+
+const felled = (state, tree) => state.cutCount > 0
+  && state.cut[Math.floor(tree.y / TILE) * state.city.w + Math.floor(tree.x / TILE)] === 1;
 
 const TREE_DOT = { conifer: '#22392a', broadleaf: '#3f5d33', birch: '#5f7a3e' };
 const CANOPY_FLAT = { pine: '#1f3426', mixed: '#2a4026' };
@@ -930,28 +950,119 @@ function ruralJunction(city, vx, hy) {
 
 // Where a road runs past a forest, a grass verge and a dirt edge replace the
 // kerb, so it reads as a country road through the trees.
-function drawVerges(ctx, forests, z) {
+function drawVerges(ctx, city, forests, z) {
   const grassy = texture(ctx, 'verge', '#4b5a34', 900);
   const vw = 8;
+  const roadAt = (tx, ty) => tx >= 0 && ty >= 0 && tx < city.w && ty < city.h && city.road[ty * city.w + tx] === 1;
   for (const a of forests) {
+    if (a.cleared) continue;
     const x = a.x0 * TILE;
     const y = a.y0 * TILE;
     const w = (a.x1 - a.x0 + 1) * TILE;
     const h = (a.y1 - a.y0 + 1) * TILE;
+    const mx = Math.floor((a.x0 + a.x1) / 2);
+    const my = Math.floor((a.y0 + a.y1) / 2);
+    const sides = [
+      [roadAt(mx, a.y0 - 1), x, y - vw, w, vw, x, y - vw, x + w, y - vw],
+      [roadAt(mx, a.y1 + 1), x, y + h, w, vw, x, y + h + vw, x + w, y + h + vw],
+      [roadAt(a.x0 - 1, my), x - vw, y, vw, h, x - vw, y, x - vw, y + h],
+      [roadAt(a.x1 + 1, my), x + w, y, vw, h, x + w + vw, y, x + w + vw, y + h],
+    ];
     ctx.fillStyle = grassy;
-    ctx.fillRect(x, y - vw, w, vw);
-    ctx.fillRect(x, y + h, w, vw);
-    ctx.fillRect(x - vw, y, vw, h);
-    ctx.fillRect(x + w, y, vw, h);
+    for (const [road, rx, ry, rw, rh] of sides) if (road) ctx.fillRect(rx, ry, rw, rh);
     if (z >= 0.6) {
       ctx.strokeStyle = 'rgba(92,78,52,0.55)';
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.moveTo(x, y - vw); ctx.lineTo(x + w, y - vw);
-      ctx.moveTo(x, y + h + vw); ctx.lineTo(x + w, y + h + vw);
-      ctx.moveTo(x - vw, y); ctx.lineTo(x - vw, y + h);
-      ctx.moveTo(x + w + vw, y); ctx.lineTo(x + w + vw, y + h);
+      for (const [road, , , , , ax, ay, bx, by] of sides) {
+        if (!road) continue;
+        ctx.moveTo(ax, ay);
+        ctx.lineTo(bx, by);
+      }
       ctx.stroke();
+    }
+  }
+}
+
+// What is left of each avenue (axis 'v') or street ('h') in view, as
+// { line, a, b } tile ranges along it.
+const runIndex = new WeakMap();
+function runsInView(city, axis, lines, lo, hi) {
+  let index = runIndex.get(city);
+  if (!index) {
+    index = { v: new Map(), h: new Map() };
+    for (const k of ['v', 'h']) for (const r of city.roadRuns?.[k] ?? []) index[k].set(r.line, r.spans);
+    runIndex.set(city, index);
+  }
+  const out = [];
+  for (const line of lines) {
+    const spans = index[axis].get(line) ?? [[0, (axis === 'v' ? Math.min(city.h, SEA_Y) : city.w) - 1]];
+    for (const [a, b] of spans) {
+      if (b < lo - 2 || a > hi + 2) continue;
+      out.push({ line, a: Math.max(a, lo - 2), b: Math.min(b, hi + 2) });
+    }
+  }
+  return out;
+}
+
+// Tracks cut through the forest: bare earth with tyre ruts, sawdust, and the
+// stumps and stacked logs left along the edges.
+function drawTracks(ctx, state, b, z) {
+  const cut = state.cut;
+  if (!cut || !state.cutCount) return;
+  const w = state.city.w;
+  const dirt = texture(ctx, 'dirt', '#6b5a43', 1200);
+  ctx.fillStyle = dirt;
+  for (let y = b.y0; y <= b.y1; y++) {
+    for (let x = b.x0; x <= b.x1; x++) {
+      if (cut[y * w + x]) ctx.fillRect(x * TILE - 1, y * TILE - 1, TILE + 2, TILE + 2);
+    }
+  }
+  if (z < 0.5) return;
+  for (let y = b.y0; y <= b.y1; y++) {
+    for (let x = b.x0; x <= b.x1; x++) {
+      if (!cut[y * w + x]) continue;
+      const seed = x * 31.7 + y * 17.3;
+      // Ruts where the wheels go.
+      ctx.fillStyle = 'rgba(40,30,20,0.25)';
+      const vertical = cut[(y - 1) * w + x] || cut[(y + 1) * w + x];
+      if (vertical) {
+        ctx.fillRect(x * TILE + 8, y * TILE, 4, TILE);
+        ctx.fillRect(x * TILE + 20, y * TILE, 4, TILE);
+      } else {
+        ctx.fillRect(x * TILE, y * TILE + 8, TILE, 4);
+        ctx.fillRect(x * TILE, y * TILE + 20, TILE, 4);
+      }
+      // A stump or a log pile on tiles at the edge of the track.
+      const edge = !cut[y * w + x - 1] || !cut[y * w + x + 1] || !cut[(y - 1) * w + x] || !cut[(y + 1) * w + x];
+      if (!edge || hash(seed) > 0.55) continue;
+      const px = x * TILE + 6 + hash(seed + 1) * 20;
+      const py = y * TILE + 6 + hash(seed + 2) * 20;
+      if (hash(seed + 3) < 0.6) {
+        ctx.fillStyle = '#5a4430';
+        ctx.beginPath();
+        ctx.arc(px, py, 4.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#c9a77a';
+        ctx.beginPath();
+        ctx.arc(px, py, 3.2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(90,64,40,0.6)';
+        ctx.lineWidth = 0.7;
+        ctx.beginPath();
+        ctx.arc(px, py, 1.6, 0, Math.PI * 2);
+        ctx.stroke();
+      } else {
+        for (let i = 0; i < 3; i++) {
+          ctx.fillStyle = i % 2 ? '#6e5338' : '#7d5f40';
+          rr(ctx, px - 9, py - 5 + i * 3.6, 18, 3.8, 1.8);
+          ctx.fill();
+          ctx.fillStyle = '#c9a77a';
+          ctx.beginPath();
+          ctx.arc(px + 9, py - 3.1 + i * 3.6, 1.7, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
     }
   }
 }
@@ -2137,25 +2248,7 @@ function drawEngine(ctx, e, now) {
   if (type === 'medcar') ctx.scale(0.62, 0.78);
   else if (type === 'ambubus') ctx.scale(1.38, 1.04);
 
-  if (type === 'divetruck') {
-    paint(ctx, -41, -17, 58, 34, 5, '#eceff0');
-    ctx.fillStyle = '#2d7fd0';
-    ctx.fillRect(-41, -2, 58, 4);
-    ctx.fillStyle = '#c9ced3';
-    ctx.fillRect(-36, -14, 30, 1.6);
-    ctx.fillRect(-36, 12.4, 30, 1.6);
-    ctx.fillStyle = '#e04a2f';
-    rr(ctx, -34, -10, 14, 7, 1.5);
-    ctx.fill();
-    ctx.fillStyle = '#31373d';
-    rr(ctx, -14, 3, 20, 8, 2);
-    ctx.fill();
-    ctx.fillStyle = '#8a9096';
-    ctx.fillRect(-12, 5, 16, 1.4);
-    cab(ctx, 15, 26, '#dfe2e3');
-    lightBar(ctx, 22, busy, now, ['#ff3b30', '#ff3b30']);
-    chevrons(ctx, -41, 3);
-  } else if (type === 'command') {
+  if (type === 'command') {
     paint(ctx, -37, -16, 76, 32, 8, '#f1efe9');
     ctx.fillStyle = '#c93a2f';
     ctx.fillRect(-37, -2.5, 76, 5);
@@ -2329,8 +2422,59 @@ function drawEngine(ctx, e, now) {
   ctx.restore();
 }
 
+// The tool in a firefighter's hands, in the crew's rotated frame (forward is -y).
+function drawHeldTool(ctx, c, now, swing) {
+  if (c.riding) return;
+  if (c.tool === 'chainsaw') {
+    const buzz = c.status === 'cutting' ? Math.sin(now * 60) * 0.6 : 0;
+    ctx.save();
+    ctx.translate(5.5 + buzz, -6 - swing * 0.3);
+    ctx.fillStyle = '#e2701e'; // body
+    rr(ctx, -2.6, -2, 5.2, 5.6, 1.2);
+    ctx.fill();
+    ctx.fillStyle = '#2a2d31'; // handle
+    ctx.fillRect(-2.2, 2.8, 4.4, 1.4);
+    ctx.fillStyle = '#b9bdc1'; // bar and chain
+    rr(ctx, -1.1, -12, 2.2, 10.4, 1);
+    ctx.fill();
+    ctx.restore();
+  } else if (c.tool === 'cutter') {
+    ctx.save();
+    ctx.translate(0, -8);
+    ctx.fillStyle = '#d9b51e'; // spreader arms
+    ctx.beginPath();
+    ctx.moveTo(-1.6, 2);
+    ctx.lineTo(-3.6, -7);
+    ctx.lineTo(-1.6, -7);
+    ctx.lineTo(0, 0);
+    ctx.lineTo(1.6, -7);
+    ctx.lineTo(3.6, -7);
+    ctx.lineTo(1.6, 2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#c0392b'; // hydraulic body
+    rr(ctx, -2.4, 1.5, 4.8, 4, 1);
+    ctx.fill();
+    ctx.restore();
+  } else if (c.tool === 'medkit') {
+    ctx.fillStyle = '#e9eee9';
+    rr(ctx, 6, -3, 5, 4.4, 1);
+    ctx.fill();
+    ctx.fillStyle = '#d64535';
+    ctx.fillRect(8, -2.4, 1, 3.2);
+    ctx.fillRect(6.9, -1.3, 3.2, 1);
+  } else if (c.fetch) {
+    // Reaching into the locker.
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.beginPath();
+    ctx.arc(0, -11, 1.6 + Math.abs(Math.sin(now * 6)) * 1.2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
 function drawCrew(ctx, c, now) {
-  if (c.diver && (c.status === 'swimming' || c.status === 'rescuing')) {
+  const diver = c.tool === 'diving';
+  if (diver && (c.status === 'swimming' || c.status === 'rescuing')) {
     ctx.strokeStyle = 'rgba(220,240,252,0.5)';
     ctx.lineWidth = 1.5;
     ctx.beginPath();
@@ -2359,8 +2503,8 @@ function drawCrew(ctx, c, now) {
   // helmet. Firefighters in tan turnout gear, paramedics in white and green,
   // divers in black with an orange tank.
   const swing = c.status === 'moving' ? Math.sin(now * 12 + c.x * 0.1) * 2.6 : 0;
-  const coat = c.diver ? '#262c33' : c.medic ? '#e9eee9' : '#c9a24a';
-  const coatDark = c.diver ? '#14181c' : c.medic ? '#aeb8b0' : '#8c6d2b';
+  const coat = diver ? '#262c33' : c.medic ? '#e9eee9' : '#c9a24a';
+  const coatDark = diver ? '#14181c' : c.medic ? '#aeb8b0' : '#8c6d2b';
   ctx.fillStyle = coatDark; // arms
   ctx.beginPath();
   ctx.ellipse(-7.6, 0.5 + swing, 2.5, 4, 0, 0, Math.PI * 2);
@@ -2376,14 +2520,14 @@ function drawCrew(ctx, c, now) {
   ctx.beginPath();
   ctx.ellipse(0, 1, 7.8, 5, 0, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = c.diver ? '#e86f1f' : c.medic ? '#3a9d6a' : '#e4e0c8'; // reflective bands
+  ctx.fillStyle = diver ? '#e86f1f' : c.medic ? '#3a9d6a' : '#e4e0c8'; // reflective bands
   ctx.fillRect(-4.6, -3.6, 1.8, 9.2);
   ctx.fillRect(2.8, -3.6, 1.8, 9.2);
-  ctx.fillStyle = c.diver ? '#e86f1f' : c.medic ? '#2f6f9a' : '#3a3f44'; // tank / pack
+  ctx.fillStyle = diver ? '#e86f1f' : c.medic ? '#2f6f9a' : '#3a3f44'; // tank / pack
   rr(ctx, -3.4, 2.4, 6.8, 4.6, 1.5);
   ctx.fill();
   // Helmet: shell, brim to the front, reflective crest.
-  ctx.fillStyle = c.diver ? '#2d7fd0' : c.medic ? '#f2f6f3' : '#e6c93d';
+  ctx.fillStyle = diver ? '#2d7fd0' : c.medic ? '#f2f6f3' : '#e6c93d';
   ctx.beginPath();
   ctx.ellipse(0, -0.5, 4.2, 4.6, 0, 0, Math.PI * 2);
   ctx.fill();
@@ -2393,6 +2537,15 @@ function drawCrew(ctx, c, now) {
   ctx.fill();
   ctx.fillStyle = c.medic ? '#d64535' : '#b92f23';
   ctx.fillRect(-0.7, -4, 1.4, 7);
+  if (diver) {
+    // Fins behind, mask in front.
+    ctx.fillStyle = '#e8d23a';
+    ctx.fillRect(-4.8, 7 + swing * 0.4, 3.2, 4.6);
+    ctx.fillRect(1.6, 7 - swing * 0.4, 3.2, 4.6);
+    ctx.fillStyle = 'rgba(120,190,230,0.85)';
+    ctx.fillRect(-2.6, -4.6, 5.2, 1.6);
+  }
+  drawHeldTool(ctx, c, now, swing);
   ctx.restore();
 
   // Treatment progress, drawn upright above the paramedic.
@@ -2736,6 +2889,10 @@ function drawParticles(ctx, state) {
       const s = 4 + (1 - life) * 2;
       ctx.fillRect(p.x - s / 2, p.y - s * 1.5, s, s * 3);
       ctx.fillRect(p.x - s * 1.5, p.y - s / 2, s * 3, s);
+    } else if (p.kind === 'chip') {
+      ctx.globalAlpha = Math.min(1, life * 1.8);
+      ctx.fillStyle = p.tone < 0.5 ? '#d8b98a' : '#a6835a';
+      ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size * 0.7);
     } else if (p.kind === 'debris') {
       ctx.globalAlpha = Math.min(1, life * 1.5);
       ctx.save();
@@ -3321,8 +3478,12 @@ function miniStatic(state, mw, mh) {
     g.fillRect(pk.x0 * TILE * sx, pk.y0 * TILE * sy, (pk.x1 - pk.x0 + 1) * TILE * sx, (pk.y1 - pk.y0 + 1) * TILE * sy);
   }
   g.fillStyle = '#5a626b';
-  for (const vx of V_ROADS) g.fillRect(vx * TILE * sx, 0, Math.max(1, 2 * TILE * sx), SEA_Y * TILE * sy);
-  for (const hy of H_ROADS) g.fillRect(0, hy * TILE * sy, mw, Math.max(1, 2 * TILE * sy));
+  for (const r of runsInView(city, 'v', V_ROADS, 0, city.h)) {
+    g.fillRect(r.line * TILE * sx, r.a * TILE * sy, Math.max(1, 2 * TILE * sx), (r.b - r.a + 1) * TILE * sy);
+  }
+  for (const r of runsInView(city, 'h', H_ROADS, 0, city.w)) {
+    g.fillRect(r.a * TILE * sx, r.line * TILE * sy, (r.b - r.a + 1) * TILE * sx, Math.max(1, 2 * TILE * sy));
+  }
   for (const b of state.buildings) {
     g.fillStyle = b.state === 'rubble' ? '#4d4a44' : b.type === 'pharmacy' ? '#7fcf9c' : b.type === 'hospital' ? '#ff8f8f' : '#7d848d';
     const bigger = b.type === 'hospital' ? 2.5 : 1.2;

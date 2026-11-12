@@ -116,7 +116,7 @@ test('a rescue boat sails up the river, divers bring the person out, and they be
   const state = shift();
   commandBuyStation(state, 2);
   const boat = commandBuyVehicle(state, 'rescueboat');
-  assert.equal(state.crew.filter((c) => c.engineId === boat.id && c.diver).length, 2);
+  assert.equal(state.crew.filter((c) => c.engineId === boat.id && c.tool === 'diving').length, 2);
   const victim = riverVictim(state);
   victim.life = victim.maxLife = 400;
   selectUnit(state, boat.id);
@@ -136,22 +136,28 @@ test('a rescue boat sails up the river, divers bring the person out, and they be
   assert.ok(state.events.some((e) => /Diver brought someone out/.test(e.text)));
 });
 
-test('a dive team drives to the bank and its divers swim out', () => {
+test('an engine needs no dive vehicle: its firefighters suit up on the bank and swim out', () => {
   const state = shift();
-  const truck = commandBuyVehicle(state, 'divetruck');
+  const truck = state.engines[0];
   // The first bridge over the river on a street.
   let bridge = null;
   for (let i = 0; i < city.bridge.length && !bridge; i++) if (city.bridge[i]) bridge = { x: i % city.w, y: Math.floor(i / city.w) };
   const victim = spawnVictim(state, (bridge.x + 0.5) * TILE, (bridge.y + 2.5) * TILE, 'the bridge');
   victim.life = victim.maxLife = 600;
   selectUnit(state, truck.id);
-  assert.equal(commandDispatch(state), true);
+  assert.equal(commandDispatchVictim(state, victim.id), true);
   let seconds = 0;
+  let divers = 0;
   while ((state.stats.dived ?? 0) < 1 && seconds < 400) {
     update(state, 1 / 30);
     seconds += 1 / 30;
+    divers = Math.max(divers, state.crew.filter((c) => c.engineId === truck.id && c.tool === 'diving').length);
   }
   assert.equal(state.stats.dived, 1, `not rescued after ${seconds.toFixed(0)} s (${truck.status})`);
+  assert.equal(divers, CONFIG.vehicles.engine.tools.diving, 'the engine did not send out its divers');
+  // The hose crew stayed aboard; the divers swim back and stow the gear.
+  for (let i = 0; i < 30 * 40; i++) update(state, 1 / 30);
+  assert.ok(state.crew.filter((c) => c.engineId === truck.id).every((c) => c.riding), 'the divers never came back aboard');
 });
 
 test('someone left in the water drowns when their clock runs out', () => {
@@ -356,7 +362,7 @@ test('the unit list groups vehicles by what they do', () => {
   const state = shift();
   const kinds = {
     engine: 'fire', command: 'fire', ambulance: 'medical', ambubus: 'medical', medcar: 'medical',
-    helicopter: 'air', airtanker: 'air', divetruck: 'water', rescueboat: 'water', fireboat: 'water',
+    helicopter: 'air', airtanker: 'air', rescue: 'fire', rescueboat: 'water', fireboat: 'water',
   };
   commandBuyStation(state, 2);
   for (const [type, group] of Object.entries(kinds)) {
