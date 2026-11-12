@@ -16,8 +16,10 @@ import { streamImpact, spawnRescue } from './effects.js';
 import { rescuePerson } from './civilians.js';
 import { earn, spend } from './economy.js';
 import {
-  findPatient, isMedical, nearestPatient, nearestPharmacy, restockKits, treatPatient,
+  findPatient, hospitalInReach, isMedical, nearestHospital, nearestPatient, nearestPharmacy,
+  restockKits, treatPatient, unloadCargo,
 } from './medical.js';
+import { workOnBlockade } from './blockades.js';
 
 const CREW_OFFSETS = [
   { a: 0.85, r: 26 },
@@ -83,6 +85,9 @@ function spawnVehicle(state, type) {
     kits: spec.kits ?? 0,
     kitAcc: 0,
     patientId: null,
+    cargo: [],
+    goal: null,
+    blockadeId: null,
   };
   state.engines.push(engine);
   for (let i = 0; i < spec.crew; i++) spawnCrew(state, engine);
@@ -190,6 +195,9 @@ function vehicleBase(state, type, overrides = {}) {
     kits: spec.kits ?? 0,
     kitAcc: 0,
     patientId: null,
+    cargo: [],
+    goal: null,
+    blockadeId: null,
     ...overrides,
   };
 }
@@ -215,6 +223,7 @@ export function restoreFleet(state, saved = {}) {
       targetId: entry.targetId ?? null,
       supply: entry.supply ?? null,
       kits: entry.kits ?? CONFIG.vehicles[type].kits ?? 0,
+      cargo: (entry.cargo ?? []).map((c) => ({ ...c })),
     });
     state.vehicleCount[type] = Math.max(state.vehicleCount[type] ?? 0, engine.number);
     state.engines.push(engine);
@@ -362,6 +371,8 @@ export function orderEngine(state, engine, wx, wy, buildingId = null, wildfireId
   engine.path = smoothPath(state.nav, 'drive', { x: engine.x, y: engine.y }, tiles);
   engine.targetId = building?.id ?? null;
   engine.wildfireId = wildfireId;
+  engine.blockadeId = null;
+  engine.goal = goal;
   engine.arrived = false;
   engine.packTimer = crewOut ? 1.4 : 0;
   engine.status = 'responding';
@@ -492,6 +503,82 @@ export function toggleHydrant(state, engine) {
   };
   addEvent(state, `${engine.name}: supply line connected`, 'good');
   return true;
+}
+
+/** Re-plan every moving vehicle's route; called when a road is blocked or reopened. */
+export function repathEngines(state) {
+  for (const engine of state.engines) {
+    if (engine.path.length === 0 || !engine.goal) continue;
+    const tiles = findPath(state.nav, 'drive', tileOf(engine.x, engine.y), engine.goal);
+    if (!tiles) {
+      engine.path = [];
+      engine.goal = null;
+      engine.targetId = null;
+      engine.wildfireId = null;
+      engine.patientId = null;
+      engine.blockadeId = null;
+      engine.status = 'blocked';
+      addEvent(state, `${engine.name}: every route is blocked — stopped`, 'warn');
+      continue;
+    }
+    engine.path = smoothPath(state.nav, 'drive', { x: engine.x, y: engine.y }, tiles);
+  }
+}
+
+/** Drive to a wreck and put the crew to work on it. */
+export function orderEngineToBlockade(state, engine, blockade) {
+  if (!engine || !blockade || isMedical(engine)) return false;
+  const ok = orderEngine(state, engine, blockade.x, blockade.y);
+  if (!ok) return false;
+  engine.blockadeId = blockade.id;
+  return true;
+}
+
+/** Closest free fire vehicle for a wreck; a rescue unit counts as nearer (it has the cutters). */
+export function pickEngineForBlockade(state, blockade) {
+  let best = null;
+  let bestScore = Infinity;
+  for (const engine of state.engines) {
+    if (isMedical(engine)) continue;
+    const free = !engine.targetId && !engine.wildfireId && !engine.blockadeId
+      && engine.path.length === 0 && engine.packTimer === 0;
+    const d = dist(engine.x, engine.y, blockade.x, blockade.y) * (engine.type === 'rescue' ? 0.6 : 1) + (free ? 0 : 1e6);
+    if (d < bestScore) {
+      bestScore = d;
+      best = engine;
+    }
+  }
+  return best;
+}
+
+/** Take the stretcher cases to the nearest hospital. */
+export function sendToHospital(state, engine) {
+  if (!engine || !isMedical(engine)) return false;
+  const hospital = nearestHospital(state, engine.x, engine.y);
+  if (!hospital) {
+    addEvent(state, 'No hospital in the city', 'warn');
+    return false;
+  }
+  if (hospitalInReach(state, engine) && (engine.cargo?.length ?? 0) > 0) {
+    unloadCargo(state, engine, hospital);
+    return true;
+  }
+  recallCrew(state, engine);
+  const ok = orderEngine(
+    state,
+    engine,
+    (hospital.x + hospital.w / 2) * TILE,
+    (hospital.y + hospital.h / 2) * TILE,
+    hospital.id,
+  );
+  if (ok) {
+    engine.targetId = null;
+    engine.patientId = null;
+    if ((engine.cargo?.length ?? 0) > 0) {
+      addEvent(state, `${engine.name} taking ${engine.cargo.length} patient${engine.cargo.length === 1 ? '' : 's'} to ${hospital.name}`, 'info');
+    }
+  }
+  return ok;
 }
 
 /** Send an ambulance to an injured person. */
@@ -651,6 +738,7 @@ function arriveEngine(state, engine) {
     if (engine.patientId || nearestPatient(state, engine.x, engine.y, { maxDist: reach })) {
       deployCrew(state, engine, null);
     }
+    engine.goal = null;
     engine.status = 'on scene';
     return;
   }
@@ -666,7 +754,11 @@ function arriveEngine(state, engine) {
     const wildfire = (state.wildfires ?? []).find((w) => w.id === engine.wildfireId);
     if (wildfire) deployCrew(state, engine, null);
     engine.wildfireId = null;
+  } else if (engine.blockadeId) {
+    if (state.blockades.some((b) => b.id === engine.blockadeId)) deployCrew(state, engine, null);
+    engine.blockadeId = null;
   }
+  engine.goal = null;
   engine.status = 'on scene';
 }
 
@@ -734,11 +826,11 @@ function updateEngine(state, engine, dt) {
   }
 
   if (engine.path.length > 0) {
-    followPath(engine, dt, engine.spec.speed * TILE);
+    followPath(engine, dt, engine.spec.speed * TILE * (state.trafficFactor ?? 1));
     engine.pumping = false;
     engine.refilling = false;
     if (engine.path.length === 0) arriveEngine(state, engine);
-    engine.status = 'responding';
+    engine.status = (engine.cargo?.length ?? 0) > 0 ? 'transporting' : 'responding';
     return;
   }
 
@@ -802,6 +894,21 @@ function updateAmbulance(state, engine, dt) {
   if (engine.patientId) {
     const patient = findPatient(state, engine.patientId);
     if (!patient || patient.treated) engine.patientId = null;
+  }
+
+  // Stretcher cases: deliver if at a hospital, otherwise set off once the crew are back aboard.
+  if ((engine.cargo?.length ?? 0) > 0) {
+    const hospital = hospitalInReach(state, engine);
+    if (hospital) {
+      unloadCargo(state, engine, hospital);
+    } else if (state.time >= (engine.hospitalRetry ?? 0)) {
+      const out = crewOf(state, engine).filter((c) => !c.riding);
+      if (out.length > 0 && engine.cargo.length >= engine.spec.carry) recallCrew(state, engine);
+      else if (out.length === 0) {
+        engine.hospitalRetry = state.time + 5;
+        sendToHospital(state, engine);
+      }
+    }
   }
 
   const tileX = Math.floor(engine.x / TILE);
@@ -893,6 +1000,42 @@ function updateMedic(state, crew, engine, dt) {
     treatPatient(state, patient, engine);
     crew.patientId = null;
   }
+}
+
+/** With no fire to fight, a crew within reach of a wreck clears it. Returns true if busy. */
+function updateCrewBlockade(state, crew, engine, dt) {
+  const hoseRange = engine.spec.hoseRange * TILE;
+  let best = null;
+  let bestRect = null;
+  let bestD = Infinity;
+  for (const b of state.blockades) {
+    const rect = { x: b.x - b.w / 2, y: b.y - b.h / 2, w: b.w, h: b.h };
+    const d = distToRect(engine.x, engine.y, rect);
+    if (d > hoseRange - 2.5 * TILE || d >= bestD) continue;
+    bestD = d;
+    best = b;
+    bestRect = rect;
+  }
+  if (!best) return false;
+
+  crew.spraying = false;
+  if (distToRect(crew.x, crew.y, bestRect) <= 2.2 * TILE) {
+    crew.path.length = 0;
+    crew.status = 'clearing';
+    workOnBlockade(state, best, dt * (engine.type === 'rescue' ? CONFIG.blockade.rescueBonus : 1));
+    return true;
+  }
+
+  crew.status = 'moving';
+  crew.think -= dt;
+  if (crew.think <= 0 || crew.path.length === 0) {
+    crew.think = 0.8;
+    const goal = standTileForRect(state.nav, bestRect, crew.x, crew.y, 3);
+    const tiles = goal ? findPath(state.nav, 'walk', tileOf(crew.x, crew.y), goal) : null;
+    if (tiles) crew.path = smoothPath(state.nav, 'walk', { x: crew.x, y: crew.y }, tiles);
+  }
+  followPath(crew, dt, CONFIG.crew.speed * TILE, { x: engine.x, y: engine.y, r: hoseRange });
+  return true;
 }
 
 function chooseTarget(state, crew, engine) {
@@ -1065,6 +1208,7 @@ function updateCrew(state, crew, dt) {
     target = chooseTarget(state, crew, engine);
     if (target) crew.targetId = target.id;
   }
+  if (!target && updateCrewBlockade(state, crew, engine, dt)) return;
   if (!target) {
     crew.spraying = false;
     crew.rescueTimer = 0;

@@ -4,6 +4,7 @@ import { CONFIG, TILE } from '../core/config.js';
 import { rectsTouch } from '../core/math.js';
 import { addEvent } from './events.js';
 import { evacuate } from './civilians.js';
+import { downwindFactor } from './wind.js';
 import {
   earn, money, spend, speedBonus, valueFactor,
 } from './economy.js';
@@ -85,10 +86,21 @@ function destroy(state, building) {
 function trySpread(state, building) {
   if (building.fire < 0.6) return;
   const rect = buildingRect(building);
+  const wind = state.wind;
+  // Downwind the fire reaches further; upwind it barely crosses the gap.
+  const reach = CONFIG.fire.spreadRange * TILE * (1 + 0.9 * (wind?.speed ?? 0));
+  const cx = rect.x + rect.w / 2;
+  const cy = rect.y + rect.h / 2;
   for (const other of state.buildings) {
     if (other === building || other.state !== 'ok') continue;
-    if (!rectsTouch(rect, buildingRect(other), CONFIG.fire.spreadRange * TILE)) continue;
-    if (state.rng.float() < CONFIG.fire.spreadChance * building.fire) {
+    const o = buildingRect(other);
+    if (!rectsTouch(rect, o, reach)) continue;
+    const ox = o.x + o.w / 2;
+    const oy = o.y + o.h / 2;
+    const factor = downwindFactor(state, cx, cy, ox, oy);
+    // The extended reach is only available downwind.
+    if (!rectsTouch(rect, o, CONFIG.fire.spreadRange * TILE) && factor <= 1) continue;
+    if (state.rng.float() < CONFIG.fire.spreadChance * building.fire * factor) {
       ignite(state, other, 'spread');
     }
   }
@@ -126,6 +138,12 @@ export function updateFire(state, dt) {
     if (b.fire <= CONFIG.fire.outAt) {
       extinguish(state, b);
       continue;
+    }
+
+    // An industrial fire left to run can take the whole building up with it.
+    if (b.type === 'warehouse' && b.fire >= 0.85 && !b.exploded && state.rng.float() < dt * 0.04) {
+      b.exploded = true;
+      state.onExplosion?.(b);
     }
 
     b.spreadTimer -= dt;

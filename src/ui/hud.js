@@ -5,6 +5,7 @@ import { CONFIG } from '../core/config.js';
 import { formatClock } from '../core/math.js';
 import { hydrantInReach } from '../systems/units.js';
 import { hourlyBudget } from '../systems/economy.js';
+import { windLabel } from '../systems/wind.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -16,6 +17,7 @@ const TYPE_LABEL = {
   hotel: 'Hotel',
   warehouse: 'Warehouse',
   pharmacy: 'Pharmacy',
+  hospital: 'Hospital',
   station: 'Fire station',
 };
 
@@ -29,6 +31,9 @@ const STATUS_TONE = {
   refilling: 'good',
   restocking: 'good',
   treating: 'good',
+  clearing: 'good',
+  transporting: 'warn',
+  blocked: 'bad',
   'no kits': 'bad',
   'in quarters': 'good',
   'no water': 'bad',
@@ -59,6 +64,9 @@ const SHORT_STATUS = {
   'no water': 'No water',
   restocking: 'Restocking',
   treating: 'Treating',
+  clearing: 'Clearing',
+  transporting: 'To hospital',
+  blocked: 'Blocked',
   'no kits': 'No kits',
 };
 
@@ -162,6 +170,7 @@ export function update(state, force = false) {
 
   const buildingFires = state.buildings.filter((b) => b.state === 'burning').length;
   const wildfires = state.wildfires?.length ?? 0;
+  const wrecks = state.blockades.length;
   const fires = buildingFires + wildfires;
   const trapped = state.buildings.reduce((sum, b) => sum + (b.trapped ?? 0), 0);
 
@@ -174,6 +183,9 @@ export function update(state, force = false) {
   budgetEl.dataset.tone = budget.net >= 0 ? 'good' : 'bad';
   budgetEl.title = `Subsidy ${money(budget.subsidy)} − wages ${money(budget.wages)} − upkeep ${money(budget.upkeep)} per game hour`;
   $('stat-injured').textContent = String(state.patients.filter((q) => !q.treated).length);
+  $('stat-wind').textContent = windLabel(state.wind);
+  $('wind-arrow').style.transform = `rotate(${state.wind.dir}rad)`;
+  $('stat-wind').title = 'Wind speed and the compass point it blows from. Fire spreads faster downwind.';
   $('stat-fires').textContent = String(fires);
   $('stat-trapped').textContent = String(trapped);
   $('stat-rescued').textContent = String(state.stats.rescued);
@@ -191,9 +203,10 @@ export function update(state, force = false) {
   }
 
   const banner = $('banner');
-  if (fires > 0) {
+  if (fires > 0 || wrecks > 0) {
     banner.hidden = false;
     const parts = [];
+    if (wrecks > 0) parts.push(`${wrecks} road${wrecks === 1 ? '' : 's'} blocked`);
     if (buildingFires > 0) parts.push(`${buildingFires} structure fire${buildingFires === 1 ? '' : 's'}`);
     if (wildfires > 0) parts.push(`${wildfires} forest fire${wildfires === 1 ? '' : 's'}`);
     const people = trapped > 0 ? ` · ${trapped} trapped` : '';
@@ -233,6 +246,9 @@ function engineTone(engine) {
 }
 
 function selectionSignature(state, entity) {
+  if (state.selected.kind === 'blockade') {
+    return [entity.id, Math.round(entity.progress * 50)].join(':');
+  }
   if (state.selected.kind === 'patient') {
     return [entity.id, entity.treated, Math.ceil(entity.life / 5), Math.round(entity.treatTimer)].join(':');
   }
@@ -242,7 +258,7 @@ function selectionSignature(state, entity) {
       : '';
     return [
       entity.id, entity.status, Math.round(entity.water / 80), entity.riding,
-      entity.kind === 'crew' ? entity.targetId : '', supply, entity.kits ?? '',
+      entity.kind === 'crew' ? entity.targetId : '', supply, entity.kits ?? '', entity.cargo?.length ?? '',
     ].join(':');
   }
   return [
@@ -258,6 +274,7 @@ function updateSelection(state) {
   if (selected?.kind === 'unit') entity = state.units.find((u) => u.id === selected.id);
   else if (selected?.kind === 'wildfire') entity = (state.wildfires ?? []).find((w) => w.id === selected.id);
   else if (selected?.kind === 'patient') entity = state.patients.find((q) => q.id === selected.id);
+  else if (selected?.kind === 'blockade') entity = state.blockades.find((q) => q.id === selected.id);
   else entity = state.buildings.find((b) => b.id === selected?.id);
 
   if (!entity) {
@@ -274,7 +291,9 @@ function updateSelection(state) {
   panel.hidden = false;
   panel.innerHTML = selected.kind === 'wildfire'
     ? wildfireCard(state, entity)
-    : selected.kind === 'patient'
+    : selected.kind === 'blockade'
+      ? blockadeCard(state, entity)
+      : selected.kind === 'patient'
       ? patientCard(state, entity)
       : selected.kind === 'unit'
       ? (entity.kind === 'engine' ? engineCard(state, entity) : crewCard(state, entity))
@@ -297,19 +316,36 @@ function wildfireCard(state, wildfire) {
     </div>`;
 }
 
+function blockadeCard(state, wreck) {
+  const free = state.engines.some((e) => !e.spec.medical);
+  const fuse = wreck.fuelAt != null && !wreck.fuelDone ? Math.max(0, Math.ceil(wreck.fuelAt - state.time)) : null;
+  return `
+    <div class="sel__kind">${wreck.big ? 'Major incident · ' : ''}${wreck.debris ? 'Debris' : 'Wreck'}</div>
+    <h2 class="sel__name">${esc(wreck.name)}</h2>
+    <div class="sel__status" data-tone="warn"><i></i>Road blocked</div>
+    <div class="bar__label"><span>Cleared</span><span>${Math.round(wreck.progress * 100)}%</span></div>
+    <div class="bar"><i style="width:${Math.round(wreck.progress * 100)}%"></i></div>
+    ${fuse != null ? `<div class="sel__alert">Fuel leaking — may ignite a building in ${fuse} s</div>` : ''}
+    <p class="sel__meta">Vehicles cannot drive through it; engines route round. A deployed crew within reach clears it (rescue units twice as fast).<br>Reward $${(wreck.reward ?? 0).toLocaleString('en-US')}${fuse != null ? ' + a quick-clearance bonus' : ''}.</p>
+    <div class="sel__actions">
+      ${free ? '<button type="button" class="btn" data-action="dispatch">Send a crew<kbd>D</kbd></button>' : ''}
+      <button type="button" class="btn" data-action="center">Locate<kbd>C</kbd></button>
+    </div>`;
+}
+
 function patientCard(state, patient) {
   const frac = Math.max(0, Math.min(1, patient.life / patient.maxLife));
   const free = state.engines.filter((e) => e.spec.medical && e.kits > 0).length;
   return `
     <div class="sel__kind">Medical emergency</div>
-    <h2 class="sel__name">Injured person</h2>
+    <h2 class="sel__name">${patient.critical ? 'Critically injured' : 'Injured person'}</h2>
     <div class="sel__status" data-tone="${patient.treated ? 'good' : 'bad'}"><i></i>${patient.treated ? 'Stabilised' : 'Needs an ambulance'}</div>
     ${patient.treated ? '' : `
       <div class="bar__label"><span>Time left</span><span>${Math.ceil(patient.life)} s</span></div>
       <div class="bar bar--health"><i style="width:${Math.round(frac * 100)}%"></i></div>`}
     <p class="sel__meta">Hurt near ${esc(patient.buildingName)}.<br>${
       free > 0
-        ? 'A paramedic crew walks out from the ambulance and uses one kit.'
+        ? `A paramedic crew walks out from the ambulance and uses one kit.${patient.critical ? ' Critical: once stabilised they go to a hospital.' : ''}`
         : 'No ambulance with kits — buy one at the station (B).'
     }</p>
     <div class="sel__actions">
@@ -333,10 +369,13 @@ function ambulanceCard(state, engine) {
     ${statusChip(engine.status)}
     <div class="bar__label"><span>Medical kits</span><span>${Math.floor(engine.kits)} / ${kits}</span></div>
     <div class="bar"><i style="width:${pct(engine.kits, kits)}"></i></div>
-    <p class="sel__meta">${aboard} aboard · ${crew.length - aboard} out<br>Paramedics walk up to ${engine.spec.medRange} tiles from the vehicle. Restock on the station apron (free, slow) or beside a pharmacy ($${CONFIG.economy.kitPrice} a kit, fast).</p>
+    <div class="bar__label"><span>Stretchers</span><span>${engine.cargo?.length ?? 0} / ${engine.spec.carry}</span></div>
+    <div class="bar"><i style="width:${pct(engine.cargo?.length ?? 0, engine.spec.carry)}"></i></div>
+    <p class="sel__meta">${aboard} aboard · ${crew.length - aboard} out<br>Paramedics walk up to ${engine.spec.medRange} tiles from the vehicle. Restock on the station apron (free, slow) or beside a pharmacy ($${CONFIG.economy.kitPrice} a kit, fast). Critical patients ride to a hospital for $${CONFIG.medical.transportFee} each.</p>
     <div class="sel__actions">
       <button type="button" class="btn" data-action="dispatch">Nearest patient<kbd>D</kbd></button>
       <button type="button" class="btn" data-action="pharmacy">Pharmacy<kbd>P</kbd></button>
+      <button type="button" class="btn" data-action="hospital">Hospital<kbd>K</kbd></button>
       <button type="button" class="btn" data-action="recall">Recall<kbd>R</kbd></button>
       <button type="button" class="btn" data-action="home">Station<kbd>H</kbd></button>
     </div>`;
@@ -471,13 +510,17 @@ function updateTooltip(state) {
       ? (state.wildfires ?? []).find((w) => w.id === hover.id)
       : hover.kind === 'patient'
         ? state.patients.find((q) => q.id === hover.id)
-        : state.buildings.find((b) => b.id === hover.id);
+        : hover.kind === 'blockade'
+          ? state.blockades.find((q) => q.id === hover.id)
+          : state.buildings.find((b) => b.id === hover.id);
   if (!entity) {
     tip.hidden = true;
     return;
   }
   let detail;
-  if (hover.kind === 'patient') {
+  if (hover.kind === 'blockade') {
+    detail = `Road blocked · ${Math.round(entity.progress * 100)}% cleared`;
+  } else if (hover.kind === 'patient') {
     detail = entity.treated ? 'Stabilised' : `Needs an ambulance · ${Math.ceil(entity.life)} s`;
   } else if (hover.kind === 'wildfire') {
     detail = `Forest fire · $${entity.reward ?? 0} · ${Math.round(entity.intensity * 100)}%`;

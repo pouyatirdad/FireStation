@@ -25,13 +25,14 @@ const buildingRectOf = (b) => ({
   h: b.h * TILE,
 });
 
-/** Put an injured person on the ground beside a building. */
-export function spawnPatient(state, building, severity = null) {
+/**
+ * Put an injured person on the ground at a point. Severity decides both how long
+ * they last and whether they are critical (stabilise them, then a hospital).
+ */
+export function spawnPatientAt(state, {
+  x, y, severity = null, label = 'somewhere', buildingId = null, silent = false,
+}) {
   if (state.patients.length >= 40) return null;
-  const rect = buildingRectOf(building);
-  const stand = standTileForRect(state.nav, rect, rect.x + rect.w / 2, rect.y + rect.h / 2, 4);
-  if (!stand) return null;
-  const centre = tileCenter(stand.x, stand.y);
   const sev = severity ?? state.rng.range(0.25, 1);
   const [lo, hi] = CONFIG.medical.survive;
   const survive = hi - (hi - lo) * sev;
@@ -39,21 +40,44 @@ export function spawnPatient(state, building, severity = null) {
     id: `patient${seq++}`,
     kind: 'patient',
     name: 'Injured person',
-    x: centre.x + state.rng.range(-10, 10),
-    y: centre.y + state.rng.range(-10, 10),
-    buildingId: building.id,
-    buildingName: building.name,
+    x,
+    y,
+    buildingId,
+    buildingName: label,
     severity: sev,
+    critical: sev >= CONFIG.medical.criticalAt,
     life: survive,
     maxLife: survive,
     treated: false,
     treatTimer: 0,
     claimedBy: null, // the ambulance heading for them
+    medicId: null,
     leaveAt: 0,
   };
   state.patients.push(patient);
-  addEvent(state, `Injured person near ${building.name} — ambulance needed`, 'warn');
+  if (!silent) {
+    addEvent(
+      state,
+      `Injured person near ${label} — ambulance needed${patient.critical ? ' (critical)' : ''}`,
+      'warn',
+    );
+  }
   return patient;
+}
+
+/** Put an injured person on the ground beside a building. */
+export function spawnPatient(state, building, severity = null) {
+  const rect = buildingRectOf(building);
+  const stand = standTileForRect(state.nav, rect, rect.x + rect.w / 2, rect.y + rect.h / 2, 4);
+  if (!stand) return null;
+  const centre = tileCenter(stand.x, stand.y);
+  return spawnPatientAt(state, {
+    x: centre.x + state.rng.range(-10, 10),
+    y: centre.y + state.rng.range(-10, 10),
+    severity,
+    label: building.name,
+    buildingId: building.id,
+  });
 }
 
 /** A few of the people who escape a fire are hurt. Called as the fire starts. */
@@ -120,6 +144,14 @@ export function treatPatient(state, patient, engine) {
   state.rating = Math.min(CONFIG.rating.start, state.rating + 2);
   const fee = earn(state, CONFIG.economy.treated, 'treatment');
   addEvent(state, `Patient stabilised near ${patient.buildingName} — ${money(fee)}`, 'good');
+  // A critical patient goes onto the stretcher, if there is room, for the hospital.
+  const room = (engine.spec.carry ?? 0) - (engine.cargo?.length ?? 0);
+  if (patient.critical && room > 0) {
+    engine.cargo = engine.cargo ?? [];
+    engine.cargo.push({ name: patient.buildingName, severity: patient.severity });
+    patient.leaveAt = state.time; // off the street at once
+    addEvent(state, `${engine.name}: patient on board for the hospital`, 'info');
+  }
   return true;
 }
 
@@ -197,4 +229,51 @@ export function restockKits(state, engine, dt, onApron) {
   }
   if (engine.kits >= max) engine.kitAcc = 0;
   return true;
+}
+
+// ------------------------------------------------------------ hospitals ---
+
+const distToBuilding = (x, y, b) => {
+  const r = buildingRectOf(b);
+  return distToRect(x, y, r);
+};
+
+export function nearestHospital(state, x, y) {
+  let best = null;
+  let bestD = Infinity;
+  for (const b of state.city.hospitals ?? []) {
+    if (b.state === 'rubble') continue;
+    const d = distToBuilding(x, y, b);
+    if (d < bestD) {
+      bestD = d;
+      best = b;
+    }
+  }
+  return best;
+}
+
+export function hospitalInReach(state, engine) {
+  const range = CONFIG.medical.hospitalRange * TILE;
+  for (const b of state.city.hospitals ?? []) {
+    if (b.state === 'rubble') continue;
+    if (distToBuilding(engine.x, engine.y, b) <= range) return b;
+  }
+  return null;
+}
+
+/** Hand over everyone on the stretchers. Returns how many were delivered. */
+export function unloadCargo(state, engine, hospital) {
+  const cargo = engine.cargo ?? [];
+  if (cargo.length === 0) return 0;
+  const n = cargo.length;
+  engine.cargo = [];
+  const fee = earn(state, n * CONFIG.medical.transportFee, 'transport');
+  state.stats.transported = (state.stats.transported ?? 0) + n;
+  state.rating = Math.min(CONFIG.rating.start, state.rating + 3 * n);
+  addEvent(
+    state,
+    `${engine.name} delivered ${n} patient${n === 1 ? '' : 's'} to ${hospital.name} — ${money(fee)}`,
+    'good',
+  );
+  return n;
 }

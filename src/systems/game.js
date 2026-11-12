@@ -9,9 +9,15 @@ import { buildNav } from './grid.js';
 import {
   activeEngine, buildingOf, buyVehicle, createUnits, deployCrew, dispatchEngine,
   engineForUnit, orderAmbulanceToPatient, orderCrew, orderEngine, orderEngineToWildfire,
-  pickAmbulanceFor, recallCrew, restoreFleet, sellVehicle, sendEngineHome, sendToPharmacy,
+  orderEngineToBlockade, pickAmbulanceFor, pickEngineForBlockade, recallCrew, repathEngines,
+  restoreFleet, sellVehicle, sendEngineHome, sendToHospital, sendToPharmacy,
   toggleHydrant, updateUnits,
 } from './units.js';
+import {
+  createTraffic, findBlockade, restoreBlockades, updateTraffic,
+} from './blockades.js';
+import { explode, updateChains } from './chains.js';
+import { createWind, updateWind } from './wind.js';
 import { createLedger, updateEconomy } from './economy.js';
 import {
   findPatient, isMedical, nearestPatient, restorePatients, updatePatients,
@@ -45,6 +51,8 @@ export function createGame(seed = CONFIG.city.seed) {
     stats: { saved: 0, lost: 0, alarms: 0, rescued: 0, casualties: 0, escaped: 0, treated: 0 },
     ledger: createLedger(),
     patients: [],
+    blockades: [],
+    wind: createWind(new Rng(seed * 104729 + 7)),
     events: [],
     eventSeq: 0,
     streams: [],
@@ -60,7 +68,10 @@ export function createGame(seed = CONFIG.city.seed) {
   };
 
   createUnits(state);
+  createTraffic(state);
   state.onDestroyed = (building) => spawnDebris(state, building);
+  state.onExplosion = (building) => explode(state, building);
+  state.onBlockadeChange = () => repathEngines(state);
   return state;
 }
 
@@ -84,7 +95,10 @@ export function update(state, dt) {
   state.streams.length = 0;
   state.hoses.length = 0;
 
+  updateWind(state, dt);
   updateIncidents(state, dt);
+  updateChains(state);
+  updateTraffic(state, dt);
   updateEconomy(state, dt);
   updatePatients(state, dt);
   updateUnits(state, dt);
@@ -100,6 +114,7 @@ export function getSelected(state) {
   const sel = state.selected;
   if (!sel) return null;
   if (sel.kind === 'patient') return findPatient(state, sel.id);
+  if (sel.kind === 'blockade') return findBlockade(state, sel.id);
   if (sel.kind === 'wildfire') {
     return (state.wildfires ?? []).find((w) => w.id === sel.id) ?? null;
   }
@@ -109,6 +124,10 @@ export function getSelected(state) {
 
 export function selectWildfire(state, id) {
   state.selected = id ? { kind: 'wildfire', id } : null;
+}
+
+export function selectBlockade(state, id) {
+  state.selected = id ? { kind: 'blockade', id } : null;
 }
 
 export function selectPatient(state, id) {
@@ -149,6 +168,13 @@ export function pickAt(state, wx, wy, pad = 0) {
     }
   }
   if (best) return best;
+
+  // Wrecks and debris: the whole blocked rectangle is the target.
+  for (const b of state.blockades ?? []) {
+    if (Math.abs(wx - b.x) <= b.w / 2 + pad && Math.abs(wy - b.y) <= b.h / 2 + pad) {
+      return { kind: 'blockade', id: b.id };
+    }
+  }
 
   // A person on the ground is small; give them a generous target.
   let patient = null;
@@ -194,6 +220,7 @@ export function commandMove(state, wx, wy, buildingId = null) {
   }
   if (selected.kind === 'wildfire') return commandDispatchWildfire(state, selected.id);
   if (selected.kind === 'patient') return commandDispatchPatient(state, selected.id);
+  if (selected.kind === 'blockade') return commandDispatchBlockade(state, selected.id);
   if (selected.kind === 'engine') return orderEngine(state, selected, wx, wy, buildingId);
   if (selected.kind === 'crew') return orderCrew(state, selected, wx, wy, buildingId);
   // A building is selected: send the active engine to it if it is alight.
@@ -250,6 +277,36 @@ export function commandDispatchPatient(state, id) {
   return true;
 }
 
+/** Send a crew to clear a wreck: the selected fire vehicle, else the best free one. */
+export function commandDispatchBlockade(state, id) {
+  const blockade = findBlockade(state, id);
+  if (!blockade) return false;
+  const selected = getSelected(state);
+  const picked = selected && selected.kind !== 'blockade' ? engineForUnit(state, selected) : null;
+  const engine = picked && !isMedical(picked) ? picked : pickEngineForBlockade(state, blockade);
+  if (!engine) {
+    addEvent(state, 'No fire vehicle available to clear the road', 'warn');
+    return false;
+  }
+  if (!orderEngineToBlockade(state, engine, blockade)) return false;
+  selectUnit(state, engine.id);
+  return true;
+}
+
+/** Send the selected ambulance to the hospital with whoever is on board. */
+export function commandHospital(state) {
+  const engine = engineForUnit(state, getSelected(state)) ?? activeEngine(state);
+  if (!engine || !isMedical(engine)) {
+    addEvent(state, 'Select an ambulance to send it to a hospital', 'warn');
+    return false;
+  }
+  if ((engine.cargo?.length ?? 0) === 0) {
+    addEvent(state, `${engine.name} has no patients on board`, 'info');
+    return false;
+  }
+  return sendToHospital(state, engine);
+}
+
 /** Send the selected ambulance to restock at the nearest pharmacy. */
 export function commandPharmacy(state) {
   const engine = engineForUnit(state, getSelected(state)) ?? activeEngine(state);
@@ -264,8 +321,10 @@ export function commandDispatch(state, buildingId = null) {
   const selected = getSelected(state);
   if (selected?.kind === 'wildfire') return commandDispatchWildfire(state, selected.id);
   if (selected?.kind === 'patient') return commandDispatchPatient(state, selected.id);
+  if (selected?.kind === 'blockade') return commandDispatchBlockade(state, selected.id);
   const engine = selected ? engineForUnit(state, selected) : null;
   if (engine && isMedical(engine)) {
+    if ((engine.cargo?.length ?? 0) > 0) return commandHospital(state);
     const patient = nearestPatient(state, engine.x, engine.y, { unclaimed: true })
       ?? nearestPatient(state, engine.x, engine.y);
     if (!patient) {
@@ -278,6 +337,8 @@ export function commandDispatch(state, buildingId = null) {
     const hq = state.city.station;
     const patient = nearestPatient(state, (hq.x + hq.w / 2) * TILE, (hq.y + hq.h / 2) * TILE, { unclaimed: true });
     if (patient) return commandDispatchPatient(state, patient.id);
+    const wreck = state.blockades[0];
+    if (wreck) return commandDispatchBlockade(state, wreck.id);
   }
   const target = buildingOf(state, buildingId)
     ?? (selected?.kind === 'building' && selected.state === 'burning' ? selected : null);
@@ -356,7 +417,7 @@ export { orderEngine, orderCrew };
 
 export function serialize(state) {
   return {
-    version: 2,
+    version: 3,
     seed: state.seed,
     time: state.time,
     clock: state.clock,
@@ -393,6 +454,7 @@ export function serialize(state) {
       targetId: e.targetId,
       supply: e.supply,
       kits: e.kits,
+      cargo: (e.cargo ?? []).map((c) => ({ ...c })),
     })),
     crews: state.crew.map((c) => ({
       id: c.id,
@@ -416,7 +478,14 @@ export function serialize(state) {
       life: p.life,
       maxLife: p.maxLife,
       treated: p.treated,
+      critical: p.critical,
     })),
+    blockades: state.blockades.map((b) => ({
+      id: b.id, name: b.name, place: b.place, tx: b.tx, ty: b.ty, tw: b.tw, th: b.th,
+      progress: b.progress, big: b.big, reward: b.reward, fuelAt: b.fuelAt,
+      fuelDone: b.fuelDone, debris: b.debris,
+    })),
+    wind: { ...state.wind },
     ledger: { ...state.ledger, lastBudget: state.ledger.lastBudget ? { ...state.ledger.lastBudget } : null, by: { ...(state.ledger.by ?? {}) } },
   };
 }
@@ -452,6 +521,8 @@ export function loadState(data) {
   restoreFleet(state, { engines: data.engines ?? [], crews: data.crews ?? [] });
   restoreWildfires(state, data.wildfires ?? []);
   restorePatients(state, data.patients ?? []);
+  restoreBlockades(state, data.blockades ?? []);
+  if (data.wind) state.wind = { ...state.wind, ...data.wind };
   if (data.ledger) state.ledger = { ...createLedger(), ...data.ledger };
   state.running = true;
   state.paused = false;

@@ -10,9 +10,10 @@ import { addEvent } from './events.js';
 import { buildingRect, ignite } from './fire.js';
 import { startWildfire } from './wildfire.js';
 import { spawnPatient } from './medical.js';
+import { pileUp, trafficAccident } from './chains.js';
 
 const SMALL = () => ['structure', 'structure', 'structure', 'rescue', 'block'];
-const BIG = ['industrial', 'bigBlock', 'forest'];
+const BIG = ['industrial', 'bigBlock', 'forest', 'pileup'];
 
 /**
  * How far from Station 1 (in tiles) a call can come from. It starts as the
@@ -145,7 +146,12 @@ function medicalCall(state) {
   return spawnPatient(state, building, state.rng.range(0.3, 1));
 }
 
+const roadAllowed = (state) => (x, y) => inCoverage(state, x, y);
+
 function spawnSmall(state) {
+  if (state.rng.chance(CONFIG.incidents.crashCall)) {
+    return trafficAccident(state, roadAllowed(state));
+  }
   if (state.rng.chance(CONFIG.incidents.medicalCall)) return medicalCall(state);
   const kind = state.rng.pick(SMALL());
   if (kind === 'rescue') return rescueJob(state);
@@ -157,11 +163,13 @@ function spawnBig(state) {
   const kind = state.rng.pick(BIG);
   if (kind === 'industrial') return industrialFire(state);
   if (kind === 'forest') return forestFire(state);
+  if (kind === 'pileup') return pileUp(state, (x, y) => inCoverage(state, x, y, 1.2));
   return bigBlockFire(state);
 }
 
 export function bigIncidentActive(state) {
   if (state.wildfires.some((w) => w.intensity > 0)) return true;
+  if (state.blockades.some((b) => b.big)) return true;
   return state.buildings.some((b) => b.big && (b.state === 'burning' || b.state === 'out'));
 }
 

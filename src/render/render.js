@@ -156,6 +156,7 @@ export function render(ctx, state, cam, view, opts = {}) {
   drawSelectedLabel(ctx, state, cam, view);
   drawOffscreenAlarms(ctx, state, cam, view, now);
   drawOffscreenPatients(ctx, state, cam, view, now);
+  drawOffscreenWrecks(ctx, state, cam, view, now);
   drawMinimap(ctx, state, cam, view);
   drawVignette(ctx, W, H);
 }
@@ -330,6 +331,22 @@ function drawGround(ctx, state, b, z) {
     if (car.y < top - 50 || car.y > top + height + 50) continue;
     drawCar(ctx, car);
   }
+  // Moving traffic, which queues behind a blockade.
+  for (const car of z < 0.3 ? [] : state.traffic?.cars ?? []) {
+    if (car.x < left - 50 || car.x > left + width + 50) continue;
+    if (car.y < top - 50 || car.y > top + height + 50) continue;
+    drawCar(ctx, car);
+    if (car.v < 8 && z >= 0.6) {
+      // Brake lights on a car that is stopped in a jam.
+      ctx.save();
+      ctx.translate(car.x, car.y);
+      ctx.rotate(car.angle);
+      ctx.fillStyle = 'rgba(255,60,50,0.9)';
+      ctx.fillRect(-21, -6, 3, 4);
+      ctx.fillRect(-21, 2, 3, 4);
+      ctx.restore();
+    }
+  }
 }
 
 function drawCar(ctx, car) {
@@ -462,11 +479,15 @@ function drawEntities(ctx, state, bounds, now, z) {
   for (const patient of state.patients ?? []) {
     list.push({ key: patient.y + 6, patient });
   }
+  for (const blockade of state.blockades ?? []) {
+    list.push({ key: blockade.y - 40, blockade });
+  }
   list.sort((a, b) => a.key - b.key);
   for (const item of list) {
     if (item.building) drawBuilding(ctx, state, item.building, now, z);
     else if (item.unit) drawUnit(ctx, item.unit, now, z);
     else if (item.patient) drawPatient(ctx, item.patient, now, z);
+    else if (item.blockade) drawBlockade(ctx, item.blockade, now, z);
     else drawCivilian(ctx, item.person, now);
   }
 }
@@ -518,6 +539,7 @@ function drawBuilding(ctx, state, b, now, z) {
 
   if (detailed) drawRoofDetails(ctx, b, x, y - e, w, h);
   if (b.type === 'pharmacy') drawPharmacyMark(ctx, x, y - e, w, h);
+  if (b.type === 'hospital') drawHospitalMark(ctx, x, y - e, w, h, detailed);
   if (detailed && b.type === 'station') drawStationFace(ctx, b, x, facadeTop, w, e, z);
 
   if (b.state === 'burning') {
@@ -603,8 +625,26 @@ function drawPharmacyMark(ctx, x, y, w, h) {
   ctx.fillRect(cx - size * 0.46, cy - arm, size * 0.92, arm * 2);
 }
 
+// A helipad-style H in a ring, with a red cross: unmistakable from the full-map zoom.
+function drawHospitalMark(ctx, x, y, w, h, detailed) {
+  const size = Math.min(w, h) * 0.7;
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+  ctx.fillStyle = 'rgba(255,255,255,0.95)';
+  ctx.fillRect(cx - size / 2, cy - size / 2, size, size);
+  ctx.fillStyle = '#d3382f';
+  const arm = size * 0.14;
+  ctx.fillRect(cx - arm, cy - size * 0.38, arm * 2, size * 0.76);
+  ctx.fillRect(cx - size * 0.38, cy - arm, size * 0.76, arm * 2);
+  if (detailed) {
+    ctx.strokeStyle = 'rgba(30,50,70,0.5)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(cx - size / 2, cy - size / 2, size, size);
+  }
+}
+
 function drawRoofDetails(ctx, b, x, y, w, h) {
-  if (b.type === 'pharmacy') return;
+  if (b.type === 'pharmacy' || b.type === 'hospital') return;
   for (const d of b.details) {
     const dx = x + d.u * w;
     const dy = y + d.v * h;
@@ -1062,6 +1102,76 @@ function drawPatient(ctx, p, now, z) {
   ctx.restore();
 }
 
+function drawBlockade(ctx, b, now, z) {
+  const x = b.x - b.w / 2;
+  const y = b.y - b.h / 2;
+  const seed = hashString(b.id);
+
+  // Scorched asphalt.
+  ctx.fillStyle = 'rgba(14,12,10,0.38)';
+  ctx.fillRect(x, y, b.w, b.h);
+
+  // Hazard stripes around the closed stretch.
+  ctx.strokeStyle = 'rgba(245,190,40,0.9)';
+  ctx.lineWidth = 3;
+  ctx.setLineDash([9, 9]);
+  ctx.strokeRect(x + 1.5, y + 1.5, b.w - 3, b.h - 3);
+  ctx.setLineDash([]);
+
+  if (b.debris) {
+    for (let i = 0; i < 14; i++) {
+      const rw = 6 + hash(seed + i * 3.3) * 14;
+      const rh = 5 + hash(seed + i * 5.9) * 11;
+      ctx.fillStyle = i % 3 === 0 ? '#6b675e' : i % 3 === 1 ? '#55524b' : '#403d37';
+      ctx.fillRect(x + hash(seed + i * 11.7) * (b.w - rw), y + hash(seed + i * 17.1) * (b.h - rh), rw, rh);
+    }
+  } else {
+    // Two crumpled cars, one on its side.
+    for (let i = 0; i < 2; i++) {
+      ctx.save();
+      ctx.translate(b.x + (i === 0 ? -14 : 16), b.y + (i === 0 ? 6 : -8));
+      ctx.rotate(0.5 + i * 1.7 + hash(seed) * 0.4);
+      ctx.fillStyle = 'rgba(10,14,18,0.3)';
+      ctx.fillRect(-19, -6, 40, 16);
+      ctx.fillStyle = i === 0 ? '#8f2f27' : '#3d4d63';
+      rr(ctx, -20, -8, 40, 16, 4);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(0,0,0,0.3)';
+      ctx.fillRect(-8, -6, 14, 12);
+      ctx.restore();
+    }
+  }
+
+  // A fuse that is burning down looks like trouble: smoke, then flames.
+  if (b.fuelAt != null && !b.fuelDone) {
+    const left = b.fuelAt - (now ?? 0);
+    if (left < 20) {
+      const flick = 0.6 + 0.4 * Math.sin(now * 14);
+      ctx.fillStyle = `rgba(255,140,30,${0.55 * flick})`;
+      ctx.beginPath();
+      ctx.arc(b.x - 4, b.y - 6, 9 + 4 * flick, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // Flashing amber beacon.
+  if (Math.floor(now * 4) % 2 === 0) {
+    ctx.fillStyle = '#ffb81f';
+    ctx.beginPath();
+    ctx.arc(x + 8, y + 8, 4, 0, Math.PI * 2);
+    ctx.arc(x + b.w - 8, y + b.h - 8, 4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  if (b.progress > 0) {
+    const bw = Math.max(34, Math.min(b.w, 70));
+    ctx.fillStyle = 'rgba(8,12,16,0.75)';
+    ctx.fillRect(b.x - bw / 2 - 2, b.y - b.h / 2 - 14, bw + 4, 9);
+    ctx.fillStyle = '#7cc8ff';
+    ctx.fillRect(b.x - bw / 2, b.y - b.h / 2 - 12, bw * b.progress, 5);
+  }
+}
+
 function drawCivilian(ctx, person, now) {
   const bob = Math.sin(now * 10 + person.phase) * 1.2;
   ctx.save();
@@ -1284,6 +1394,13 @@ function drawWorldSelection(ctx, state, now, z) {
         ctx.stroke();
         ctx.setLineDash([]);
       }
+    } else if (hover.kind === 'blockade') {
+      const wreck = (state.blockades ?? []).find((q) => q.id === hover.id);
+      if (wreck) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(wreck.x - wreck.w / 2 - 5, wreck.y - wreck.h / 2 - 5, wreck.w + 10, wreck.h + 10);
+      }
     } else if (hover.kind === 'patient') {
       const patient = (state.patients ?? []).find((q) => q.id === hover.id);
       if (patient) {
@@ -1326,6 +1443,15 @@ function drawWorldSelection(ctx, state, now, z) {
   if (!selected) return;
   const entity = lookup(state, selected);
   if (!entity) return;
+
+  if (selected.kind === 'blockade') {
+    ctx.strokeStyle = PALETTE.select;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([8, 6]);
+    ctx.strokeRect(entity.x - entity.w / 2 - 6, entity.y - entity.h / 2 - 6, entity.w + 12, entity.h + 12);
+    ctx.setLineDash([]);
+    return;
+  }
 
   if (selected.kind === 'patient') {
     ctx.strokeStyle = PALETTE.select;
@@ -1421,6 +1547,7 @@ function lookup(state, ref) {
   if (!ref) return null;
   if (ref.kind === 'wildfire') return (state.wildfires ?? []).find((w) => w.id === ref.id) ?? null;
   if (ref.kind === 'patient') return (state.patients ?? []).find((q) => q.id === ref.id) ?? null;
+  if (ref.kind === 'blockade') return (state.blockades ?? []).find((q) => q.id === ref.id) ?? null;
   if (ref.kind === 'unit') return state.units.find((u) => u.id === ref.id) ?? null;
   return state.buildings.find((b) => b.id === ref.id) ?? null;
 }
@@ -1572,7 +1699,10 @@ function drawSelectedLabel(ctx, state, cam, view) {
 
   const isUnit = selected.kind === 'unit';
   const isPatient = selected.kind === 'patient';
-  const p = isPatient
+  const isBlockade = selected.kind === 'blockade';
+  const p = isBlockade
+    ? worldToScreen(cam, entity.x, entity.y - entity.h / 2 - 30, view)
+    : isPatient
     ? worldToScreen(cam, entity.x, entity.y - 46, view)
     : isUnit
     ? worldToScreen(cam, entity.x, entity.y - (entity.kind === 'engine' ? 34 : 18), view)
@@ -1587,15 +1717,17 @@ function drawSelectedLabel(ctx, state, cam, view) {
 
   const title = entity.name;
   let detail;
-  if (isPatient) {
-    detail = entity.treated ? 'STABILISED' : `NEEDS AMBULANCE · ${Math.ceil(entity.life)}s LEFT`;
+  if (isBlockade) {
+    detail = `ROAD BLOCKED · ${Math.round(entity.progress * 100)}% CLEARED`;
+  } else if (isPatient) {
+    detail = entity.treated ? 'STABILISED' : `${entity.critical ? 'CRITICAL · ' : ''}NEEDS AMBULANCE · ${Math.ceil(entity.life)}s LEFT`;
   } else if (selected.kind === 'wildfire') {
     detail = `MAJOR INCIDENT · ${Math.round(entity.intensity * 100)}% · $${entity.reward ?? 0}`;
   } else if (isUnit) {
     detail = entity.kind !== 'engine'
       ? entity.status.toUpperCase()
       : entity.spec.medical
-        ? `${entity.status.toUpperCase()} · ${entity.kits}/${entity.spec.kits} KITS`
+        ? `${entity.status.toUpperCase()} · ${entity.kits}/${entity.spec.kits} KITS${(entity.cargo?.length ?? 0) > 0 ? ` · ${entity.cargo.length} ABOARD` : ''}`
         : `${entity.status.toUpperCase()} · ${Math.round((entity.water / entity.capacity) * 100)}% WATER${entity.supply ? ' · HYDRANT' : ''}`;
   } else if (entity.state === 'burning') {
     detail = `BURNING · ${Math.round(entity.fire * 100)}% · ${Math.round((entity.integrity / entity.maxIntegrity) * 100)}% STANDING`;
@@ -1662,6 +1794,29 @@ function drawOffscreenAlarms(ctx, state, cam, view, now) {
   }
 }
 
+function drawOffscreenWrecks(ctx, state, cam, view, now) {
+  const pad = 34;
+  const pulse = 0.6 + 0.4 * Math.sin(now * 4);
+  for (const b of state.blockades ?? []) {
+    const p = worldToScreen(cam, b.x, b.y, view);
+    if (p.x > -20 && p.x < view.width + 20 && p.y > -20 && p.y < view.height + 20) continue;
+    const cx = clamp(p.x, pad, view.width - pad);
+    const cy = clamp(p.y, pad, view.height - pad);
+    const angle = Math.atan2(p.y - cy, p.x - cx);
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(angle);
+    ctx.fillStyle = `rgba(255,190,40,${0.5 + pulse * 0.4})`;
+    ctx.beginPath();
+    ctx.moveTo(9, 0);
+    ctx.lineTo(-5, -6);
+    ctx.lineTo(-5, 6);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
 function drawOffscreenPatients(ctx, state, cam, view, now) {
   const pad = 34;
   const pulse = 0.6 + 0.4 * Math.sin(now * 6);
@@ -1717,8 +1872,9 @@ function miniStatic(state, mw, mh) {
   for (const vx of V_ROADS) g.fillRect(vx * TILE * sx, 0, Math.max(1, 2 * TILE * sx), mh);
   for (const hy of H_ROADS) g.fillRect(0, hy * TILE * sy, mw, Math.max(1, 2 * TILE * sy));
   for (const b of state.buildings) {
-    g.fillStyle = b.state === 'rubble' ? '#4d4a44' : b.type === 'pharmacy' ? '#7fcf9c' : '#7d848d';
-    g.fillRect(b.x * TILE * sx, b.y * TILE * sy, Math.max(1.2, b.w * TILE * sx), Math.max(1.2, b.h * TILE * sy));
+    g.fillStyle = b.state === 'rubble' ? '#4d4a44' : b.type === 'pharmacy' ? '#7fcf9c' : b.type === 'hospital' ? '#ff8f8f' : '#7d848d';
+    const bigger = b.type === 'hospital' ? 2.5 : 1.2;
+    g.fillRect(b.x * TILE * sx, b.y * TILE * sy, Math.max(bigger, b.w * TILE * sx), Math.max(bigger, b.h * TILE * sy));
   }
   miniCache = { canvas, city, w: mw, h: mh, rubble };
   return canvas;
@@ -1762,6 +1918,11 @@ function drawMinimap(ctx, state, cam, view) {
     ctx.beginPath();
     ctx.arc(x + wf.x * sx, y + wf.y * sy, Math.max(2.5, wf.radius * sx), 0, Math.PI * 2);
     ctx.fill();
+  }
+
+  for (const wreck of state.blockades ?? []) {
+    ctx.fillStyle = `rgba(255,190,40,${0.7 + pulse * 0.3})`;
+    ctx.fillRect(x + wreck.x * sx - 2.5, y + wreck.y * sy - 2.5, 5, 5);
   }
 
   for (const patient of state.patients ?? []) {

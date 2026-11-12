@@ -33,7 +33,7 @@ export const CONFIG = {
     speedBonus: { fast: 60, slow: 240, max: 0.5 }, // seconds since ignition; bonus on incident rewards
     value: {
       house: 0.8, apartment: 1.2, shop: 1, pharmacy: 1.1, office: 1.6,
-      hotel: 1.8, warehouse: 1.3, station: 2,
+      hotel: 1.8, warehouse: 1.3, hospital: 2.2, station: 2,
     },
     budget: {
       hourEvery: 120, // real seconds per game hour (60 / clockRate)
@@ -75,8 +75,25 @@ export const CONFIG = {
       label: 'Ambulance', cost: 1400, crew: 2, speed: 10, capacity: 0, upkeep: 22,
       hoseRange: 0, turretRange: 0, turretPower: 0, turretWater: 0,
       refillRate: 0, rescueTime: 3, refund: 0.6,
-      medical: true, kits: 8, treatTime: 4, medRange: 22,
+      medical: true, kits: 8, treatTime: 4, medRange: 22, carry: 2,
     },
+  },
+
+  // Roads blocked by wrecks and debris, and the traffic that queues behind them.
+  blockade: {
+    clearTime: 26, // crew-seconds of work to open a road
+    rescueBonus: 1.8, // a rescue crew has the cutting gear
+    quickBonus: 120, // paid if the wreck is cleared before its fuel catches
+    fuelDelay: [45, 80], // seconds before a wreck's fuel ignites a neighbour
+    fuelReach: 9, // tiles
+    minStationDist: 14, // crashes do not seal the station in
+    pileSpacing: 8, // tiles between the wrecks of a pile-up
+  },
+  traffic: {
+    cars: 1100,
+    speed: [3.2, 6.4], // tiles per second
+    rushFactor: 0.8, // emergency vehicles' speed in rush hour
+    rush: [[7, 9], [16.5, 18.5]], // game hours
   },
 
   // Injured civilians and medical supplies.
@@ -88,6 +105,9 @@ export const CONFIG = {
     rescuedInjuredChance: 0.45, // per person carried out by a firefighter
     maxPerFire: 3,
     survive: [130, 210], // seconds an untreated patient lasts
+    criticalAt: 0.7, // severity at which a patient must go to a hospital
+    transportFee: 260, // paid when a critical patient reaches a hospital
+    hospitalRange: 4, // tiles from the hospital footprint to unload
   },
 
   refillRange: 2.8, // tiles from a hydrant/station a vehicle can hook up
@@ -131,7 +151,11 @@ export const CONFIG = {
     // grows as the shift goes on, up to the whole city.
     radius: { start: 90, growPerSecond: 0.18 }, // tiles
     medicalCall: 0.2, // share of small calls that are a medical emergency
-    reward: { structure: 300, block: 600, rescue: 350, industrial: 1500, bigBlock: 1800, forest: 2200 },
+    reward: {
+      structure: 300, block: 600, rescue: 350, industrial: 1500, bigBlock: 1800, forest: 2200,
+      crash: 250, chain: 700, pileup: 1800,
+    },
+    crashCall: 0.16, // share of small calls that are a traffic accident
   },
 
   clockStart: 7 * 60, // 07:00

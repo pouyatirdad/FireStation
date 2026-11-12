@@ -1089,8 +1089,8 @@ button { font-family: inherit; }
 /* ------------------------------------------------------------- responsive --- */
 
 @media (max-width: 1280px) {
-  .stats .stat:nth-child(8),
-  .stats .stat:nth-child(9) { display: none; }
+  .stats .stat:nth-child(9),
+  .stats .stat:nth-child(10) { display: none; }
   .hints { display: none; }
 }
 
@@ -1103,9 +1103,9 @@ button { font-family: inherit; }
 @media (max-width: 900px) {
   .panel--log { display: none; }
   .panel--selection { width: 266px; }
-  .stats .stat:nth-child(5),
   .stats .stat:nth-child(6),
-  .stats .stat:nth-child(7) { display: none; }
+  .stats .stat:nth-child(7),
+  .stats .stat:nth-child(8) { display: none; }
   .roster__actions kbd { display: none; }
   .roster { gap: 8px; }
 }
@@ -1154,3 +1154,8 @@ button { font-family: inherit; }
 .budget__row[data-tone='bad'] b { color: #ff8f84; }
 .budget__row:last-of-type { margin-top: 4px; padding-top: 6px; border-top: 1px solid var(--line); }
 .budget__total { margin: 8px 0 0; font-size: 11px; color: var(--muted); }
+
+/* ---- wind -------------------------------------------------------------- */
+
+.stat__value--wind { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; white-space: nowrap; }
+.wind__arrow { display: inline-block; color: #9fd8ff; font-size: 14px; line-height: 1; transition: transform 0.6s ease; }

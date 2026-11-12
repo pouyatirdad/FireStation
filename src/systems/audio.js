@@ -23,8 +23,10 @@ export function eventSound(event) {
   if (!event) return null;
   const text = event.text ?? '';
   switch (event.tone) {
-    case 'big': return 'klaxon';
-    case 'fire': return /spread/i.test(text) ? 'warn' : 'alarm';
+    case 'big': return /explosion/i.test(text) ? 'boom' : 'klaxon';
+    case 'fire':
+      if (/traffic accident/i.test(text)) return 'crash';
+      return /spread/i.test(text) ? 'warn' : 'alarm';
     case 'bad': return /building lost/i.test(text) ? 'boom' : 'bad';
     case 'good':
       if (/supply line connected/i.test(text)) return 'clunk';
@@ -227,6 +229,13 @@ export function createAudio() {
       tone(220, 0.55, { type: 'triangle', gain: 0.16, slide: 110 });
       burst(0.25, { from: 500, to: 120, gain: 0.12 });
     },
+    crash: () => {
+      burst(0.35, { filter: 'bandpass', from: 1800, to: 500, gain: 0.35, q: 1.5 });
+      tone(180, 0.3, { type: 'square', gain: 0.1, slide: 70 });
+      tone(1240, 0.18, { type: 'triangle', gain: 0.06, delay: 0.06, slide: 700 });
+      tone(660, 0.5, { type: 'square', gain: 0.05, delay: 0.5 });
+      tone(660, 0.5, { type: 'square', gain: 0.05, delay: 1.1 });
+    },
     boom: () => {
       burst(1.4, { from: 900, to: 50, gain: 0.55 });
       tone(78, 0.9, { type: 'sine', gain: 0.5, slide: 28, attack: 0.01 });
@@ -317,7 +326,8 @@ export function createAudio() {
 
     // A little less wind at night would be more honest, but the day length makes
     // that a faint effect; keep it constant and gentle.
-    ramp(loops.wind.gain.gain, 0.05, 0.5);
+    ramp(loops.wind.gain.gain, 0.025 + 0.09 * (state.wind?.speed ?? 0.3), 0.5);
+    ramp(loops.wind.filter.frequency, 260 + 520 * (state.wind?.speed ?? 0.3), 0.8);
 
     const moving = state.engines
       .filter((e) => e.path.length > 0)

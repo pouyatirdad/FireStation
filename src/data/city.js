@@ -42,6 +42,7 @@ const SPEC = {
   hotel: { floors: [5, 8], hp: [110, 150], risk: 0.6 },
   warehouse: { floors: [1, 2], hp: [85, 120], risk: 1.15 },
   pharmacy: { floors: [1, 2], hp: [75, 100], risk: 0.85 },
+  hospital: { floors: [3, 5], hp: [150, 190], risk: 0.55 },
   station: { floors: [2, 2], hp: [180, 180], risk: 0.7 },
 };
 
@@ -53,6 +54,7 @@ const ROOFS = {
   hotel: ['#8a6250', '#96705e', '#7d594a'],
   warehouse: ['#6d747b', '#7a7f76', '#616a70'],
   pharmacy: ['#d9e3dc', '#cfdcd4', '#e0e6df'],
+  hospital: ['#e4e9ec', '#dce3e7', '#e9eceb'],
   station: ['#8c4b3f'],
 };
 
@@ -73,6 +75,7 @@ const OCCUPANTS = {
   hotel: [12, 36],
   warehouse: [1, 5],
   pharmacy: [2, 7],
+  hospital: [22, 46],
   station: [0, 0],
 };
 
@@ -113,6 +116,10 @@ const NAMES = {
     'Hotel Belvedere', 'The Anchor', 'Grand Union', 'Hotel Meridian',
     'The Seafarer', 'Belmont Arms', 'The Regent', 'Harbor Lights',
     'The Cartographer', 'Westgate Inn',
+  ],
+  hospital: [
+    'St. Anne’s Hospital', 'Harbor General Hospital', 'Mercy Medical Center', 'Northgate Infirmary',
+    'University Hospital', 'Eastside Clinic & Emergency', 'South Bank Hospital', 'Riverside General',
   ],
   pharmacy: [
     'City Pharmacy', 'Healthwell Pharmacy', 'Green Cross Chemist', 'Corner Rx',
@@ -187,6 +194,8 @@ const DOWNTOWNS = [
   { col: 15, row: 8, name: 'EASTSIDE' },
   { col: 7, row: 14, name: 'SOUTH BANK' },
 ];
+
+const HOSPITAL_BLOCKS = new Set(['3,2', ...DOWNTOWNS.slice(1).map((d) => `${d.col},${d.row}`)]);
 
 const FOREST_NAMES = ['NORTH WOODS', 'PINE RIDGE', 'GREEN HOLLOW', 'EASTWOOD', 'BIRCH FOREST', 'OLD GROWTH', 'FERN VALLEY'];
 
@@ -433,6 +442,9 @@ export function createCity(seed = 7) {
     const xs = splitCells(ax0, ax1, cols);
     const ys = splitCells(ay0, ay1, rows);
 
+    // Every commercial centre has a hospital, plus one next to the old town.
+    let wantsHospital = HOSPITAL_BLOCKS.has(`${block.col},${block.row}`);
+
     // A quarter of the residential and commercial blocks have a pharmacy.
     let wantsPharmacy = kind !== 'industry' && (block.col * 2 + block.row) % 4 === 0;
 
@@ -446,7 +458,11 @@ export function createCity(seed = 7) {
         if (bhei >= 5 && rng.chance(0.4)) bhei -= 1;
         if (bwid < 3 || bhei < 3) continue;
         let type = weightedPick(rng, KIND_TYPES[kind]);
-        if (wantsPharmacy) {
+        if (wantsHospital && bwid >= 4 && bhei >= 4) {
+          type = 'hospital';
+          wantsHospital = false;
+          wantsPharmacy = false;
+        } else if (wantsPharmacy) {
           type = 'pharmacy';
           wantsPharmacy = false;
         }
@@ -612,6 +628,7 @@ export function createCity(seed = 7) {
     bays: BAYS.map((b) => ({ x: b.x * TILE, y: b.y * TILE })),
     districts,
     pharmacies: buildings.filter((b) => b.type === 'pharmacy'),
+    hospitals: buildings.filter((b) => b.type === 'hospital'),
     spawn: { x: BAYS[0].x * TILE, y: BAYS[0].y * TILE, angle: Math.PI / 2 },
     startHour: START_HOUR,
   };

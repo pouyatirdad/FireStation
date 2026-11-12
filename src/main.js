@@ -8,11 +8,13 @@ import {
   createGame, startShift, update, pickAt, selectUnit, selectBuilding,
   commandMove, commandDispatch, commandDeploy, commandRecall, commandReturnHome,
   commandBuyVehicle, commandSellVehicle, commandHydrant, commandDispatchWildfire,
-  commandDispatchPatient, commandPharmacy, selectPatient,
+  commandDispatchPatient, commandDispatchBlockade, commandPharmacy, commandHospital,
+  selectPatient, selectBlockade,
   selectWildfire, getSelected, serialize, loadState,
 } from './systems/game.js';
 import { createAudio } from './systems/audio.js';
 import { spawnPatient } from './systems/medical.js';
+import { trafficAccident, pileUp } from './systems/chains.js';
 import { activeFires } from './systems/fire.js';
 import { addEvent } from './systems/events.js';
 import { engineForUnit } from './systems/units.js';
@@ -179,6 +181,7 @@ canvas.addEventListener('pointerup', (ev) => {
   if (hit) {
     if (hit.kind === 'unit') selectUnit(state, hit.id);
     else if (hit.kind === 'patient') selectPatient(state, hit.id);
+    else if (hit.kind === 'blockade') selectBlockade(state, hit.id);
     else if (hit.kind === 'wildfire') selectWildfire(state, hit.id);
     else selectBuilding(state, hit.id);
   } else {
@@ -216,6 +219,10 @@ function orderAt(mx, my) {
     if (commandDispatchPatient(state, hit.id)) audio.play('radio');
     return;
   }
+  if (hit?.kind === 'blockade') {
+    if (commandDispatchBlockade(state, hit.id)) audio.play('radio');
+    return;
+  }
   const buildingId = hit?.kind === 'building' ? hit.id : null;
   if (commandMove(state, world.x, world.y, buildingId)) {
     state.ui.orderMark = { x: world.x, y: world.y, t: state.time };
@@ -244,7 +251,7 @@ function selectedEntity() {
 function centerOnSelected() {
   const entity = selectedEntity();
   if (!entity) return;
-  if (entity.kind === 'wildfire' || entity.kind === 'patient') {
+  if (entity.kind === 'wildfire' || entity.kind === 'patient' || entity.kind === 'blockade') {
     cam.x = entity.x;
     cam.y = entity.y;
   } else if (entity.kind === 'engine' || entity.kind === 'crew') {
@@ -267,6 +274,7 @@ function incidents() {
   for (const q of state.patients) {
     if (!q.treated) list.push({ kind: 'patient', id: q.id, x: q.x, y: q.y });
   }
+  for (const w of state.blockades) list.push({ kind: 'blockade', id: w.id, x: w.x, y: w.y });
   for (const b of state.buildings) {
     if ((b.trapped ?? 0) > 0 && b.state !== 'burning' && b.state !== 'rubble') {
       list.push({ kind: 'building', id: b.id, x: (b.x + b.w / 2) * TILE, y: (b.y + b.h / 2) * TILE });
@@ -288,6 +296,7 @@ function jumpToNextIncident() {
   cam.y = target.y;
   if (cam.zoom < 0.7) cam.zoom = 0.9;
   if (target.kind === 'patient') selectPatient(state, target.id);
+  else if (target.kind === 'blockade') selectBlockade(state, target.id);
   else if (target.kind === 'wildfire') selectWildfire(state, target.id);
   else selectBuilding(state, target.id);
   clampCamera(cam, state, view);
@@ -308,6 +317,7 @@ function toggleSound() {
 function onAction(action, data = {}) {
   switch (action) {
     case 'pharmacy': commandPharmacy(state); break;
+    case 'hospital': commandHospital(state); break;
     case 'dispatch': commandDispatch(state); break;
     case 'deploy': commandDeploy(state); break;
     case 'recall': commandRecall(state); break;
@@ -387,7 +397,7 @@ function sellApparatus(id) {
 
 // ------------------------------------------------------------------- save ---
 
-const SAVE_KEY = 'firestation.save.v2';
+const SAVE_KEY = 'firestation.save.v3';
 
 function hasSave() {
   try {
@@ -536,6 +546,7 @@ window.addEventListener('keydown', (ev) => {
     case 'h': commandReturnHome(state); break;
     case 'g': commandHydrant(state); break;
     case 'p': commandPharmacy(state); break;
+    case 'k': commandHospital(state); break;
     case 'c': centerOnSelected(); break;
     case '+':
     case '=':
@@ -691,6 +702,26 @@ if (params.has('wildfire')) {
     cam.x = wf.x;
     cam.y = wf.y;
     cam.zoom = 0.8;
+    clampCamera(cam, state, view);
+  }
+}
+if (params.has('crash')) {
+  startGame();
+  const wreck = trafficAccident(state, () => true);
+  if (wreck) {
+    cam.x = wreck.x;
+    cam.y = wreck.y;
+    cam.zoom = 0.9;
+    clampCamera(cam, state, view);
+  }
+}
+if (params.has('pileup')) {
+  startGame();
+  pileUp(state, () => true);
+  if (state.blockades[0]) {
+    cam.x = state.blockades[0].x;
+    cam.y = state.blockades[0].y;
+    cam.zoom = 0.6;
     clampCamera(cam, state, view);
   }
 }

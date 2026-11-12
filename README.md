@@ -4,7 +4,7 @@ A top-down emergency-services management game for Windows, in the spirit of **Em
 520×384 city (ten times the area of the first version) with forests, pharmacies and a waterfront,
 five kinds of apparatus you buy and sell — engines, ladders, tankers, rescue units and
 **ambulances** — small calls and major incidents, injured civilians, forest fires, a real budget,
-synthesised sound and a day/night cycle. Vanilla JavaScript, no dependencies; one self-contained
+synthesised sound, hospitals, blocked roads with live traffic, wind that drives the fire, chained incidents and a day/night cycle. Vanilla JavaScript, no dependencies; one self-contained
 `index.html`.
 
 ![Harbor City](docs/screenshot-city.png)
@@ -47,6 +47,9 @@ the night.
 | **Apparatus** | <kbd>B</kbd> opens the apparatus panel: buy and sell engines, ladders, tankers, rescue units and ambulances. Eight bays. |
 | **Injured** | People hurt in a fire lie on the street with a countdown ring and a red cross. Right-click them or press <kbd>D</kbd> with an ambulance selected. Medical emergencies also come in as calls of their own. |
 | **Pharmacy** | An ambulance carries 8 medical kits (one per patient). Restock slowly and free on the station apron, or fast beside any pharmacy for $12 a kit. <kbd>P</kbd> sends the selected ambulance to the nearest one. |
+| **Hospital** | Seven hospitals, one in every commercial centre. A **critical** patient (flagged on their card) is stabilised on the spot, put on a stretcher (two per ambulance) and driven to the nearest hospital automatically, for $260 each. <kbd>K</kbd> sends the ambulance by hand. |
+| **Roads** | Wrecks and debris **block the street**: those tiles are closed to the fleet until a deployed crew clears them (rescue units twice as fast). Engines on the move re-plan round a new blockage. Traffic fills every avenue, queues behind a wreck, and in rush hour (07–09 and 16:30–18:30) slows your response by 20%. |
+| **Wind** | The top bar shows the wind. Fire spreads up to ~2.5× as often downwind and barely crosses upwind; a forest fire creeps downwind and throws embers further that way; smoke and sparks lean with it. It shifts every few minutes. |
 | **Find it** | <kbd>Tab</kbd> jumps to the next incident (fire, forest fire, trapped people or an injured person), <kbd>Home</kbd> back to the station. Off-screen incidents get an arrow on the edge of the screen and a dot on the minimap. |
 | **Hose** | Water only flows within the vehicle's hose range — the dashed circle around it. |
 | **Hydrant** | Park within reach of a hydrant and press <kbd>G</kbd>. A supply line runs to the pump and the tank stays fed while the crew works. Drive off and it detaches. |
@@ -75,6 +78,15 @@ Selling returns 60% of the price. Every incident carries its own reward:
 | Industrial fire (major) | $1,500 |
 | Major block fire | $1,800 |
 | Forest fire (major) | $2,200 |
+
+### Chained incidents
+
+One call can become several if you are slow:
+
+- **Traffic accident** – a wreck blocks the road, one to three people are hurt, and the fuel is leaking. After 45–80 seconds it **sets the nearest building alight** (a fire worth $700 on its own). Clear the wreck first and it never happens, and you earn a quick-clearance bonus.
+- **Pile-up** (major) – several wrecks in a row on one road, four to six injured, the same fuse on each.
+- **Explosion** – a warehouse fire that runs hot (over 85%) can blow up: two neighbours catch, two bystanders are hurt and debris closes the street in front.
+- **Forest fire** – embers light the buildings it reaches, further downwind.
 
 ### The money
 
@@ -123,13 +135,14 @@ lists the pointer controls. <kbd>F1</kbd> opens the full list.
 
 | Input | Action |
 |---|---|
-| Left click | Select a vehicle, a crew member, a building, a wildfire or an injured person |
-| Right click | Send the selected unit there; on a burning building or wildfire, dispatch |
+| Left click | Select a vehicle, a crew member, a building, a wildfire, a wreck or an injured person |
+| Right click | Send the selected unit there; on a burning building, wildfire, wreck or injured person, dispatch |
 | Drag / arrow keys | Pan the map |
 | Scroll | Zoom around the pointer |
 | <kbd>1</kbd>–<kbd>8</kbd> | Select a vehicle |
 | <kbd>D</kbd> | Dispatch the selected vehicle (or the nearest idle one); an ambulance goes to the nearest patient |
 | <kbd>P</kbd> | Send the selected ambulance to the nearest pharmacy |
+| <kbd>K</kbd> | Send the selected ambulance to the nearest hospital with its patients |
 | <kbd>Tab</kbd> / <kbd>Home</kbd> | Next incident / back to Station 1 |
 | <kbd>M</kbd> | Sound on or off |
 | <kbd>E</kbd> / <kbd>R</kbd> | Deploy / recall the crew |
@@ -168,7 +181,12 @@ simulation knows about the DOM, and nothing in the renderer changes the simulati
 - **Incidents** (`src/systems/incidents.js`) generate small calls near the station (the covered radius
   grows over the shift) and gate the major incidents to the part of the shift where they belong, with
   rewards attached to each job.
-- **Medical** (`src/systems/medical.js`) owns the injured, their survival clocks and the kit stock;
+- **Blockades and traffic** (`src/systems/blockades.js`) seal and reopen road tiles in the nav layer and run
+  the traffic cars; **chains** (`src/systems/chains.js`) decides when a crash, a fuel fire, a pile-up or an
+  explosion turns into the next incident; **wind** (`src/systems/wind.js`) is the shared direction and
+  strength that fire, wildfire and particles read.
+- **Medical** (`src/systems/medical.js`) owns the injured, their survival clocks, the kit stock and the
+  hospital hand-over;
   **economy** (`src/systems/economy.js`) owns every credit that moves, the hourly payroll and the
   ledger; **audio** (`src/systems/audio.js`) is Web Audio synthesis driven by the state and the
   dispatch log.
@@ -201,6 +219,8 @@ needs editing.
 ?credits=20000  override the starting credits
 ?station        open the apparatus panel
 ?injured        start, and put two injured people near the station
+?crash          start, and cause a traffic accident
+?pileup         start, and cause a pile-up
 ?fleet=ambulance,ladder   (buy several, ambulances included)
 ?hydrantpark    park Engine 1 beside a hydrant
 ?connect        connect that hydrant supply line
@@ -238,4 +258,4 @@ attachment; it needs no other file and no network.
 
 ## Not built yet
 
-A second station, police units, vehicle upgrades, weather and an isometric art pass. The simulation was written so those can be added without rewriting the core.
+A second station, police units, vehicle upgrades, rain and an isometric art pass. The simulation was written so those can be added without rewriting the core.

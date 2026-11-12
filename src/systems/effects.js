@@ -3,6 +3,7 @@
 // steam where it lands, and a lost building comes down in a burst of debris.
 
 import { buildingRect } from './fire.js';
+import { windVector } from './wind.js';
 
 const MAX_FX = 700;
 
@@ -135,6 +136,7 @@ export function updateEffects(state, dt) {
     if (rng.float() < dt * 22) spawnSteam(state, stream.tx, stream.ty);
   }
 
+  const wind = windVector(state);
   for (let i = state.fx.length - 1; i >= 0; i--) {
     const p = state.fx[i];
     p.life -= dt;
@@ -151,9 +153,12 @@ export function updateEffects(state, dt) {
       p.rot += p.vr * dt;
     } else if (p.kind === 'ember') {
       p.vy += 40 * dt;
+      p.vx += wind.x * 70 * dt;
+      p.vy += wind.y * 40 * dt;
     } else if (p.kind === 'smoke') {
-      p.vx += 2 * dt;
-      p.vy *= 1 - 0.25 * dt;
+      // Smoke leans with the wind: it settles toward a drift speed of ~70 px/s at full strength.
+      p.vx += (wind.x * 70 - p.vx) * 0.5 * dt;
+      p.vy += (wind.y * 40 - 16 - p.vy) * 0.35 * dt;
     }
   }
 }
