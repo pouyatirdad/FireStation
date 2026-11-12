@@ -143,7 +143,7 @@ const NAMES = {
 const START_HOUR = 7;
 
 // How many trees to scatter in a park patch: rough area, capped.
-const treeCount = (w, h) => Math.min(36, Math.max(4, Math.round((w * h) / 10)));
+const treeCount = (w, h) => Math.min(64, Math.max(4, Math.round((w * h) / 9)));
 
 function weightedPick(rng, pairs) {
   const total = pairs.reduce((sum, [, w]) => sum + w, 0);
@@ -202,7 +202,33 @@ const DOWNTOWNS = [
   { col: 7, row: 14, name: 'SOUTH BANK' },
 ];
 
-const FOREST_NAMES = ['NORTH WOODS', 'PINE RIDGE', 'GREEN HOLLOW', 'EASTWOOD', 'BIRCH FOREST', 'OLD GROWTH', 'FERN VALLEY'];
+const FOREST_NAMES = ['NORTH WOODS', 'PINE RIDGE', 'GREEN HOLLOW', 'EASTWOOD', 'BIRCH FOREST', 'OLD GROWTH', 'FERN VALLEY', 'SOUTHEAST FOREST'];
+
+// The big pine forest in the south-east: every block east of the river from the
+// Eastside district down to the quay (columns 13–17, rows 10–14).
+const BIG_FOREST = { col0: 13, col1: 17, row0: 10, row1: 14, zone: FOREST_NAMES.length - 1 };
+
+// A stable per-tile hash for decoration (tree species, forest edges), so the
+// city's random stream, and with it every building, is not disturbed.
+function tileHash(x, y, k = 0) {
+  const n = Math.sin(x * 127.1 + y * 311.7 + k * 74.7) * 43758.5453;
+  return n - Math.floor(n);
+}
+
+// Tree species: 'conifer' (pine, spruce), 'broadleaf' (oak, maple) or 'birch'.
+// Each has its own believable range of greens.
+const TREE_TONES = {
+  conifer: ['#24412c', '#2b4a31', '#203a2a', '#2f4f34'],
+  broadleaf: ['#46683a', '#4f7339', '#3d5e32', '#587b3f'],
+  birch: ['#6f8a45', '#7a9350', '#66843f'],
+};
+
+function species(x, y, pineShare, birchShare = 0.1) {
+  const r = tileHash(x, y, 3);
+  const kind = r < pineShare ? 'conifer' : r < pineShare + birchShare ? 'birch' : 'broadleaf';
+  const tones = TREE_TONES[kind];
+  return { kind, tone: tones[Math.floor(tileHash(x, y, 5) * tones.length)] };
+}
 
 /** The road grid, cut into blocks, with a district kind for each. */
 function buildBlocks(seed = 7) {
@@ -229,13 +255,18 @@ function buildBlocks(seed = 7) {
   forestBlocks.set('5,0', 0);
   forestBlocks.set('4,1', 0);
   forestBlocks.set('5,1', 0);
+  for (let c = BIG_FOREST.col0; c <= BIG_FOREST.col1; c++) {
+    for (let r = BIG_FOREST.row0; r <= BIG_FOREST.row1; r++) forestBlocks.set(`${c},${r}`, BIG_FOREST.zone);
+  }
   // More woods in the outskirts, each two blocks by two, clear of the old town.
-  for (let zone = 1, tries = 0; zone < FOREST_NAMES.length && tries < 200; tries++) {
+  for (let zone = 1, tries = 0; zone < BIG_FOREST.zone && tries < 200; tries++) {
     const col = rng.int(0, xs.length - 2);
     const row = rng.int(0, lastRow - 3);
     if (col < 6 && row < 6) continue; // the original quarter and its own woods
     const cells = [[col, row], [col + 1, row], [col, row + 1], [col + 1, row + 1]];
     if (cells.some(([c, r]) => forestBlocks.has(`${c},${r}`))) continue;
+    // Keep a block of town between the small woods and the big forest.
+    if (cells.some(([c, r]) => c >= BIG_FOREST.col0 - 1 && r >= BIG_FOREST.row0 - 1)) continue;
     if (cells.some(([c, r]) => DOWNTOWNS.some((d) => Math.abs(d.col - c) <= 1 && Math.abs(d.row - r) <= 1))) continue;
     for (const [c, r] of cells) forestBlocks.set(`${c},${r}`, zone);
     zone++;
@@ -267,7 +298,8 @@ function buildBlocks(seed = 7) {
       else if (roll < 0.07) kind = 'park';
       else if (row === 0 || near >= 3) kind = (col + row) % 3 === 0 ? 'market' : 'houses';
       else kind = 'market';
-      blocks.push({ col, row, x0, y0, x1, y1, kind, zone });
+      const woods = kind === 'forest' ? (zone === BIG_FOREST.zone ? 'pine' : 'mixed') : undefined;
+      blocks.push({ col, row, x0, y0, x1, y1, kind, zone, woods });
     }
   }
   return blocks;
@@ -323,6 +355,9 @@ export function createCity(seed = 7) {
   const forestAreas = [];
   const forestTiles = [];
   const forest = new Uint8Array(w * h);
+  // Every tile of a forest block, its edge ring included: no parked cars or
+  // street trees there, and the renderer draws the roads through it as country roads.
+  const woods = new Uint8Array(w * h);
   const usedNames = new Set();
 
   const context = { rng, w, h, road, apron, blocked, buildings, trees, parks, at, inb };
@@ -400,17 +435,33 @@ export function createCity(seed = 7) {
   const stationLot = { x0: 63, y0: 44, x1: 69, y1: 49 };
   for (const [tx, ty] of [[49, 40], [60, 40], [70, 39], [47, 52], [68, 57], [70, 46]]) {
     if (inb(tx, ty) && !blocked[at(tx, ty)] && !road[at(tx, ty)] && !apron[at(tx, ty)]) {
-      trees.push({ x: (tx + 0.5) * TILE, y: (ty + 0.5) * TILE, r: rng.range(9, 13), tone: rng.pick(['#46683a', '#4f7339', '#3d5e32']) });
+      trees.push({ x: (tx + 0.5) * TILE, y: (ty + 0.5) * TILE, r: rng.range(11, 15), tone: rng.pick(['#46683a', '#4f7339', '#3d5e32']) });
     }
   }
 
   const blocks = buildBlocks(seed);
 
+  // Park trees grow in groves with open lawn between them, plus a few
+  // specimen trees standing on their own.
   function scatterTrees(x0, y0, x1, y1) {
     const count = treeCount(x1 - x0 + 1, y1 - y0 + 1);
+    const groves = Array.from({ length: Math.max(1, Math.round(count / 8)) }, () => [
+      rng.range(x0 + 1, x1),
+      rng.range(y0 + 1, y1),
+    ]);
     for (let i = 0; i < count; i++) {
-      const wx = rng.range(x0, x1 + 1);
-      const wy = rng.range(y0, y1 + 1);
+      let wx;
+      let wy;
+      if (i % 5 === 4) {
+        wx = rng.range(x0, x1 + 1);
+        wy = rng.range(y0, y1 + 1);
+      } else {
+        const [gx, gy] = groves[i % groves.length];
+        const a = rng.range(0, Math.PI * 2);
+        const d = rng.range(0, 2.8);
+        wx = clamp(gx + Math.cos(a) * d, x0, x1 + 0.99);
+        wy = clamp(gy + Math.sin(a) * d, y0, y1 + 0.99);
+      }
       const tx = Math.floor(wx);
       const ty = Math.floor(wy);
       if (!inb(tx, ty)) continue;
@@ -418,8 +469,8 @@ export function createCity(seed = 7) {
       trees.push({
         x: wx * TILE,
         y: wy * TILE,
-        r: rng.range(8, 15),
-        tone: rng.pick(['#46683a', '#4f7339', '#3d5e32', '#587b3f']),
+        r: rng.range(14, 24),
+        ...species(Math.floor(wx * 5), Math.floor(wy * 5), 0.12, 0.15),
       });
     }
   }
@@ -427,7 +478,11 @@ export function createCity(seed = 7) {
   function fillBlock(block) {
     const { x0, y0, x1, y1, kind } = block;
     if (kind === 'forest') {
-      forestAreas.push({ x0, y0, x1, y1 });
+      const pine = block.woods === 'pine' ? 0.8 : 0.35;
+      forestAreas.push({ x0, y0, x1, y1, woods: block.woods });
+      for (let y = y0; y <= y1; y++) {
+        for (let x = x0; x <= x1; x++) woods[at(x, y)] = block.woods === 'pine' ? 2 : 1;
+      }
       for (let y = y0 + 1; y <= y1 - 1; y++) {
         for (let x = x0 + 1; x <= x1 - 1; x++) {
           if (road[at(x, y)] || blocked[at(x, y)] || water[at(x, y)]) continue;
@@ -437,11 +492,30 @@ export function createCity(seed = 7) {
             trees.push({
               x: (x + 0.5 + rng.range(-0.3, 0.3)) * TILE,
               y: (y + 0.5 + rng.range(-0.3, 0.3)) * TILE,
-              r: rng.range(9, 16),
-              tone: rng.pick(['#36572c', '#3d5e30', '#2f4e27']),
+              r: rng.range(14, 22),
+              ...species(x, y, pine),
             });
           }
         }
+      }
+      // A ragged edge: big trees along the block's rim, leaning out over the
+      // verge, so the forest does not end in a ruled line.
+      const rim = (x, y, nx, ny) => {
+        if (tileHash(x, y, 11) > 0.62) return;
+        trees.push({
+          x: (x + 0.5 + nx * (0.15 + tileHash(x, y, 12) * 0.35)) * TILE,
+          y: (y + 0.5 + ny * (0.15 + tileHash(x, y, 13) * 0.35)) * TILE,
+          r: 13 + tileHash(x, y, 14) * 9,
+          ...species(x, y, pine),
+        });
+      };
+      for (let x = x0; x <= x1; x++) {
+        rim(x, y0, 0, -1);
+        rim(x, y1, 0, 1);
+      }
+      for (let y = y0 + 1; y < y1; y++) {
+        rim(x0, y, -1, 0);
+        rim(x1, y, 1, 0);
       }
       return;
     }
@@ -494,6 +568,106 @@ export function createCity(seed = 7) {
 
   for (const block of blocks) fillBlock(block);
 
+  // --- no streets in the woods --------------------------------------------
+  // A road with forest on both sides is not a street: the trees grow over it.
+  // Those tiles become forest, so the only way in by vehicle is a track a crew
+  // cuts with a chainsaw. What is left of each avenue and street is kept as
+  // runs, for the traffic and the renderer.
+  const wooded = (x, y) => inb(x, y) && woods[at(x, y)] !== 0;
+  const cleared = [];
+  const clearRun = (x0, y0, x1, y1, type) => {
+    forestAreas.push({ x0, y0, x1, y1, woods: type === 2 ? 'pine' : 'mixed', cleared: true });
+  };
+  for (const vx of V_ROADS) {
+    let start = -1;
+    for (let y = 0; y <= h; y++) {
+      let inside = false;
+      if (y < h && road[at(vx, y)]) {
+        const hy = H_ROADS.find((r) => y >= r && y <= r + 1);
+        inside = hy != null
+          ? wooded(vx - 1, hy - 1) && wooded(vx + 2, hy - 1) && wooded(vx - 1, hy + 2) && wooded(vx + 2, hy + 2)
+          : wooded(vx - 1, y) && wooded(vx + 2, y);
+      }
+      if (inside) {
+        if (start < 0) start = y;
+        cleared.push([vx, y, woods[at(vx - 1, y)] || woods[at(vx - 1, y - 2)]], [vx + 1, y, woods[at(vx + 2, y)] || woods[at(vx + 2, y - 2)]]);
+      } else if (start >= 0) {
+        clearRun(vx, start, vx + 1, y - 1, woods[at(vx - 1, start)] || woods[at(vx - 1, start - 2)]);
+        start = -1;
+      }
+    }
+  }
+  for (const hy of H_ROADS) {
+    let start = -1;
+    for (let x = 0; x <= w; x++) {
+      const junction = V_ROADS.some((vx) => x >= vx && x <= vx + 1);
+      const inside = x < w && !junction && road[at(x, hy)] && wooded(x, hy - 1) && wooded(x, hy + 2);
+      if (inside) {
+        if (start < 0) start = x;
+        cleared.push([x, hy, woods[at(x, hy - 1)]], [x, hy + 1, woods[at(x, hy + 2)]]);
+      } else if (start >= 0) {
+        clearRun(start, hy, x - 1, hy + 1, woods[at(start, hy - 1)]);
+        start = -1;
+      }
+    }
+  }
+  for (const [x, y, type] of cleared) {
+    const i = at(x, y);
+    road[i] = 0;
+    bridge[i] = 0;
+    woods[i] = type || 1;
+  }
+  // The cleared strips, and a forest block's rim wherever it no longer meets a
+  // street, are forest like the rest.
+  for (const [x, y] of cleared) {
+    const i = at(x, y);
+    if (forest[i] || water[i] || blocked[i]) continue;
+    forest[i] = 1;
+    forestTiles.push({ x, y });
+    if (tileHash(x, y, 21) < 0.16) {
+      trees.push({
+        x: (x + 0.2 + tileHash(x, y, 22) * 0.6) * TILE,
+        y: (y + 0.2 + tileHash(x, y, 23) * 0.6) * TILE,
+        r: 14 + tileHash(x, y, 24) * 8,
+        ...species(x, y, woods[i] === 2 ? 0.8 : 0.35),
+      });
+    }
+  }
+  for (const block of blocks) {
+    if (block.kind !== 'forest') continue;
+    for (let y = block.y0; y <= block.y1; y++) {
+      for (let x = block.x0; x <= block.x1; x++) {
+        const i = at(x, y);
+        if (forest[i] || water[i] || blocked[i]) continue;
+        let byRoad = false;
+        for (let dy = -1; dy <= 1 && !byRoad; dy++) {
+          for (let dx = -1; dx <= 1; dx++) if (inb(x + dx, y + dy) && road[at(x + dx, y + dy)]) byRoad = true;
+        }
+        if (byRoad) continue;
+        forest[i] = 1;
+        forestTiles.push({ x, y });
+      }
+    }
+  }
+
+  const spans = (n, test) => {
+    const out = [];
+    let start = -1;
+    for (let i = 0; i <= n; i++) {
+      if (i < n && test(i)) {
+        if (start < 0) start = i;
+      } else if (start >= 0) {
+        out.push([start, i - 1]);
+        start = -1;
+      }
+    }
+    return out;
+  };
+  const roadRuns = {
+    v: V_ROADS.map((vx) => ({ line: vx, spans: spans(h, (y) => road[at(vx, y)] && road[at(vx + 1, y)]) })),
+    h: H_ROADS.map((hy) => ({ line: hy, spans: spans(w, (x) => road[at(x, hy)] && road[at(x, hy + 1)]) })),
+  };
+
   // --- Station 2: the same layout as Station 1, in the Civic Quarter. It is
   // for sale; its apron and bays only count once it has been bought. ----------
   const b2 = blocks.find((b) => b.col === 8 && b.row === 6);
@@ -515,7 +689,7 @@ export function createCity(seed = 7) {
   }
   for (const [tx, ty] of [[b2.x0 + 5, b2.y0 + 2], [b2.x0 + 16, b2.y0 + 2], [b2.x0 + 2, b2.y0 + 10]]) {
     if (inb(tx, ty) && !blocked[at(tx, ty)] && !road[at(tx, ty)] && !apron[at(tx, ty)]) {
-      trees.push({ x: (tx + 0.5) * TILE, y: (ty + 0.5) * TILE, r: rng.range(9, 13), tone: '#46683a' });
+      trees.push({ x: (tx + 0.5) * TILE, y: (ty + 0.5) * TILE, r: rng.range(11, 15), tone: '#46683a' });
     }
   }
 
@@ -574,7 +748,7 @@ export function createCity(seed = 7) {
   for (let ty = 1; ty < h - 1; ty++) {
     for (let tx = 1; tx < w - 1; tx++) {
       const i = at(tx, ty);
-      if (road[i] || blocked[i] || apron[i] || park[i] || water[i]) continue;
+      if (road[i] || blocked[i] || apron[i] || park[i] || water[i] || woods[i]) continue;
       if (hydrantAt.has(`${tx},${ty}`)) continue;
       const kerb =
         road[at(tx + 1, ty)] || road[at(tx - 1, ty)] ||
@@ -583,7 +757,7 @@ export function createCity(seed = 7) {
       trees.push({
         x: (tx + 0.5) * TILE,
         y: (ty + 0.5) * TILE,
-        r: rng.range(7, 11),
+        r: rng.range(10, 14),
         tone: rng.pick(['#46683a', '#4f7339', '#3d5e32']),
       });
     }
@@ -597,7 +771,7 @@ export function createCity(seed = 7) {
 
   const tryCar = (tx, ty, x, y, angle) => {
     if (cars.length >= 1100) return;
-    if (!inb(tx, ty) || blocked[at(tx, ty)] || road[at(tx, ty)] || apron[at(tx, ty)] || park[at(tx, ty)] || water[at(tx, ty)]) return;
+    if (!inb(tx, ty) || blocked[at(tx, ty)] || road[at(tx, ty)] || apron[at(tx, ty)] || park[at(tx, ty)] || water[at(tx, ty)] || woods[at(tx, ty)]) return;
     cars.push({ x, y, angle: rng.chance(0.5) ? angle : angle + Math.PI, color: rng.pick(CAR_COLORS) });
   };
 
@@ -688,10 +862,12 @@ export function createCity(seed = 7) {
     w,
     h,
     road,
+    roadRuns,
     apron,
     blocked,
     park,
     forest,
+    woods,
     water,
     bridge,
     forestAreas,

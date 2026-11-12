@@ -13,6 +13,7 @@ import {
   restoreFleet, sellVehicle, sendEngineHome, sendToHospital, sendToPharmacy,
   toggleHydrant, updateUnits, isFirefighter,
   boatCanReach, diveVehiclesFor, orderEngineToVictim,
+  canDive, crewForTool, cutList, equipCrew, orderCut, restoreCuts,
 } from './units.js';
 import {
   findVictim, nearestVictim, restoreVictims, updateVictims,
@@ -76,6 +77,9 @@ export function createGame(seed = CONFIG.city.seed) {
     fx: [],
     fleeing: [],
     wildfires: [],
+    // Forest tiles felled by chainsaw crews: tracks vehicles can drive.
+    cut: new Uint8Array(city.w * city.h),
+    cutCount: 0,
     nextCallAt: CONFIG.incidents.firstCall,
     nextBigAt: CONFIG.incidents.bigAfter + 30,
     selected: null,
@@ -251,7 +255,15 @@ export function commandMove(state, wx, wy, buildingId = null) {
   if (selected.kind === 'blockade') return commandDispatchBlockade(state, selected.id);
   if (selected.kind === 'victim') return commandDispatchVictim(state, selected.id);
   if (selected.kind === 'engine') return orderEngine(state, selected, wx, wy, buildingId);
-  if (selected.kind === 'crew') return orderCrew(state, selected, wx, wy, buildingId);
+  if (selected.kind === 'crew') {
+    // With a chainsaw, a right-click in the woods means "cut a track to here".
+    const city = state.city;
+    const tile = Math.floor(wy / TILE) * city.w + Math.floor(wx / TILE);
+    if (selected.tool === 'chainsaw' && !buildingId && city.woods?.[tile] && !state.nav.drive[tile]) {
+      return orderCut(state, selected, wx, wy);
+    }
+    return orderCrew(state, selected, wx, wy, buildingId);
+  }
   // A building is selected: send the active engine to it if it is alight.
   if (selected.state === 'burning') return commandDispatch(state, selected.id);
   return false;
@@ -315,9 +327,9 @@ export function commandDispatchVictim(state, id) {
   if (!victim) return false;
   const selected = getSelected(state);
   const picked = selected && selected.kind !== 'victim' ? engineForUnit(state, selected) : null;
-  const candidates = picked?.spec?.diver ? [picked] : diveVehiclesFor(state, victim);
+  const candidates = canDive(picked) ? [picked] : diveVehiclesFor(state, victim);
   if (candidates.length === 0) {
-    addEvent(state, 'No divers — buy a dive team or a rescue boat', 'warn');
+    addEvent(state, 'No diving gear free — engines and rescue units carry it, or buy a rescue boat', 'warn');
     return false;
   }
   for (const engine of candidates) {
@@ -448,6 +460,25 @@ export function commandReturnHome(state) {
   return sendEngineHome(state, engine);
 }
 
+/**
+ * Hand out a tool. With a firefighter selected, they fetch it from their own
+ * vehicle; with a vehicle selected, someone aboard steps out with it (or the
+ * nearest crew member on the ground goes back for it).
+ */
+export function commandEquip(state, tool) {
+  const selected = getSelected(state);
+  const engine = engineForUnit(state, selected) ?? activeEngine(state);
+  if (!engine) return false;
+  const crew = selected?.kind === 'crew' ? selected : crewForTool(state, engine, tool);
+  if (!crew) {
+    addEvent(state, `${engine.name} has nobody to take it`, 'warn');
+    return false;
+  }
+  const ok = equipCrew(state, crew, tool);
+  if (ok && selected?.kind !== 'crew') selectUnit(state, crew.id);
+  return ok;
+}
+
 /** Connect or disconnect the selected engine's supply line to a hydrant. */
 export function commandHydrant(state) {
   const engine = engineForUnit(state, getSelected(state)) ?? activeEngine(state);
@@ -509,7 +540,7 @@ export { orderEngine, orderCrew };
 
 export function serialize(state) {
   return {
-    version: 5,
+    version: 7,
     seed: state.seed,
     time: state.time,
     clock: state.clock,
@@ -558,7 +589,10 @@ export function serialize(state) {
       riding: c.riding,
       targetId: c.targetId,
       wildfireId: c.wildfireId,
+      tool: c.fetch ?? c.tool,
+      cut: c.cut ? { ...c.cut } : null,
     })),
+    cut: cutList(state),
     wildfires: (state.wildfires ?? []).map((w) => ({ ...w })),
     patients: state.patients.map((p) => ({
       id: p.id,
@@ -624,6 +658,7 @@ export function loadState(data) {
   state.insured = Boolean(data.insured);
   state.training = { fire: 0, medic: 0, rescue: 0, ...(data.training ?? {}) };
   state.contracts = restoreContracts(data.contracts);
+  restoreCuts(state, data.cut ?? []);
   restoreFleet(state, { engines: data.engines ?? [], crews: data.crews ?? [] });
   restoreWildfires(state, data.wildfires ?? []);
   restorePatients(state, data.patients ?? []);

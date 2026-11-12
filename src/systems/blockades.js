@@ -109,32 +109,54 @@ function openRoad(state, blockade) {
 // ------------------------------------------------------------- traffic ---
 
 /**
- * Cars on every avenue and street: two lanes each way, each lane a list of cars
- * that follow the one in front. Positions are in world pixels along the road.
+ * Cars on every stretch of avenue and street: one lane each way, each lane a
+ * list of cars that follow the one in front. A street that ends at the woods or
+ * the quay is its own stretch. Positions are in world pixels along the road.
  */
 export function createTraffic(state) {
   const rng = state.rng;
   const city = state.city;
   const lanes = [];
-  const add = (axis, line, dir, length) => lanes.push({ axis, line, dir, length, cars: [] });
-  for (const vx of V_ROADS) {
-    add('v', (vx + 0.5) * TILE, 1, city.h * TILE);
-    add('v', (vx + 1.5) * TILE, -1, city.h * TILE);
+  const add = (axis, line, dir, from, to) => lanes.push({
+    axis, line, dir, start: from * TILE, end: (to + 1) * TILE, length: (to + 1 - from) * TILE, cars: [],
+  });
+  const runs = city.roadRuns ?? {
+    v: V_ROADS.map((line) => ({ line, spans: [[0, city.h - 1]] })),
+    h: H_ROADS.map((line) => ({ line, spans: [[0, city.w - 1]] })),
+  };
+  for (const { line: vx, spans } of runs.v) {
+    for (const [a, b] of spans) {
+      if (b - a < 6) continue;
+      add('v', (vx + 0.5) * TILE, 1, a, b);
+      add('v', (vx + 1.5) * TILE, -1, a, b);
+    }
   }
-  for (const hy of H_ROADS) {
-    add('h', (hy + 0.5) * TILE, -1, city.w * TILE);
-    add('h', (hy + 1.5) * TILE, 1, city.w * TILE);
+  for (const { line: hy, spans } of runs.h) {
+    for (const [a, b] of spans) {
+      if (b - a < 6) continue;
+      add('h', (hy + 0.5) * TILE, -1, a, b);
+      add('h', (hy + 1.5) * TILE, 1, a, b);
+    }
   }
 
   const colors = ['#cfd3d8', '#3d4d63', '#8f2f27', '#e7e3d6', '#4c5c50', '#b98a3a', '#6b6f76', '#2f4f7a'];
   const total = CONFIG.traffic.cars;
   const [lo, hi] = CONFIG.traffic.speed;
+  // Longer roads carry more cars.
+  const totalLength = lanes.reduce((sum, l) => sum + l.length, 0);
+  const laneAt = (d) => {
+    for (const l of lanes) {
+      if (d < l.length) return l;
+      d -= l.length;
+    }
+    return lanes[lanes.length - 1];
+  };
   for (let i = 0; i < total; i++) {
-    const lane = lanes[Math.floor(rng.float() * lanes.length)];
+    const lane = laneAt(rng.float() * totalLength);
     const speed = rng.range(lo, hi) * TILE;
     const car = {
       lane,
-      pos: rng.range(0, lane.length),
+      pos: rng.range(lane.start, lane.end),
       v: speed,
       cruise: speed,
       color: colors[Math.floor(rng.float() * colors.length)],
@@ -230,8 +252,9 @@ export function updateTraffic(state, dt) {
       const rate = target < car.v ? 520 : 150;
       car.v += clampStep(target - car.v, rate * dt);
       car.pos += lane.dir * car.v * dt;
-      if (car.pos > lane.length + 40) car.pos -= lane.length + 80;
-      else if (car.pos < -40) car.pos += lane.length + 80;
+      // A car leaving the end of its stretch turns off; another turns in at the start.
+      if (car.pos > lane.end) car.pos -= lane.length;
+      else if (car.pos < lane.start) car.pos += lane.length;
     }
     placeCars(lane);
   }

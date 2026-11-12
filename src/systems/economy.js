@@ -23,6 +23,9 @@ export function createLedger() {
     hours: 0,
     lastBudget: null, // { subsidy, upkeep, premium, interest, net }
     nextDonationAt: 0,
+    missions: 0, // successful missions since the last volunteers' grant
+    grantAfter: null, // missions needed before the next grant can happen
+    grants: 0,
   };
 }
 
@@ -36,6 +39,42 @@ export function earn(state, amount, tag = 'other') {
     ledger.by = ledger.by ?? {};
     ledger.by[tag] = (ledger.by[tag] ?? 0) + amount;
   }
+  // An incident reward is a mission completed.
+  if (tag === 'incident') missionDone(state);
+  return amount;
+}
+
+/** Is the city in good enough shape for a foundation to want its name on it? */
+export function cityInGoodShape(state) {
+  if (state.rating < CONFIG.economy.grant.minRating) return false;
+  if ((state.wildfires ?? []).length > 0) return false;
+  let burning = 0;
+  for (const b of state.buildings) if (b.state === 'burning') burning++;
+  return burning <= 1 && (state.blockades ?? []).every((b) => !b.big);
+}
+
+/**
+ * Count a successful mission and, very rarely, receive a volunteers' grant:
+ * only once a long run of missions has built up, only while the city is fine,
+ * and then only on a lucky roll. A miss moves the next chance a few missions on.
+ */
+export function missionDone(state) {
+  const ledger = state.ledger;
+  if (!ledger || !state.rng) return null;
+  const grant = CONFIG.economy.grant;
+  ledger.missions = (ledger.missions ?? 0) + 1;
+  if (ledger.grantAfter == null) ledger.grantAfter = state.rng.int(grant.after[0], grant.after[1]);
+  if (ledger.missions < ledger.grantAfter) return null;
+  if (!cityInGoodShape(state) || !state.rng.chance(grant.chance)) {
+    ledger.grantAfter = ledger.missions + state.rng.int(grant.retry[0], grant.retry[1]);
+    return null;
+  }
+  const amount = Math.round(state.rng.range(grant.min, grant.max) / 500) * 500;
+  ledger.missions = 0;
+  ledger.grantAfter = state.rng.int(grant.after[0], grant.after[1]);
+  ledger.grants = (ledger.grants ?? 0) + 1;
+  earn(state, amount, 'grant');
+  addEvent(state, `Volunteers' foundation grant — ${money(amount)} for keeping ${state.city?.name ?? 'the city'} safe`, 'good');
   return amount;
 }
 

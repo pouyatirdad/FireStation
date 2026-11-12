@@ -13,7 +13,8 @@ import {
 } from './grid.js';
 import { addEvent } from './events.js';
 import { activeFires, buildingRect } from './fire.js';
-import { streamImpact, spawnRescue } from './effects.js';
+import { streamImpact, spawnChips, spawnRescue } from './effects.js';
+import { placeNear } from './places.js';
 import { rescuePerson } from './civilians.js';
 import { earn, spend } from './economy.js';
 import {
@@ -52,6 +53,229 @@ export const vehicleSpec = (type) => CONFIG.vehicles[type] ?? null;
 export const vehicleCost = (type) => CONFIG.vehicles[type]?.cost ?? 0;
 
 export const isFirefighter = (engine) => !engine?.spec?.medical && !engine?.spec?.command && !engine?.spec?.diver;
+
+// ------------------------------------------------------------- equipment ---
+
+/** What a crew member carries when they first step out: hose, medical bag or dive kit. */
+export function defaultTool(engine) {
+  if (engine?.spec?.medical) return 'medkit';
+  if (engine?.spec?.diver) return 'diving';
+  return (engine?.spec?.hoseRange ?? 0) > 0 ? 'hose' : null;
+}
+
+/** How many of a tool the vehicle's lockers hold. Hose is unlimited on a pump. */
+export function toolCount(engine, tool) {
+  if (tool === 'hose') return (engine?.spec?.hoseRange ?? 0) > 0 ? Infinity : 0;
+  return engine?.spec?.tools?.[tool] ?? 0;
+}
+
+/** The tools a vehicle's crew can take, hose first. */
+export function vehicleTools(engine) {
+  if (!isFirefighter(engine) || engine.spec.flying || engine.spec.boat) return [];
+  const list = toolCount(engine, 'hose') > 0 ? ['hose'] : [];
+  for (const tool of Object.keys(engine.spec.tools ?? {})) if (toolCount(engine, tool) > 0) list.push(tool);
+  return list;
+}
+
+/** Tools of a kind still in the lockers (out with a crew, or being fetched, counts as taken). */
+export function toolsFree(state, engine, tool) {
+  const total = toolCount(engine, tool);
+  if (total === Infinity) return Infinity;
+  const out = crewOf(state, engine).filter((c) => !c.riding && (c.tool === tool || c.fetch === tool)).length;
+  return Math.max(0, total - out);
+}
+
+/** Can this vehicle put a diver in the water? */
+export const canDive = (engine) => Boolean(engine?.spec?.diver) || toolCount(engine, 'diving') > 0;
+
+/** Back aboard: equipment goes back in the lockers and every job is dropped. */
+function board(crew, engine) {
+  crew.riding = true;
+  crew.path = [];
+  crew.spraying = false;
+  crew.targetId = null;
+  crew.rescueTimer = 0;
+  crew.rescueId = null;
+  crew.wildfireId = null;
+  crew.tool = defaultTool(engine);
+  crew.fetch = null;
+  crew.fetchTimer = 0;
+  crew.cut = null;
+  crew.boarding = false;
+  crew.status = 'aboard';
+}
+
+/** Put one crew member on the ground beside the vehicle. */
+function stepOut(state, engine, crew, slot = 0) {
+  const offset = CREW_OFFSETS[slot % CREW_OFFSETS.length];
+  const angle = engine.angle + offset.a;
+  let x = engine.x + Math.cos(angle) * offset.r;
+  let y = engine.y + Math.sin(angle) * offset.r;
+  if (!passable(state.nav, 'walk', Math.floor(x / TILE), Math.floor(y / TILE))) {
+    x = engine.x;
+    y = engine.y;
+  }
+  crew.riding = false;
+  crew.x = x;
+  crew.y = y;
+  crew.path = [];
+  crew.targetId = null;
+  crew.spraying = false;
+  crew.think = 0;
+  crew.warned = false;
+  crew.rescueTimer = 0;
+  crew.rescueId = null;
+  crew.wildfireId = null;
+  crew.patientId = null;
+  crew.victimId = null;
+  crew.treatTimer = 0;
+  crew.idleFor = 0;
+  crew.cut = null;
+  crew.boarding = false;
+  crew.status = 'deployed';
+}
+
+/**
+ * Send a crew member to their vehicle for a tool. Someone aboard steps out
+ * with it; someone already on the ground walks back to the lockers first.
+ */
+export function equipCrew(state, crew, tool) {
+  const engine = crew ? engineOfCrew(state, crew) : null;
+  if (!engine || !CONFIG.tools[tool]) return false;
+  if (crew.medic) return false;
+  if (!crew.riding && (crew.fetch === tool || (crew.tool === tool && !crew.fetch))) return true;
+  if (toolCount(engine, tool) <= 0) {
+    addEvent(state, `${engine.name} does not carry a ${CONFIG.tools[tool].label.toLowerCase()}`, 'warn');
+    return false;
+  }
+  if (toolsFree(state, engine, tool) <= 0 && crew.tool !== tool) {
+    addEvent(state, `Every ${CONFIG.tools[tool].label.toLowerCase()} on ${engine.name} is already in use`, 'warn');
+    return false;
+  }
+  if (crew.riding) {
+    if (engine.path.length > 0 || engine.packTimer > 0) {
+      addEvent(state, `Stop ${engine.name} before anyone gets out`, 'warn');
+      return false;
+    }
+    const out = crewOf(state, engine).filter((c) => !c.riding).length;
+    stepOut(state, engine, crew, out);
+  }
+  if (crew.victimId) {
+    const v = findVictim(state, crew.victimId);
+    if (v && v.diverId === crew.id) v.diverId = null;
+  }
+  crew.cut = null;
+  crew.path = [];
+  crew.targetId = null;
+  crew.wildfireId = null;
+  crew.victimId = null;
+  crew.spraying = false;
+  crew.boarding = false;
+  crew.tool = null;
+  crew.fetch = tool;
+  crew.fetchTimer = 0;
+  crew.think = 0;
+  crew.status = tool === 'diving' ? 'suiting up' : 'fetching';
+  return true;
+}
+
+/** The crew member a vehicle should hand a tool to: someone aboard, else the nearest one out. */
+export function crewForTool(state, engine, tool) {
+  const crews = crewOf(state, engine).filter((c) => !c.medic);
+  const aboard = crews.find((c) => c.riding);
+  if (aboard && engine.path.length === 0 && engine.packTimer === 0) return aboard;
+  let best = null;
+  let bestD = Infinity;
+  for (const c of crews) {
+    if (c.riding || c.tool === tool || c.fetch === tool) continue;
+    const d = dist(c.x, c.y, engine.x, engine.y);
+    if (d < bestD) {
+      bestD = d;
+      best = c;
+    }
+  }
+  return best ?? aboard ?? null;
+}
+
+// ----------------------------------------------------------- woodcutting ---
+
+/** Forest that a chainsaw can open up: wooded, not already a track, not a building or water. */
+export function cuttable(state, x, y) {
+  const city = state.city;
+  if (x < 0 || y < 0 || x >= city.w || y >= city.h) return false;
+  const i = y * city.w + x;
+  return Boolean(city.woods?.[i]) && !state.nav.drive[i] && !city.blocked[i] && !city.water[i];
+}
+
+/** Fell the trees on a tile: it becomes a dirt track vehicles can drive. */
+export function cutTile(state, x, y) {
+  if (!cuttable(state, x, y)) return false;
+  const i = y * state.city.w + x;
+  state.cut[i] = 1;
+  state.nav.drive[i] = 1;
+  state.cutCount = (state.cutCount ?? 0) + 1;
+  return true;
+}
+
+/** Re-open the tracks a saved shift had cut. */
+export function restoreCuts(state, list = []) {
+  for (const i of list) {
+    if (!(i >= 0 && i < state.cut.length)) continue;
+    state.cut[i] = 1;
+    state.nav.drive[i] = 1;
+  }
+  state.cutCount = list.length;
+}
+
+export function cutList(state) {
+  const out = [];
+  for (let i = 0; i < state.cut.length; i++) if (state.cut[i]) out.push(i);
+  return out;
+}
+
+/**
+ * A crew member with a chainsaw cuts a track from the nearest drivable ground
+ * toward a point in the forest, two tiles wide, so a vehicle can follow.
+ */
+export function orderCut(state, crew, wx, wy) {
+  if (!crew || crew.riding || crew.tool !== 'chainsaw') return false;
+  const target = tileOf(wx, wy);
+  const city = state.city;
+  if (!city.woods?.[target.y * city.w + target.x]) {
+    addEvent(state, `${crew.name}: cut where there are trees`, 'warn');
+    return false;
+  }
+  const here = tileOf(crew.x, crew.y);
+  const start = nearestPassable(state.nav, 'drive', here.x, here.y, 14)
+    ?? nearestPassable(state.nav, 'drive', target.x, target.y, 80);
+  if (!start) {
+    addEvent(state, `${crew.name}: no road or track to cut from`, 'warn');
+    return false;
+  }
+  crew.cut = { tx: target.x, ty: target.y, hx: start.x, hy: start.y, timer: 0, done: 0 };
+  crew.path = [];
+  crew.targetId = null;
+  crew.wildfireId = null;
+  crew.think = 0;
+  crew.status = 'moving';
+  addEvent(state, `${crew.name} cutting a track into the woods near ${placeNear(state, wx, wy)}`, 'info');
+  return true;
+}
+
+/** The next step of a cutting job: the tile ahead, and the one beside it for the second lane. */
+function nextCut(state, job) {
+  const dx = job.tx - job.hx;
+  const dy = job.ty - job.hy;
+  if (dx === 0 && dy === 0) return null;
+  const alongX = Math.abs(dx) >= Math.abs(dy);
+  const x = job.hx + (alongX ? Math.sign(dx) : 0);
+  const y = job.hy + (alongX ? 0 : Math.sign(dy));
+  if (passable(state.nav, 'drive', x, y)) return { x, y, skip: true };
+  if (!cuttable(state, x, y)) return { x, y, blocked: true };
+  const sides = alongX ? [[x, y + 1], [x, y - 1]] : [[x + 1, y], [x - 1, y]];
+  const side = sides.find(([sx, sy]) => cuttable(state, sx, sy));
+  return { x, y, side: side ? { x: side[0], y: side[1] } : null };
+}
 
 /** The stations the player owns (Station 1 always; Station 2 once bought). */
 export const ownsStation = (state, index) => Boolean(state.ownedStations?.[index] ?? index === 0);
@@ -149,8 +373,12 @@ function spawnCrew(state, engine) {
     treatTimer: 0,
     idleFor: 0,
     victimId: null,
-    diver: Boolean(engine.spec?.diver),
     medic: Boolean(engine.spec?.medical),
+    tool: defaultTool(engine),
+    fetch: null,
+    fetchTimer: 0,
+    cut: null,
+    boarding: false,
     status: 'aboard',
   };
   engine.crewIds.push(crew.id);
@@ -312,8 +540,12 @@ export function restoreFleet(state, saved = {}) {
       treatTimer: 0,
       idleFor: 0,
       victimId: null,
-      diver: Boolean(engine.spec?.diver),
       medic: Boolean(engine.spec?.medical),
+      tool: entry.riding !== false ? defaultTool(engine) : entry.tool ?? defaultTool(engine),
+      fetch: null,
+      fetchTimer: 0,
+      cut: entry.riding !== false || !entry.cut ? null : { ...entry.cut, timer: 0 },
+      boarding: false,
       status: entry.riding !== false ? 'aboard' : 'standing by',
     };
     state.nextCrew = Math.max(state.nextCrew, number + 1);
@@ -636,38 +868,36 @@ export function orderCrew(state, crew, wx, wy, buildingId = null) {
   return true;
 }
 
-export function deployCrew(state, engine, target = null) {
+/**
+ * Everyone aboard steps out. `tools` hands out equipment first, in order
+ * (`{ cutter: 2 }`: two of them take the cutters); the rest take the hose.
+ * With `only`, just the crew members who get one of those tools step out.
+ */
+export function deployCrew(state, engine, target = null, tools = null, only = false) {
   const aboard = crewOf(state, engine).filter((c) => c.riding);
   if (aboard.length === 0) return 0;
+  const already = crewOf(state, engine).length - aboard.length;
+  const handOut = [];
+  for (const [tool, want] of Object.entries(tools ?? {})) {
+    const n = Math.min(want, toolsFree(state, engine, tool));
+    for (let i = 0; i < n; i++) handOut.push(tool);
+  }
   let n = 0;
   for (const crew of aboard) {
-    const offset = CREW_OFFSETS[n % CREW_OFFSETS.length];
-    const angle = engine.angle + offset.a;
-    let x = engine.x + Math.cos(angle) * offset.r;
-    let y = engine.y + Math.sin(angle) * offset.r;
-    if (!passable(state.nav, 'walk', Math.floor(x / TILE), Math.floor(y / TILE))) {
-      x = engine.x;
-      y = engine.y;
-    }
-    crew.riding = false;
-    crew.x = x;
-    crew.y = y;
-    crew.path = [];
+    const tool = handOut[n] ?? null;
+    if (only && !tool) break;
+    stepOut(state, engine, crew, already + n);
     crew.targetId = target?.id ?? null;
-    crew.spraying = false;
-    crew.think = 0;
-    crew.warned = false;
-    crew.rescueTimer = 0;
-    crew.rescueId = null;
-    crew.wildfireId = null;
-    crew.patientId = null;
-    crew.victimId = null;
-    crew.treatTimer = 0;
-    crew.idleFor = 0;
-    crew.status = 'deployed';
+    crew.tool = defaultTool(engine);
+    if (tool) {
+      crew.tool = null;
+      crew.fetch = tool;
+      crew.fetchTimer = 0;
+      crew.status = tool === 'diving' ? 'suiting up' : 'fetching';
+    }
     n++;
   }
-  addEvent(state, target ? `${n} crew deployed to ${target.name}` : `${n} crew deployed`, 'info');
+  if (n > 0) addEvent(state, target ? `${n} crew deployed to ${target.name}` : `${n} crew deployed`, 'info');
   return n;
 }
 
@@ -675,14 +905,7 @@ export function recallCrew(state, engine) {
   let n = 0;
   for (const crew of crewOf(state, engine)) {
     if (crew.riding) continue;
-    crew.riding = true;
-    crew.path = [];
-    crew.spraying = false;
-    crew.targetId = null;
-    crew.rescueTimer = 0;
-    crew.rescueId = null;
-    crew.wildfireId = null;
-    crew.status = 'aboard';
+    board(crew, engine);
     n++;
   }
   if (n > 0) addEvent(state, 'Crew recalled to the engine', 'info');
@@ -752,7 +975,7 @@ export function orderEngineToBlockade(state, engine, blockade) {
   return true;
 }
 
-/** Closest free fire vehicle for a wreck; a rescue unit counts as nearer (it has the cutters). */
+/** Closest free fire vehicle for a wreck; one carrying rescue cutters counts as nearer. */
 export function pickEngineForBlockade(state, blockade) {
   let best = null;
   let bestScore = Infinity;
@@ -760,7 +983,7 @@ export function pickEngineForBlockade(state, blockade) {
     if (!isFirefighter(engine) || engine.spec.flying || engine.spec.boat) continue;
     const free = !engine.targetId && !engine.wildfireId && !engine.blockadeId
       && engine.path.length === 0 && engine.packTimer === 0;
-    const d = dist(engine.x, engine.y, blockade.x, blockade.y) * (engine.type === 'rescue' ? 0.6 : 1) + (free ? 0 : 1e6);
+    const d = dist(engine.x, engine.y, blockade.x, blockade.y) * (toolCount(engine, 'cutter') > 0 ? 0.6 : 1) + (free ? 0 : 1e6);
     if (d < bestScore) {
       bestScore = d;
       best = engine;
@@ -769,9 +992,16 @@ export function pickEngineForBlockade(state, blockade) {
   return best;
 }
 
-/** Send divers to a person in the water: a boat sails, a dive truck drives to the bank. */
+/**
+ * Send divers to a person in the water: a rescue boat sails to them; an engine
+ * or rescue unit with diving gear drives to the nearest bank.
+ */
 export function orderEngineToVictim(state, engine, victim) {
-  if (!engine?.spec?.diver || !victim) return false;
+  if (!canDive(engine) || !victim) return false;
+  if (!engine.spec.diver && toolsFree(state, engine, 'diving') <= 0) {
+    addEvent(state, `${engine.name}: its diving gear is already in use`, 'warn');
+    return false;
+  }
   const ok = engine.spec.boat
     ? orderBoat(state, engine, victim.x, victim.y, null, null)
     : orderEngine(state, engine, victim.x, victim.y);
@@ -780,12 +1010,12 @@ export function orderEngineToVictim(state, engine, victim) {
   return true;
 }
 
-/** Diver vehicles, nearest first (boats count as nearer: they are right on the water). */
+/** Vehicles that can put a diver in, nearest first (boats count as nearer: they are right on the water). */
 export function diveVehiclesFor(state, victim) {
   return state.engines
-    .filter((e) => e.spec.diver)
+    .filter((e) => canDive(e) && (e.spec.diver || toolsFree(state, e, 'diving') > 0))
     .map((e) => {
-      const free = !e.victimId && e.path.length === 0 && e.packTimer === 0;
+      const free = !e.victimId && !e.targetId && !e.wildfireId && e.path.length === 0 && e.packTimer === 0;
       return { e, score: Math.hypot(e.x - victim.x, e.y - victim.y) * (e.spec.boat ? 0.7 : 1) + (free ? 0 : 1e6) };
     })
     .sort((a, b) => a.score - b.score)
@@ -1004,10 +1234,16 @@ function arriveEngine(state, engine) {
     if (wildfire) deployCrew(state, engine, null);
     engine.wildfireId = null;
   } else if (engine.blockadeId) {
-    if (state.blockades.some((b) => b.id === engine.blockadeId)) deployCrew(state, engine, null);
+    // The cutters come out first; everyone else helps by hand.
+    if (state.blockades.some((b) => b.id === engine.blockadeId)) deployCrew(state, engine, null, { cutter: 2 });
     engine.blockadeId = null;
   } else if (engine.victimId) {
-    if (findVictim(state, engine.victimId)) deployCrew(state, engine, null);
+    // A boat's crew are already divers; a fire vehicle sends out only the ones
+    // it has diving gear for, and they suit up on the bank.
+    if (findVictim(state, engine.victimId)) {
+      if (engine.spec.diver) deployCrew(state, engine, null);
+      else deployCrew(state, engine, null, { diving: 2 }, true);
+    }
     engine.victimId = null;
   }
   engine.goal = null;
@@ -1208,16 +1444,7 @@ function updateEngine(state, engine, dt) {
     engine.status = 'packing up';
     if (engine.packTimer <= 0) {
       engine.packTimer = 0;
-      for (const crew of crewOf(state, engine)) {
-        crew.riding = true;
-        crew.path = [];
-        crew.targetId = null;
-        crew.spraying = false;
-        crew.rescueTimer = 0;
-        crew.rescueId = null;
-        crew.wildfireId = null;
-        crew.status = 'aboard';
-      }
+      for (const crew of crewOf(state, engine)) board(crew, engine);
     }
     return;
   }
@@ -1326,7 +1553,7 @@ function updateAmbulance(state, engine, dt) {
 }
 
 function updateDiver(state, crew, engine, dt) {
-  const range = engine.spec.diveRange * TILE;
+  const range = (engine.spec.diveRange ?? CONFIG.tools.diving.range) * TILE;
   let victim = crew.victimId ? findVictim(state, crew.victimId) : null;
   if (!victim) {
     crew.victimId = null;
@@ -1349,8 +1576,15 @@ function updateDiver(state, crew, engine, dt) {
   if (!victim) {
     crew.status = 'standing by';
     crew.idleFor += dt;
-    const out = crewOf(state, engine).filter((c) => !c.riding);
-    if (out.length > 0 && out.every((c) => c.idleFor > 6)) recallCrew(state, engine);
+    if (engine.spec.diver) {
+      // A rescue boat waits for all its divers, then takes them aboard.
+      const out = crewOf(state, engine).filter((c) => !c.riding);
+      if (out.length > 0 && out.every((c) => c.idleFor > 6)) recallCrew(state, engine);
+    } else if (crew.idleFor > 6) {
+      // Nobody left in the water: swim back and stow the gear.
+      crew.boarding = true;
+      crew.think = 0;
+    }
     return;
   }
   crew.idleFor = 0;
@@ -1470,7 +1704,7 @@ function updateCrewBlockade(state, crew, engine, dt) {
   if (distToRect(crew.x, crew.y, bestRect) <= 2.2 * TILE) {
     crew.path.length = 0;
     crew.status = 'clearing';
-    workOnBlockade(state, best, dt * (engine.type === 'rescue' ? CONFIG.blockade.rescueBonus : 1));
+    workOnBlockade(state, best, dt * (crew.tool === 'cutter' ? CONFIG.tools.cutter.bonus : 1));
     return true;
   }
 
@@ -1590,6 +1824,125 @@ function updateCrewWildfire(state, crew, engine, wildfire, dt) {
   return true;
 }
 
+/** Walk (or swim) somewhere with no hose to hold you back. */
+function walkFree(state, crew, dt) {
+  if (crew.path.length > 0) {
+    followPath(crew, dt, CONFIG.crew.speed * TILE);
+    crew.status = 'moving';
+  } else {
+    crew.status = 'standing by';
+  }
+}
+
+/** Walk back to a point beside the vehicle: true once there. */
+function goToVehicle(state, crew, engine, dt) {
+  if (dist(crew.x, crew.y, engine.x, engine.y) <= 1.7 * TILE) {
+    crew.path.length = 0;
+    return true;
+  }
+  const mode = state.city.water[tileOf(crew.x, crew.y).y * state.city.w + tileOf(crew.x, crew.y).x] ? 'swim' : 'walk';
+  crew.think -= dt;
+  if (crew.think <= 0 || crew.path.length === 0) {
+    crew.think = 0.8;
+    const goal = nearestPassable(state.nav, 'walk', ...Object.values(tileOf(engine.x, engine.y)), 4);
+    const tiles = goal ? findPath(state.nav, mode, tileOf(crew.x, crew.y), goal) : null;
+    crew.path = tiles ? smoothPath(state.nav, mode, { x: crew.x, y: crew.y }, tiles) : [];
+  }
+  followPath(crew, dt, (mode === 'swim' ? 3.2 : CONFIG.crew.speed) * TILE);
+  return false;
+}
+
+/** At the lockers: take the tool (or put on the dive suit), then get to work. */
+function updateFetch(state, crew, engine, dt) {
+  crew.spraying = false;
+  if (!goToVehicle(state, crew, engine, dt)) {
+    crew.status = 'returning';
+    crew.fetchTimer = 0;
+    return;
+  }
+  crew.status = crew.fetch === 'diving' ? 'suiting up' : 'fetching';
+  crew.angle = angleTo(crew.x, crew.y, engine.x, engine.y);
+  crew.fetchTimer += dt;
+  if (crew.fetchTimer >= CONFIG.fetchTime) {
+    crew.tool = crew.fetch;
+    crew.fetch = null;
+    crew.fetchTimer = 0;
+    crew.idleFor = 0;
+    crew.status = 'standing by';
+  }
+}
+
+/** Done with the job: back to the vehicle and aboard. */
+function updateBoarding(state, crew, engine, dt) {
+  crew.spraying = false;
+  crew.status = 'returning';
+  if (goToVehicle(state, crew, engine, dt)) board(crew, engine);
+}
+
+/** A crew member with a chainsaw, working down a cutting job tile by tile. */
+function updateCutter(state, crew, engine, dt) {
+  crew.spraying = false;
+  const job = crew.cut;
+  if (!job) {
+    walkFree(state, crew, dt);
+    return;
+  }
+  let next = nextCut(state, job);
+  for (let guard = 0; next?.skip && guard < 200; guard++) {
+    job.hx = next.x;
+    job.hy = next.y;
+    next = nextCut(state, job);
+  }
+  if (!next || next.blocked) {
+    crew.cut = null;
+    crew.status = 'standing by';
+    if (job.done > 0) {
+      addEvent(state, `${crew.name}: track cut — ${job.done * 2} tiles of forest opened for vehicles`, 'good');
+    } else if (next?.blocked) {
+      addEvent(state, `${crew.name}: cannot cut through there`, 'warn');
+    }
+    return;
+  }
+
+  // Work from the end of the track, facing the next trees.
+  const hx = (job.hx + 0.5) * TILE;
+  const hy = (job.hy + 0.5) * TILE;
+  if (dist(crew.x, crew.y, hx, hy) > 0.8 * TILE) {
+    crew.status = 'moving';
+    crew.think -= dt;
+    if (crew.think <= 0 || crew.path.length === 0) {
+      crew.think = 1;
+      const tiles = findPath(state.nav, 'walk', tileOf(crew.x, crew.y), { x: job.hx, y: job.hy });
+      crew.path = tiles ? smoothPath(state.nav, 'walk', { x: crew.x, y: crew.y }, tiles) : [];
+      if (!tiles) {
+        crew.cut = null;
+        addEvent(state, `${crew.name}: cannot reach the end of the track`, 'warn');
+        return;
+      }
+    }
+    followPath(crew, dt, CONFIG.crew.speed * TILE);
+    return;
+  }
+
+  crew.path.length = 0;
+  const tx = (next.x + 0.5) * TILE;
+  const ty = (next.y + 0.5) * TILE;
+  crew.angle = angleTo(crew.x, crew.y, tx, ty);
+  crew.status = 'cutting';
+  const skill = 1 + CONFIG.economy.training.rescue * (state.training?.rescue ?? 0);
+  job.timer += dt * skill;
+  if (state.rng.float() < dt * 14) spawnChips(state, (crew.x + tx) / 2, (crew.y + ty) / 2);
+  if (job.timer >= CONFIG.tools.chainsaw.cutTime) {
+    job.timer = 0;
+    cutTile(state, next.x, next.y);
+    if (next.side) cutTile(state, next.side.x, next.side.y);
+    job.hx = next.x;
+    job.hy = next.y;
+    job.done++;
+    spawnChips(state, tx, ty, 8);
+  }
+}
+
 function updateCrew(state, crew, dt) {
   const engine = engineOfCrew(state, crew);
   if (!engine) return;
@@ -1611,7 +1964,7 @@ function updateCrew(state, crew, dt) {
     crew.think -= dt;
     if (crew.think <= 0) {
       crew.think = 0.4;
-      const goal = nearestPassable(state.nav, 'walk', tileOf(engine.x, engine.y), 4);
+      const goal = nearestPassable(state.nav, 'walk', ...Object.values(tileOf(engine.x, engine.y)), 4);
       const tiles = goal ? findPath(state.nav, 'walk', tileOf(crew.x, crew.y), goal) : null;
       crew.path = tiles ? smoothPath(state.nav, 'walk', { x: crew.x, y: crew.y }, tiles) : [];
     }
@@ -1624,8 +1977,29 @@ function updateCrew(state, crew, dt) {
     updateMedic(state, crew, engine, dt);
     return;
   }
-  if (engine.spec.diver) {
+  if (crew.fetch) {
+    updateFetch(state, crew, engine, dt);
+    return;
+  }
+  if (crew.boarding) {
+    updateBoarding(state, crew, engine, dt);
+    return;
+  }
+  if (crew.tool === 'diving') {
     updateDiver(state, crew, engine, dt);
+    return;
+  }
+  if (crew.tool === 'chainsaw') {
+    updateCutter(state, crew, engine, dt);
+    return;
+  }
+  if (crew.tool === 'cutter') {
+    if (updateCrewBlockade(state, crew, engine, dt)) return;
+    walkFree(state, crew, dt);
+    return;
+  }
+  if (crew.tool !== 'hose') {
+    walkFree(state, crew, dt);
     return;
   }
 

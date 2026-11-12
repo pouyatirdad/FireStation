@@ -420,6 +420,45 @@ button { font-family: inherit; }
   grid-column: 1 / -1;
 }
 
+/* Equipment: one button per tool in the vehicle's lockers. */
+.sel__label {
+  margin: -4px 0 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.sel__tools {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin: 0 0 12px;
+}
+
+.btn--tool {
+  justify-content: space-between;
+  padding: 7px 8px;
+  font-size: 11px;
+}
+
+.btn--tool.is-active {
+  border-color: var(--warn);
+  background: rgba(217, 164, 65, 0.16);
+}
+
+.btn--tool:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.sel__count {
+  margin-left: 4px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .supply {
   display: flex;
   align-items: center;
@@ -1512,13 +1551,18 @@ button { font-family: inherit; }
   flex-wrap: wrap;
   justify-content: center;
   gap: 6px;
-  padding: 7px 9px;
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  background: var(--panel);
-  backdrop-filter: blur(16px);
-  box-shadow: 0 20px 55px rgba(0, 0, 0, 0.45);
+  padding: 0;
+  border: 0;
+  background: none;
+  backdrop-filter: none;
+  box-shadow: none;
   pointer-events: auto;
+}
+/* With no bar behind them, each button carries its own background. */
+.roster__actions .btn {
+  background: var(--panel);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
 }
 .hints { left: calc(var(--dock-l) + 24px); bottom: 70px; }
 .stage.units-collapsed .hints { left: 12px; }

@@ -76,6 +76,29 @@ export function spawnRescue(state, x, y) {
   });
 }
 
+/** Wood chips and sawdust thrown out by a chainsaw. */
+export function spawnChips(state, x, y, count = 3) {
+  const rng = state.rng;
+  for (let i = 0; i < count; i++) {
+    if (state.fx.length >= MAX_FX) return;
+    const life = rng.range(0.35, 0.8);
+    state.fx.push({
+      kind: 'chip',
+      x: x + rng.range(-4, 4),
+      y: y + rng.range(-4, 4),
+      vx: rng.range(-60, 60),
+      vy: rng.range(-70, -10),
+      size: rng.range(1, 2.4),
+      grow: 0,
+      rot: rng.range(0, Math.PI),
+      vr: rng.range(-9, 9),
+      life,
+      maxLife: life,
+      tone: rng.range(0, 1),
+    });
+  }
+}
+
 export function spawnDebris(state, building) {
   const rng = state.rng;
   const rect = buildingRect(building);
@@ -148,7 +171,7 @@ export function updateEffects(state, dt) {
     p.x += p.vx * dt;
     p.y += p.vy * dt;
     p.size += p.grow * dt;
-    if (p.kind === 'debris') {
+    if (p.kind === 'debris' || p.kind === 'chip') {
       p.vy += 260 * dt;
       p.rot += p.vr * dt;
     } else if (p.kind === 'ember') {

@@ -4,7 +4,7 @@
 import { CONFIG } from '../core/config.js';
 import { formatClock } from '../core/math.js';
 import {
-  freeBay, hydrantInReach, ownsStation, totalBays, totalBerths,
+  freeBay, hydrantInReach, ownsStation, toolCount, toolsFree, totalBays, totalBerths, vehicleTools,
 } from '../systems/units.js';
 import { contractProgress } from '../systems/contracts.js';
 import { TRAINING_LABEL, hourlyBudget } from '../systems/economy.js';
@@ -39,6 +39,9 @@ const STATUS_TONE = {
   transporting: 'warn',
   blocked: 'bad',
   'no kits': 'bad',
+  cutting: 'good',
+  fetching: 'warn',
+  'suiting up': 'warn',
   'in quarters': 'good',
   'no water': 'bad',
   'hose too short': 'bad',
@@ -73,7 +76,35 @@ const SHORT_STATUS = {
   transporting: 'To hospital',
   blocked: 'Blocked',
   'no kits': 'No kits',
+  cutting: 'Cutting',
+  fetching: 'Fetching tool',
+  'suiting up': 'Suiting up',
 };
+
+const TOOL_NOTE = {
+  hose: 'Fights fire within hose reach of the vehicle.',
+  chainsaw: 'Right-click in the forest to cut a track from the nearest road; vehicles can drive it.',
+  diving: 'Swims out to people in the water near the vehicle.',
+  cutter: 'Clears wrecks and debris much faster.',
+  medkit: 'Treats injured people near the ambulance.',
+};
+
+const toolLabel = (tool) => (tool === 'medkit' ? 'Medical bag' : CONFIG.tools[tool]?.label ?? 'Nothing');
+
+/** Buttons for the tools a vehicle carries; `crew` marks the one held. */
+function toolButtons(state, engine, crew = null) {
+  const tools = vehicleTools(engine);
+  if (tools.length === 0) return '';
+  return '<div class="sel__tools">' + tools.map((tool) => {
+    const total = toolCount(engine, tool);
+    const free = toolsFree(state, engine, tool);
+    const held = crew && !crew.riding && (crew.tool === tool || crew.fetch === tool);
+    const count = total === Infinity ? '' : ' <span class="sel__count">' + free + '/' + total + '</span>';
+    const disabled = !held && free <= 0 ? ' disabled' : '';
+    return '<button type="button" class="btn btn--tool' + (held ? ' is-active' : '') + '" data-action="equip" data-tool="' + tool + '"' + disabled +
+      ' title="' + esc(TOOL_NOTE[tool] ?? '') + '">' + esc(CONFIG.tools[tool].label) + count + '<kbd>' + CONFIG.tools[tool].key + '</kbd></button>';
+  }).join('') + '</div>';
+}
 
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => (
   { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
@@ -445,9 +476,12 @@ function selectionSignature(state, entity) {
     const supply = entity.kind === 'engine'
       ? (entity.supply ? 'S' : hydrantInReach(state, entity) ? 'R' : 'T')
       : '';
+    const vehicle = entity.kind === 'engine' ? entity : state.engines.find((e) => e.id === entity.engineId);
+    const lockers = vehicle ? vehicleTools(vehicle).map((t) => toolsFree(state, vehicle, t)).join(',') : '';
+    const tools = entity.kind === 'engine' ? lockers : [entity.tool, entity.fetch, entity.cut?.done ?? '', lockers].join(',');
     return [
       entity.id, entity.status, Math.round(entity.water / 80), entity.riding,
-      entity.kind === 'crew' ? entity.targetId : '', supply, entity.kits ?? '', entity.cargo?.length ?? '',
+      entity.kind === 'crew' ? entity.targetId : '', supply, entity.kits ?? '', entity.cargo?.length ?? '', tools,
     ].join(':');
   }
   return [
@@ -510,7 +544,7 @@ function wildfireCard(state, wildfire) {
 
 function victimCard(state, victim) {
   const frac = Math.max(0, Math.min(1, victim.life / victim.maxLife));
-  const divers = state.engines.some((e) => e.spec.diver);
+  const divers = state.engines.some((e) => e.spec.diver || toolCount(e, 'diving') > 0);
   return `
     <div class="sel__kind">Water rescue</div>
     <h2 class="sel__name">Person in the water</h2>
@@ -518,8 +552,8 @@ function victimCard(state, victim) {
     <div class="bar__label"><span>Time left</span><span>${Math.ceil(victim.life)} s</span></div>
     <div class="bar bar--health"><i style="width:${Math.round(frac * 100)}%"></i></div>
     <p class="sel__meta">Near ${esc(victim.label ?? 'the water')}.<br>${divers
-      ? 'Divers swim out from a dive team on the bank or a rescue boat on the water. Once out they need an ambulance.'
-      : 'No divers — buy a dive team or a rescue boat in Headquarters (B).'}</p>
+      ? 'Firefighters put on the diving gear from an engine or rescue unit parked on the bank, or go over the side of a rescue boat. Once out they need an ambulance.'
+      : 'Nobody has diving gear — engines and rescue units carry it, or buy a rescue boat in Headquarters (B).'}</p>
     <div class="sel__actions">
       <button type="button" class="btn" data-action="dispatch">Send divers<kbd>D</kbd></button>
       <button type="button" class="btn" data-action="center">Locate<kbd>C</kbd></button>
@@ -636,6 +670,8 @@ function engineCard(state, engine) {
     <div class="bar"><i style="width:${waterPct}"></i></div>
     ${supply}
     <p class="sel__meta">${aboard} aboard · ${deployed} deployed<br>Hose reaches ${engine.spec.hoseRange} tiles; the deck gun ${engine.spec.turretRange}.</p>
+    <div class="sel__label">Equipment — a crew member takes it from the lockers</div>
+    ${toolButtons(state, engine)}
     <div class="sel__actions">
       <button type="button" class="btn" data-action="dispatch">Dispatch<kbd>D</kbd></button>
       <button type="button" class="btn" data-action="deploy">Deploy<kbd>E</kbd></button>
@@ -649,15 +685,21 @@ function crewCard(state, crew) {
   const target = state.buildings.find((b) => b.id === crew.targetId);
   const engine = state.engines.find((e) => e.id === crew.engineId);
   const distance = engine ? Math.round(Math.hypot(crew.x - engine.x, crew.y - engine.y) / 32) : 0;
+  const tool = crew.riding ? null : crew.fetch ?? crew.tool;
+  const job = crew.cut
+    ? `Cutting a track: ${crew.cut.done * 2} tiles felled, ${Math.max(Math.abs(crew.cut.tx - crew.cut.hx), Math.abs(crew.cut.ty - crew.cut.hy))} to go.`
+    : crew.medic ? (crew.patientId ? 'Treating a patient.' : 'No patient assigned.')
+      : tool === 'hose' ? (target ? `Working ${esc(target.name)}.` : 'No fire assigned.')
+        : esc(TOOL_NOTE[tool] ?? '');
   return `
-    <div class="sel__kind">${crew.medic ? 'Paramedic' : 'Firefighter'}</div>
+    <div class="sel__kind">${crew.medic ? 'Paramedic' : tool === 'diving' ? 'Firefighter · diver' : 'Firefighter'}</div>
     <h2 class="sel__name">${esc(crew.name)}</h2>
     ${statusChip(crew.status)}
     <p class="sel__meta">
-      ${crew.riding ? `Riding in ${esc(engine?.name ?? 'the engine')}.` : `On foot · ${distance} tiles from ${esc(engine?.name ?? 'the engine')}.`}<br>
-      ${crew.medic ? (crew.patientId ? 'Treating a patient.' : 'No patient assigned.')
-        : target ? `Working ${esc(target.name)}.` : 'No fire assigned.'}
+      ${crew.riding ? `Riding in ${esc(engine?.name ?? 'the engine')}.` : `On foot · ${distance} tiles from ${esc(engine?.name ?? 'the engine')} · ${esc(toolLabel(tool))}${crew.fetch ? ' (fetching)' : ''}.`}<br>
+      ${job}
     </p>
+    ${!crew.medic && engine ? toolButtons(state, engine, crew) : ''}
     <div class="sel__actions">
       <button type="button" class="btn" data-action="recall">Recall</button>
       <button type="button" class="btn" data-action="select-engine">Engine</button>

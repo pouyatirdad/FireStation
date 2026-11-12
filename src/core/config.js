@@ -42,6 +42,10 @@ export const CONFIG = {
     },
     kitPrice: 12, // per medical kit bought at a pharmacy
     donation: { every: [420, 700], min: 300, max: 900, minRating: 60 },
+    // Very rarely a volunteers' foundation makes a big gift: only after a long
+    // run of successful missions, only while the city is in good shape, and even
+    // then only sometimes. A miss pushes the next chance a few missions on.
+    grant: { after: [10, 20], chance: 0.4, retry: [3, 7], min: 20000, max: 50000, minRating: 85 },
 
     // Finance: borrowing, insurance, training and sponsor contracts.
     loan: { max: 30000, step: 5000, rate: 0.03 }, // interest per game hour on what is owed
@@ -59,18 +63,32 @@ export const CONFIG = {
 
   command: { aura: 0.2, range: 26 }, // tiles; extra spray power for crews near a parked command car
 
+  // Equipment a firefighter takes from their own vehicle, one item at a time.
+  // Diving needs no special vehicle: engines and rescue units carry the gear.
+  tools: {
+    hose: { label: 'Hose', key: 'F' },
+    chainsaw: { label: 'Chainsaw', key: 'X', cutTime: 1.7 }, // seconds per step of a track (two tiles)
+    diving: { label: 'Diving gear', key: 'V', range: 24 }, // tiles a diver swims from the vehicle
+    cutter: { label: 'Rescue cutter', key: 'T', bonus: 1.8 }, // how much faster a wreck is cleared
+  },
+  fetchTime: 1.4, // seconds to take a tool from the locker (or put on a dive suit)
+
   // The fleet: each vehicle is a different tool, not a skin. Buy and sell them
   // at the station; eight bays in total.
+  // `tools` is the equipment in the lockers: how many of each its crew can take
+  // out at once. Every fire vehicle with a pump also carries hose for everyone.
   vehicles: {
     engine: {
       label: 'Engine', cost: 1000, crew: 3, speed: 8.2, capacity: 1800, upkeep: 24,
       hoseRange: 15, turretRange: 9, turretPower: 0.035, turretWater: 42,
       refillRate: 170, rescueTime: 3.6, refund: 0.6,
+      tools: { chainsaw: 1, diving: 2 },
     },
     ladder: {
       label: 'Ladder', cost: 1800, crew: 3, speed: 7.6, capacity: 1200, upkeep: 36,
       hoseRange: 14, turretRange: 18, turretPower: 0.055, turretWater: 34,
       refillRate: 150, rescueTime: 3.4, refund: 0.6,
+      tools: { chainsaw: 1 },
     },
     tanker: {
       label: 'Tanker', cost: 1500, crew: 2, speed: 7.0, capacity: 6000, upkeep: 26,
@@ -81,6 +99,7 @@ export const CONFIG = {
       label: 'Rescue', cost: 1600, crew: 4, speed: 9.2, capacity: 600, upkeep: 30,
       hoseRange: 16, turretRange: 6, turretPower: 0.02, turretWater: 12,
       refillRate: 160, rescueTime: 2.2, refund: 0.6,
+      tools: { chainsaw: 2, cutter: 2, diving: 2 },
     },
     // Medical: no water and no deck gun. The paramedics walk out to injured
     // people and use one kit per patient; kits are restocked at the station or
@@ -106,13 +125,6 @@ export const CONFIG = {
       hoseRange: 0, turretRange: 0, turretPower: 0, turretWater: 0,
       refillRate: 0, rescueTime: 3, refund: 0.6,
       medical: true, kits: 16, treatTime: 3.6, medRange: 24, carry: 8,
-    },
-    // Divers by road: park on the bank and they swim out to people in the water.
-    divetruck: {
-      label: 'Dive team', cost: 2300, crew: 2, speed: 8, capacity: 0, upkeep: 30,
-      hoseRange: 0, turretRange: 0, turretPower: 0, turretWater: 0,
-      refillRate: 0, rescueTime: 5, refund: 0.6,
-      diver: true, diveRange: 24,
     },
     // Divers by water: sails to the casualty and puts them over the side.
     rescueboat: {
@@ -167,7 +179,6 @@ export const CONFIG = {
   // Roads blocked by wrecks and debris, and the traffic that queues behind them.
   blockade: {
     clearTime: 26, // crew-seconds of work to open a road
-    rescueBonus: 1.8, // a rescue crew has the cutting gear
     quickBonus: 120, // paid if the wreck is cleared before its fuel catches
     fuelDelay: [45, 80], // seconds before a wreck's fuel ignites a neighbour
     fuelReach: 9, // tiles
