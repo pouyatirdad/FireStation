@@ -278,22 +278,21 @@ function drawGround(ctx, state, b, z) {
   }
 
   // The station apron and its parking bays.
-  ctx.fillStyle = PALETTE.apron;
-  ctx.fillRect(
-    APRON.x0 * TILE,
-    APRON.y0 * TILE,
-    (APRON.x1 - APRON.x0 + 1) * TILE,
-    (APRON.y1 - APRON.y0 + 1) * TILE,
-  );
-  ctx.strokeStyle = 'rgba(232,200,90,0.45)';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  for (let i = 1; i <= 3; i++) {
-    const x = (APRON.x0 + i * 2.4) * TILE;
-    ctx.moveTo(x, APRON.y0 * TILE + 8);
-    ctx.lineTo(x, (APRON.y1 + 1) * TILE - 6);
+  for (const st of city.stations ?? [{ apron: APRON }]) {
+    const a = st.apron;
+    if (a.x1 < b.x0 || a.x0 > b.x1 || a.y1 < b.y0 || a.y0 > b.y1) continue;
+    ctx.fillStyle = PALETTE.apron;
+    ctx.fillRect(a.x0 * TILE, a.y0 * TILE, (a.x1 - a.x0 + 1) * TILE, (a.y1 - a.y0 + 1) * TILE);
+    ctx.strokeStyle = 'rgba(232,200,90,0.45)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (let i = 1; i <= 3; i++) {
+      const x = (a.x0 + i * 2.4) * TILE;
+      ctx.moveTo(x, a.y0 * TILE + 8);
+      ctx.lineTo(x, (a.y1 + 1) * TILE - 6);
+    }
+    ctx.stroke();
   }
-  ctx.stroke();
 
   // The staff car park beside the station.
   if (city.lot) {
@@ -471,7 +470,8 @@ function drawEntities(ctx, state, bounds, now, z) {
   }
   for (const u of state.units) {
     if (u.kind === 'crew' && u.riding) continue;
-    list.push({ key: u.y + 12, unit: u });
+    // Helicopters fly over everything.
+    list.push({ key: u.spec?.flying ? u.y + 100000 : u.y + 12, unit: u });
   }
   for (const person of state.fleeing) {
     list.push({ key: person.y + 8, person });
@@ -540,7 +540,7 @@ function drawBuilding(ctx, state, b, now, z) {
   if (detailed) drawRoofDetails(ctx, b, x, y - e, w, h);
   if (b.type === 'pharmacy') drawPharmacyMark(ctx, x, y - e, w, h);
   if (b.type === 'hospital') drawHospitalMark(ctx, x, y - e, w, h, detailed);
-  if (detailed && b.type === 'station') drawStationFace(ctx, b, x, facadeTop, w, e, z);
+  if (detailed && b.type === 'station') drawStationFace(ctx, b, x, facadeTop, w, e, z, b.id === 'station2' && !state.ownedStations?.[1]);
 
   if (b.state === 'burning') {
     if (b.integrity < b.maxIntegrity * 0.75) {
@@ -669,15 +669,15 @@ function drawRoofDetails(ctx, b, x, y, w, h) {
   }
 }
 
-function drawStationFace(ctx, b, x, y, w, e, z) {
+function drawStationFace(ctx, b, x, y, w, e, z, forSale = false) {
   ctx.fillStyle = '#f1ead9';
   ctx.fillRect(x + w * 0.06, y + 2, w * 0.88, Math.max(5, e * 0.16));
   if (z >= 0.85) {
-    ctx.fillStyle = '#8f2f22';
+    ctx.fillStyle = forSale ? '#2b5f8f' : '#8f2f22';
     ctx.font = `bold ${Math.max(6, e * 0.11)}px "Segoe UI", system-ui, sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('STATION 1', x + w / 2, y + 2 + Math.max(5, e * 0.16) / 2 + 0.5);
+    ctx.fillText(forSale ? 'FOR SALE' : (b.name ?? 'STATION').toUpperCase(), x + w / 2, y + 2 + Math.max(5, e * 0.16) / 2 + 0.5);
   }
 
   for (const t of [0.1, 0.53]) {
@@ -793,8 +793,89 @@ function drawFire(ctx, b, now, z) {
 // ----------------------------------------------------------------- units ---
 
 function drawUnit(ctx, u, now) {
-  if (u.kind === 'engine') drawEngine(ctx, u, now);
-  else drawCrew(ctx, u, now);
+  if (u.kind === 'engine') {
+    if (u.spec?.flying) drawHelicopter(ctx, u, now);
+    else drawEngine(ctx, u, now);
+  } else drawCrew(ctx, u, now);
+}
+
+// A water-bombing helicopter: a shadow on the ground, the airframe lifted above
+// it, a spinning rotor and a bucket under it while the tank is working.
+function drawHelicopter(ctx, e, now) {
+  const lift = 34;
+  ctx.save();
+  ctx.translate(e.x, e.y);
+
+  ctx.fillStyle = 'rgba(10,14,18,0.3)';
+  ctx.beginPath();
+  ctx.ellipse(10, 24, 38, 14, e.angle, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.translate(0, -lift);
+  ctx.rotate(e.angle);
+
+  // Tail boom, fuselage, cockpit.
+  ctx.fillStyle = '#b8bec4';
+  ctx.fillRect(-58, -3, 40, 6);
+  ctx.fillStyle = '#d9dde0';
+  ctx.fillRect(-62, -9, 8, 18);
+  ctx.fillStyle = '#c93a2f';
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 28, 15, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#f0ece2';
+  ctx.fillRect(-18, -3, 30, 6);
+  ctx.fillStyle = '#1b2b3a';
+  ctx.beginPath();
+  ctx.ellipse(16, 0, 11, 9, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(140,200,235,0.35)';
+  ctx.beginPath();
+  ctx.ellipse(18, -2, 6, 4, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // Skids.
+  ctx.strokeStyle = '#3a3f45';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(-22, -16);
+  ctx.lineTo(24, -16);
+  ctx.moveTo(-22, 16);
+  ctx.lineTo(24, 16);
+  ctx.stroke();
+
+  // Main rotor: a translucent disc and two blades.
+  const spin = now * 26;
+  ctx.fillStyle = 'rgba(210,220,230,0.12)';
+  ctx.beginPath();
+  ctx.arc(0, 0, 50, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(40,46,52,0.85)';
+  ctx.lineWidth = 3.5;
+  ctx.beginPath();
+  ctx.moveTo(Math.cos(spin) * 50, Math.sin(spin) * 50);
+  ctx.lineTo(-Math.cos(spin) * 50, -Math.sin(spin) * 50);
+  ctx.moveTo(Math.cos(spin + Math.PI / 2) * 50, Math.sin(spin + Math.PI / 2) * 50);
+  ctx.lineTo(-Math.cos(spin + Math.PI / 2) * 50, -Math.sin(spin + Math.PI / 2) * 50);
+  ctx.stroke();
+  ctx.fillStyle = '#2a2f35';
+  ctx.beginPath();
+  ctx.arc(0, 0, 5, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Beacon.
+  if (e.status === 'responding' || e.pumping) {
+    ctx.fillStyle = Math.floor(now * 6) % 2 === 0 ? '#ff4b3e' : '#58b8ff';
+    ctx.beginPath();
+    ctx.arc(-4, -10, 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+
+  ctx.fillStyle = 'rgba(255,255,255,0.92)';
+  ctx.font = 'bold 10px "Segoe UI", system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(`${(e.spec?.label ?? 'H')[0]}${e.number}`, e.x, e.y - lift - 22);
 }
 
 function drawEngine(ctx, e, now) {
@@ -819,14 +900,34 @@ function drawEngine(ctx, e, now) {
     }
   }
 
-  const body = type === 'tanker' ? '#a9b1b8'
+  const body = type === 'command' ? '#f2f0ea' : type === 'tanker' ? '#a9b1b8'
     : type === 'rescue' ? '#d97a2b'
       : type === 'ambulance' ? '#f1efe8' : '#bf2f27';
   ctx.fillStyle = body;
   rr(ctx, -42, -19, 84, 38, 6);
   ctx.fill();
 
-  if (type === 'ambulance') {
+  if (type === 'command') {
+    // A white-and-red command SUV with a roof light bar and a mast.
+    ctx.fillStyle = '#f2f0ea';
+    rr(ctx, -36, -16, 74, 32, 7);
+    ctx.fill();
+    ctx.fillStyle = '#c93a2f';
+    ctx.fillRect(-36, -3, 74, 6);
+    ctx.fillStyle = '#17222d';
+    ctx.fillRect(6, -12, 14, 24);
+    ctx.fillRect(-26, -12, 10, 24);
+    ctx.fillStyle = 'rgba(130,190,230,0.25)';
+    ctx.fillRect(6, -12, 5, 24);
+    ctx.strokeStyle = '#3a3f45';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(-8, 0);
+    ctx.lineTo(-8, -24);
+    ctx.stroke();
+    ctx.fillStyle = '#2d7fd0';
+    ctx.fillRect(-2, -12, 5, 24);
+  } else if (type === 'ambulance') {
     // White box body, a red stripe and a cross on the side, light bar on the cab.
     ctx.fillStyle = '#f7f5ee';
     rr(ctx, -40, -17, 60, 34, 5);
@@ -1485,6 +1586,15 @@ function drawWorldSelection(ctx, state, now, z) {
     ctx.stroke();
     ctx.setLineDash([]);
 
+    if (entity.kind === 'engine' && entity.spec.command) {
+      ctx.strokeStyle = 'rgba(95,208,255,0.35)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([12, 10]);
+      ctx.beginPath();
+      ctx.arc(entity.x, entity.y, CONFIG.command.range * TILE, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
     if (entity.kind === 'engine') {
       // Where the hose can still reach, and where the deck gun can.
       ctx.strokeStyle = 'rgba(95,208,255,0.13)';
@@ -1900,9 +2010,11 @@ function drawMinimap(ctx, state, cam, view) {
   ctx.drawImage(miniStatic(state, mw, mh), x, y);
 
   // Station 1, so the way home is never lost on a map this size.
-  const st = city.station;
-  ctx.fillStyle = '#ff5b4d';
-  ctx.fillRect(x + (st.x + st.w / 2) * TILE * sx - 3, y + (st.y + st.h / 2) * TILE * sy - 3, 6, 6);
+  (city.stations ?? []).forEach((station, i) => {
+    const st = station.building;
+    ctx.fillStyle = state.ownedStations?.[i] ?? i === 0 ? '#ff5b4d' : 'rgba(255,255,255,0.35)';
+    ctx.fillRect(x + (st.x + st.w / 2) * TILE * sx - 3, y + (st.y + st.h / 2) * TILE * sy - 3, 6, 6);
+  });
 
   const pulse = 0.6 + 0.4 * Math.sin(state.time * 5);
   for (const b of state.buildings) {

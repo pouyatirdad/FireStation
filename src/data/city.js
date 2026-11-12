@@ -254,7 +254,7 @@ function buildBlocks(seed = 7) {
         kind = 'forest';
         zone = forestBlocks.get(key);
       } else if (parks.has(key)) kind = 'park';
-      else if (col === 2 && row === 2) kind = 'station';
+      else if ((col === 2 && row === 2) || (col === 8 && row === 6)) kind = 'station';
       else if (near === 0 && roll < 0.02) kind = 'park';
       else if (near <= 1) kind = 'downtown';
       else if (row >= lastRow - 2 || (row >= 4 && (col * 5 + row * 3) % 7 === 0)) kind = 'industry';
@@ -473,6 +473,29 @@ export function createCity(seed = 7) {
 
   for (const block of blocks) fillBlock(block);
 
+  // --- Station 2: the same layout as Station 1, in the Civic Quarter. It is
+  // for sale; its apron and bays only count once it has been bought. ----------
+  const b2 = blocks.find((b) => b.col === 8 && b.row === 6);
+  const station2 = addBuilding(b2.x0 + 6, b2.y0 + 6, STATION.w, STATION.h, 'station', {
+    id: 'station2',
+    name: 'Station 2',
+    floors: 2,
+  });
+  const apron2 = {
+    x0: APRON.x0 - 44 + b2.x0,
+    y0: APRON.y0 - 38 + b2.y0,
+    x1: APRON.x1 - 44 + b2.x0,
+    y1: APRON.y1 - 38 + b2.y0,
+  };
+  for (let ty = apron2.y0; ty <= apron2.y1; ty++) {
+    for (let tx = apron2.x0; tx <= apron2.x1; tx++) apron[at(tx, ty)] = 1;
+  }
+  for (const [tx, ty] of [[b2.x0 + 5, b2.y0 + 2], [b2.x0 + 16, b2.y0 + 2], [b2.x0 + 2, b2.y0 + 10]]) {
+    if (inb(tx, ty) && !blocked[at(tx, ty)] && !road[at(tx, ty)] && !apron[at(tx, ty)]) {
+      trees.push({ x: (tx + 0.5) * TILE, y: (ty + 0.5) * TILE, r: rng.range(9, 13), tone: '#4f7a3d' });
+    }
+  }
+
   // --- parks mask --------------------------------------------------------
   const park = new Uint8Array(w * h);
   for (const p of parks) {
@@ -607,6 +630,17 @@ export function createCity(seed = 7) {
   districts.push({ name: 'HARBOR', x: 60 * TILE, y: (h - 60) * TILE });
   districts.push({ name: 'DOCKLANDS', x: (w - 90) * TILE, y: (h - 60) * TILE });
 
+  const bays1 = BAYS.map((b) => ({ x: b.x * TILE, y: b.y * TILE, station: 0 }));
+  const bays2 = BAYS.map((b) => ({
+    x: (b.x - APRON.x0 + apron2.x0) * TILE,
+    y: (b.y - APRON.y0 + apron2.y0) * TILE,
+    station: 1,
+  }));
+  const stations = [
+    { id: 'station', name: 'Station 1', building: station, apron: { ...APRON }, bays: bays1 },
+    { id: 'station2', name: 'Station 2', building: station2, apron: apron2, bays: bays2 },
+  ];
+
   return {
     name: CITY_NAME,
     w,
@@ -625,7 +659,9 @@ export function createCity(seed = 7) {
     parks,
     cars,
     lot: stationLot,
-    bays: BAYS.map((b) => ({ x: b.x * TILE, y: b.y * TILE })),
+    // Every bay of every station, Station 1's first so existing indexes hold.
+    bays: [...bays1, ...bays2],
+    stations,
     districts,
     pharmacies: buildings.filter((b) => b.type === 'pharmacy'),
     hospitals: buildings.filter((b) => b.type === 'hospital'),

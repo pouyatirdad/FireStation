@@ -24,17 +24,18 @@ export function coverageRadius(state) {
   return start + state.time * growPerSecond;
 }
 
-const inCoverage = (state, x, y, scale = 1) => {
-  const station = state.city.station;
-  const cx = station.x + station.w / 2;
-  const cy = station.y + station.h / 2;
-  return Math.hypot(x - cx, y - cy) <= coverageRadius(state) * scale;
-};
+// A call can come from anywhere within reach of any station you own, so
+// opening Station 2 brings a second district into the rota.
+const inCoverage = (state, x, y, scale = 1) => state.city.stations.some((st, i) => {
+  if (!(state.ownedStations?.[i] ?? i === 0)) return false;
+  const b = st.building;
+  return Math.hypot(x - (b.x + b.w / 2), y - (b.y + b.h / 2)) <= coverageRadius(state) * scale;
+});
 
 function candidates(state, types = null) {
   const pool = state.buildings.filter((b) => (
     b.state === 'ok'
-    && b.id !== 'station'
+    && b.type !== 'station'
     && (!types || types.includes(b.type))
   ));
   const near = pool.filter((b) => inCoverage(state, b.x + b.w / 2, b.y + b.h / 2));
@@ -67,7 +68,7 @@ function blockFire(state, count) {
   const neighbours = state.buildings.filter((b) => (
     b !== first
     && b.state === 'ok'
-    && b.id !== 'station'
+    && b.type !== 'station'
     && rectsTouch(rect, buildingRect(b), 4 * TILE)
   ));
   const picks = [first, ...state.rng.shuffle(neighbours).slice(0, count - 1)];
@@ -110,7 +111,7 @@ function bigBlockFire(state) {
   const neighbours = state.buildings.filter((b) => (
     b !== first
     && b.state === 'ok'
-    && b.id !== 'station'
+    && b.type !== 'station'
     && rectsTouch(rect, buildingRect(b), 5 * TILE)
   ));
   const picks = [first, ...state.rng.shuffle(neighbours).slice(0, 3)];

@@ -11,14 +11,20 @@ import {
   engineForUnit, orderAmbulanceToPatient, orderCrew, orderEngine, orderEngineToWildfire,
   orderEngineToBlockade, pickAmbulanceFor, pickEngineForBlockade, recallCrew, repathEngines,
   restoreFleet, sellVehicle, sendEngineHome, sendToHospital, sendToPharmacy,
-  toggleHydrant, updateUnits,
+  toggleHydrant, updateUnits, isFirefighter, upgradeVehicle,
 } from './units.js';
+import {
+  repayLoan, takeLoan, toggleInsurance, trainCrew,
+} from './economy.js';
+import {
+  acceptContract, createContracts, restoreContracts, updateContracts,
+} from './contracts.js';
 import {
   createTraffic, findBlockade, restoreBlockades, updateTraffic,
 } from './blockades.js';
 import { explode, updateChains } from './chains.js';
 import { createWind, updateWind } from './wind.js';
-import { createLedger, updateEconomy } from './economy.js';
+import { createLedger, spend, updateEconomy } from './economy.js';
 import {
   findPatient, isMedical, nearestPatient, restorePatients, updatePatients,
 } from './medical.js';
@@ -50,6 +56,11 @@ export function createGame(seed = CONFIG.city.seed) {
     credits: CONFIG.economy.start,
     stats: { saved: 0, lost: 0, alarms: 0, rescued: 0, casualties: 0, escaped: 0, treated: 0 },
     ledger: createLedger(),
+    ownedStations: [true, false],
+    loan: 0,
+    insured: false,
+    training: { fire: 0, medic: 0, rescue: 0 },
+    contracts: createContracts(),
     patients: [],
     blockades: [],
     wind: createWind(new Rng(seed * 104729 + 7)),
@@ -100,6 +111,7 @@ export function update(state, dt) {
   updateChains(state);
   updateTraffic(state, dt);
   updateEconomy(state, dt);
+  updateContracts(state);
   updatePatients(state, dt);
   updateUnits(state, dt);
   updateFire(state, dt);
@@ -234,8 +246,9 @@ function closestIdleEngine(state, x, y) {
   let near = null;
   let nearD = Infinity;
   for (const engine of state.engines) {
-    if (isMedical(engine)) continue;
-    const d = Math.hypot(engine.x - x, engine.y - y);
+    if (!isFirefighter(engine)) continue;
+    // A helicopter is the right tool for a forest fire, wherever it is parked.
+    const d = Math.hypot(engine.x - x, engine.y - y) * (engine.spec.flying ? 0.45 : 1);
     if (d < nearD) {
       nearD = d;
       near = engine;
@@ -391,12 +404,40 @@ export function commandHydrant(state) {
   return toggleHydrant(state, engine);
 }
 
-/** Buy a vehicle of any type at the station. */
-export function commandBuyVehicle(state, type = 'engine') {
-  const engine = buyVehicle(state, type);
+/** Buy a vehicle of any type, optionally for a particular station (0 or 1). */
+export function commandBuyVehicle(state, type = 'engine', station = null) {
+  const engine = buyVehicle(state, type, station);
   if (engine) selectUnit(state, engine.id);
   return engine;
 }
+
+/** Open Station 2: a second set of bays and a second helipad. */
+export function commandBuyStation(state) {
+  if (state.ownedStations[1]) {
+    addEvent(state, 'Station 2 is already open', 'info');
+    return false;
+  }
+  const price = CONFIG.economy.stationPrice;
+  if (state.credits < price) {
+    addEvent(state, `Not enough credits — $${price.toLocaleString('en-US')} for Station 2`, 'warn');
+    return false;
+  }
+  spend(state, price, 'station');
+  state.ownedStations[1] = true;
+  addEvent(state, 'Station 2 is open — eight more bays across the city', 'good');
+  return true;
+}
+
+export function commandUpgrade(state, engineId, kind) {
+  const engine = state.engines.find((e) => e.id === engineId);
+  return upgradeVehicle(state, engine, kind);
+}
+
+export const commandLoan = (state, amount) => takeLoan(state, amount);
+export const commandRepay = (state, amount) => repayLoan(state, amount);
+export const commandInsurance = (state) => toggleInsurance(state);
+export const commandTrain = (state, kind) => trainCrew(state, kind);
+export const commandAcceptContract = (state, id) => acceptContract(state, id);
 
 export function commandBuyEngine(state) {
   return commandBuyVehicle(state, 'engine');
@@ -417,7 +458,7 @@ export { orderEngine, orderCrew };
 
 export function serialize(state) {
   return {
-    version: 3,
+    version: 4,
     seed: state.seed,
     time: state.time,
     clock: state.clock,
@@ -455,6 +496,8 @@ export function serialize(state) {
       supply: e.supply,
       kits: e.kits,
       cargo: (e.cargo ?? []).map((c) => ({ ...c })),
+      upgrades: { ...(e.upgrades ?? {}) },
+      invested: e.invested ?? 0,
     })),
     crews: state.crew.map((c) => ({
       id: c.id,
@@ -486,6 +529,11 @@ export function serialize(state) {
       fuelDone: b.fuelDone, debris: b.debris,
     })),
     wind: { ...state.wind },
+    ownedStations: [...state.ownedStations],
+    loan: state.loan,
+    insured: state.insured,
+    training: { ...state.training },
+    contracts: JSON.parse(JSON.stringify(state.contracts)),
     ledger: { ...state.ledger, lastBudget: state.ledger.lastBudget ? { ...state.ledger.lastBudget } : null, by: { ...(state.ledger.by ?? {}) } },
   };
 }
@@ -518,6 +566,11 @@ export function loadState(data) {
     b.big = Boolean(saved.big);
   }
 
+  state.ownedStations = data.ownedStations ?? [true, false];
+  state.loan = data.loan ?? 0;
+  state.insured = Boolean(data.insured);
+  state.training = { fire: 0, medic: 0, rescue: 0, ...(data.training ?? {}) };
+  state.contracts = restoreContracts(data.contracts);
   restoreFleet(state, { engines: data.engines ?? [], crews: data.crews ?? [] });
   restoreWildfires(state, data.wildfires ?? []);
   restorePatients(state, data.patients ?? []);

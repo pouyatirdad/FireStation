@@ -10,6 +10,8 @@ import {
   commandBuyVehicle, commandSellVehicle, commandHydrant, commandDispatchWildfire,
   commandDispatchPatient, commandDispatchBlockade, commandPharmacy, commandHospital,
   selectPatient, selectBlockade,
+  commandBuyStation, commandUpgrade, commandLoan, commandRepay, commandInsurance,
+  commandTrain, commandAcceptContract,
   selectWildfire, getSelected, serialize, loadState,
 } from './systems/game.js';
 import { createAudio } from './systems/audio.js';
@@ -333,11 +335,24 @@ function onAction(action, data = {}) {
     case 'open-station': toggleStation(); break;
     case 'close-station': hideOverlay(stationScreen); break;
     case 'buy-vehicle': buyApparatus(data.type ?? 'engine'); break;
+    case 'station-tab': hud.setStationTab(data.tab ?? 'fleet'); break;
+    case 'deliver-to': hud.setBuyStation(Number(data.station ?? 0)); break;
+    case 'buy-station': commandBuyStation(state); break;
+    case 'upgrade': commandUpgrade(state, data.engine, data.kind); break;
+    case 'take-loan': commandLoan(state); break;
+    case 'repay-loan': commandRepay(state); break;
+    case 'toggle-insurance': commandInsurance(state); break;
+    case 'train': commandTrain(state, data.kind); break;
+    case 'accept-contract': commandAcceptContract(state, data.id); break;
     case 'sell-vehicle': sellApparatus(data.engine); break;
     case 'save-game': saveGame(); break;
     case 'load-game': loadGame(); break;
     case 'new-shift': restart(); break;
     default: break;
+  }
+  if (!stationScreen.hidden) {
+    hud.updateStation(state);
+    hud.update(state, true);
   }
 }
 
@@ -382,7 +397,7 @@ function toggleStation() {
 }
 
 function buyApparatus(type) {
-  const vehicle = commandBuyVehicle(state, type);
+  const vehicle = commandBuyVehicle(state, type, hud.getBuyStation());
   if (vehicle) {
     hud.updateStation(state);
     hud.update(state, true);
@@ -397,7 +412,7 @@ function sellApparatus(id) {
 
 // ------------------------------------------------------------------- save ---
 
-const SAVE_KEY = 'firestation.save.v3';
+const SAVE_KEY = 'firestation.save.v4';
 
 function hasSave() {
   try {
@@ -725,10 +740,15 @@ if (params.has('pileup')) {
     clampCamera(cam, state, view);
   }
 }
+if (params.has('heli')) {
+  startGame();
+  commandBuyVehicle(state, 'helicopter');
+  commandBuyVehicle(state, 'command');
+}
 if (params.has('injured')) {
   // Two hurt people near the station, for looking at ambulances.
   startGame();
-  const near = state.buildings.filter((b) => b.id !== 'station')
+  const near = state.buildings.filter((b) => b.type !== 'station')
     .sort((a, b) => Math.hypot(a.x - 54, a.y - 47) - Math.hypot(b.x - 54, b.y - 47));
   for (const b of near.slice(0, 2)) spawnPatient(state, b, 0.6);
   cam.x = (near[0].x + near[0].w / 2) * TILE;

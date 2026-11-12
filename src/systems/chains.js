@@ -144,7 +144,7 @@ export function updateChains(state) {
     let best = null;
     let bestD = reach;
     for (const building of state.buildings) {
-      if (building.state !== 'ok' || building.id === 'station') continue;
+      if (building.state !== 'ok' || building.type === 'station') continue;
       const r = buildingRect(building);
       const dx = Math.max(r.x - b.x, 0, b.x - (r.x + r.w));
       const dy = Math.max(r.y - b.y, 0, b.y - (r.y + r.h));
@@ -180,7 +180,7 @@ export function explode(state, building) {
 
   // Neighbours within a few tiles catch from the blast.
   const near = state.buildings
-    .filter((b) => b !== building && b.state === 'ok' && b.id !== 'station'
+    .filter((b) => b !== building && b.state === 'ok' && b.type !== 'station'
       && rectsTouch(rect, buildingRect(b), 3 * TILE));
   for (const b of state.rng.shuffle(near).slice(0, 2)) ignite(state, b, 'spread');
 

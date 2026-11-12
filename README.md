@@ -2,7 +2,7 @@
 
 A top-down emergency-services management game for Windows, in the spirit of **Emergency 4**: a
 520×384 city (ten times the area of the first version) with forests, pharmacies and a waterfront,
-five kinds of apparatus you buy and sell — engines, ladders, tankers, rescue units and
+seven kinds of apparatus you buy, upgrade and sell — engines, ladders, tankers, rescue units and
 **ambulances** — small calls and major incidents, injured civilians, forest fires, a real budget,
 synthesised sound, hospitals, blocked roads with live traffic, wind that drives the fire, chained incidents and a day/night cycle. Vanilla JavaScript, no dependencies; one self-contained
 `index.html`.
@@ -44,7 +44,7 @@ the night.
 | **Respond** | Select a vehicle (click it or press <kbd>1</kbd>–<kbd>6</kbd>) and right-click a fire. It takes the fastest road route and parks on the nearest street. With nothing selected, <kbd>D</kbd> sends the nearest idle vehicle. |
 | **Deploy** | The crew ride along. On scene they dismount, walk to the fire and attack it on their own. <kbd>E</kbd> deploys them by hand, <kbd>R</kbd> packs them up. |
 | **Rescue** | A fire leaves people trapped — a red badge on the building shows how many. A crew at the building brings one person out at a time. If it collapses first, they are lost. Small rescue jobs exist too. |
-| **Apparatus** | <kbd>B</kbd> opens the apparatus panel: buy and sell engines, ladders, tankers, rescue units and ambulances. Eight bays. |
+| **Headquarters** | <kbd>B</kbd> opens a four-tab panel: **Fleet** (buy and sell, pick which station gets the vehicle, open Station 2), **Upgrades**, **Finance** and **Contracts**. |
 | **Injured** | People hurt in a fire lie on the street with a countdown ring and a red cross. Right-click them or press <kbd>D</kbd> with an ambulance selected. Medical emergencies also come in as calls of their own. |
 | **Pharmacy** | An ambulance carries 8 medical kits (one per patient). Restock slowly and free on the station apron, or fast beside any pharmacy for $12 a kit. <kbd>P</kbd> sends the selected ambulance to the nearest one. |
 | **Hospital** | Seven hospitals, one in every commercial centre. A **critical** patient (flagged on their card) is stabilised on the spot, put on a stretcher (two per ambulance) and driven to the nearest hospital automatically, for $260 each. <kbd>K</kbd> sends the ambulance by hand. |
@@ -67,6 +67,13 @@ the night.
 | **Tanker** | 2 | 6,000 L | 12 | 7 | $1,500 | $26 |
 | **Rescue** | 4 | 600 L | 16 | 6 | $1,600 | $30 |
 | **Ambulance** | 2 paramedics | 8 kits | walks 22 tiles | — | $1,400 | $22 |
+| **Command** | 2 | — | — | — | $2,600 | $40 |
+| **Helicopter** | none | 2,600 L | — | 11 (from the air) | $8,000 | $95 |
+
+- **Command car:** no hose, no water. Parked, it makes every crew within 26 tiles spray 20% harder.
+- **Helicopter:** flies in a straight line over roads, wrecks and traffic and hovers over the target, dropping water on buildings and forest fires alike. It refills on any station apron or by dipping in the harbour (the south edge of the map), so it is fast but never close to the water. It is the first choice when you right-click a forest fire.
+- **Station 2:** a second station in the Civic Quarter, for sale at $9,000. It adds eight bays and a second helipad, its apron refills and restocks like Station 1's, and calls begin to come from its district too.
+- **Upgrades:** each vehicle takes up to three levels of bigger tank, high-pressure pump, longer hose and tuned engine (speed applies to every vehicle), plus medical stock and an extra stretcher for ambulances. Each level adds 8% to upkeep and is half refunded if you sell.
 
 Selling returns 60% of the price. Every incident carries its own reward:
 
@@ -78,6 +85,17 @@ Selling returns 60% of the price. Every incident carries its own reward:
 | Industrial fire (major) | $1,500 |
 | Major block fire | $1,800 |
 | Forest fire (major) | $2,200 |
+
+### Finance
+
+The **Finance** tab holds the levers:
+
+- **Loans** in $5,000 steps up to $30,000, at 3% of what you owe per game hour.
+- **Insurance** for $70 an hour: a lost building costs 40% instead of all of it.
+- **Training** for fire attack, paramedics and rescue, three levels each (+12% spray power, 15% faster treatment, 12% faster rescue per level), at the price of 8% higher wages per level.
+- A breakdown of everything you earned and spent this shift, and a **day report** in the log every midnight.
+
+**Contracts:** every five to eight minutes a sponsor offers a side job (knock down N fires, treat N people, reopen N roads, deliver critical patients, or go a stretch with no casualties). Accept up to two; finish in time and they pay, miss the deadline and you forfeit a quarter of the fee.
 
 ### Chained incidents
 
@@ -147,7 +165,7 @@ lists the pointer controls. <kbd>F1</kbd> opens the full list.
 | <kbd>M</kbd> | Sound on or off |
 | <kbd>E</kbd> / <kbd>R</kbd> | Deploy / recall the crew |
 | <kbd>G</kbd> | Connect or detach the hydrant supply line |
-| <kbd>B</kbd> | Apparatus panel |
+| <kbd>B</kbd> | Headquarters (fleet, upgrades, finance, contracts) |
 | <kbd>H</kbd> | Send the selected vehicle back to the station |
 | <kbd>C</kbd> | Center on the selection |
 | <kbd>Ctrl</kbd>+<kbd>S</kbd> | Save the shift |
@@ -220,6 +238,7 @@ needs editing.
 ?station        open the apparatus panel
 ?injured        start, and put two injured people near the station
 ?crash          start, and cause a traffic accident
+?heli           start, and buy a helicopter and a command car
 ?pileup         start, and cause a pile-up
 ?fleet=ambulance,ladder   (buy several, ambulances included)
 ?hydrantpark    park Engine 1 beside a hydrant

@@ -6,7 +6,7 @@ import { addEvent } from './events.js';
 import { evacuate } from './civilians.js';
 import { downwindFactor } from './wind.js';
 import {
-  earn, money, spend, speedBonus, valueFactor,
+  earn, lossShare, money, spend, speedBonus, valueFactor,
 } from './economy.js';
 
 export const buildingRect = (b) => ({
@@ -66,7 +66,11 @@ function destroy(state, building) {
   building.reward = 0;
   state.stats.lost += 1;
   state.rating = Math.max(0, state.rating - CONFIG.rating.perLost);
-  const penalty = spend(state, Math.round(CONFIG.economy.lossPenalty * valueFactor(building)), 'loss');
+  const penalty = spend(
+    state,
+    Math.round(CONFIG.economy.lossPenalty * valueFactor(building) * lossShare(state)),
+    'loss',
+  );
   addEvent(state, `Building lost — ${building.name} (−${money(penalty)})`, 'bad');
 
   if (trapped > 0) {

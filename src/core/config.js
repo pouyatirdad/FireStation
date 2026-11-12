@@ -43,7 +43,33 @@ export const CONFIG = {
     },
     kitPrice: 12, // per medical kit bought at a pharmacy
     donation: { every: [420, 700], min: 300, max: 900, minRating: 60 },
+
+    // Finance: borrowing, insurance, training and sponsor contracts.
+    loan: { max: 30000, step: 5000, rate: 0.03 }, // interest per game hour on what is owed
+    insurance: { premium: 70, lossShare: 0.4 }, // per game hour; share of a building loss you still pay
+    training: {
+      cost: [900, 1800, 3000],
+      fire: 0.12, // extra spray power per level
+      medic: 0.15, // faster treatment per level
+      rescue: 0.12, // faster rescue per level
+      wageRise: 0.08, // wages rise per level taken
+    },
+    contracts: { every: [300, 480], maxOffers: 3, maxActive: 2, failPenalty: 0.25 },
+    stationPrice: 9000, // buying Station 2
   },
+
+  // Upgrades bought per vehicle in the apparatus panel, three levels each.
+  upgrades: {
+    tank: { label: 'Bigger tank', for: 'fire', cost: [450, 800, 1250], tank: 0.25 },
+    pump: { label: 'High-pressure pump', for: 'fire', cost: [500, 900, 1400], power: 0.15 },
+    hose: { label: 'Longer hose', for: 'fire', cost: [350, 650, 1000], hose: 2, turret: 1 },
+    speed: { label: 'Tuned engine', for: 'all', cost: [400, 700, 1100], speed: 0.1 },
+    kits: { label: 'Medical stock', for: 'medical', cost: [300, 550, 850], kits: 3 },
+    stretcher: { label: 'Extra stretcher', for: 'medical', cost: [700, 1300, 2000], carry: 1 },
+    upkeep: 0.08, // upkeep rises by this share per level bought
+  },
+
+  command: { aura: 0.2, range: 26 }, // tiles; extra spray power for crews near a parked command car
 
   // The fleet: each vehicle is a different tool, not a skin. Buy and sell them
   // at the station; eight bays in total.
@@ -76,6 +102,24 @@ export const CONFIG = {
       hoseRange: 0, turretRange: 0, turretPower: 0, turretWater: 0,
       refillRate: 0, rescueTime: 3, refund: 0.6,
       medical: true, kits: 8, treatTime: 4, medRange: 22, carry: 2,
+    },
+    // The chief's car: no hose, no water. Parked, it boosts every crew within
+    // range (spray power +20%), so it earns its place on a big fire.
+    command: {
+      label: 'Command', cost: 2600, crew: 2, speed: 9.4, capacity: 0, upkeep: 40,
+      hoseRange: 0, turretRange: 0, turretPower: 0, turretWater: 0,
+      refillRate: 0, rescueTime: 3.2, refund: 0.6,
+      command: true,
+    },
+    // A water-bombing helicopter: no crew, flies straight over roads, wrecks and
+    // traffic, and drops water on whatever it hovers over, forest fires included.
+    // It refills at a station helipad or by dipping in the harbour (the south
+    // waterfront band), which is why it is fast but never close to the water.
+    helicopter: {
+      label: 'Helicopter', cost: 8000, crew: 0, speed: 17, capacity: 2600, upkeep: 95,
+      hoseRange: 0, turretRange: 11, turretPower: 0.05, turretWater: 70,
+      refillRate: 300, rescueTime: 3, refund: 0.55,
+      flying: true,
     },
   },
 
