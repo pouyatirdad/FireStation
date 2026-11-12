@@ -884,7 +884,31 @@ export function orderEngine(state, engine, wx, wy, buildingId = null, wildfireId
     addEvent(state, `${engine.name}: no street there`, 'warn');
     return false;
   }
-  const tiles = findPath(state.nav, 'drive', tileOf(engine.x, engine.y), goal);
+  let tiles = findPath(state.nav, 'drive', tileOf(engine.x, engine.y), goal);
+  if (!tiles) {
+    // That spot may be walled in (or sealed off by a wreck): try the next ones.
+    const cx = building ? Math.floor((buildingRect(building).x + buildingRect(building).w / 2) / TILE) : Math.floor(wx / TILE);
+    const cy = building ? Math.floor((buildingRect(building).y + buildingRect(building).h / 2) / TILE) : Math.floor(wy / TILE);
+    const tried = new Set([goal.x + ',' + goal.y]);
+    for (let r = 1; r <= 16 && !tiles; r++) {
+      let attempts = 0;
+      for (let dy = -r; dy <= r && !tiles && attempts < 3; dy++) {
+        for (let dx = -r; dx <= r && !tiles && attempts < 3; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+          const x = cx + dx;
+          const y = cy + dy;
+          if (!passable(state.nav, 'drive', x, y) || tried.has(x + ',' + y)) continue;
+          tried.add(x + ',' + y);
+          attempts++;
+          const path = findPath(state.nav, 'drive', tileOf(engine.x, engine.y), { x, y });
+          if (path) {
+            tiles = path;
+            goal = { x, y };
+          }
+        }
+      }
+    }
+  }
   if (!tiles) {
     addEvent(state, `${engine.name}: no route to that address`, 'warn');
     return false;

@@ -522,6 +522,88 @@ function buildBlocks(seed = 7) {
   return { blocks: grid.filter((b) => !b.gone), removed };
 }
 
+/**
+ * Make sure every building can be reached, and nothing is a dead pocket.
+ * Vehicles may drive on any open ground, so two things go wrong when buildings
+ * stand shoulder to shoulder: a building can be walled in on every side, and the
+ * free tile nearest a building can be an enclosed lane or yard that no street
+ * joins. Here, a building with no way in loses its smallest neighbour (a gap
+ * opens), and any ground left enclosed is fenced off as a walled yard.
+ */
+function ensureAccess({ w, h, road, apron, blocked, water, woods, buildings, seed }) {
+  const open = (i) => road[i] || apron[i] || !(blocked[i] || water[i] || woods[i]);
+  const main = new Uint8Array(w * h);
+  const flood = () => {
+    main.fill(0);
+    const start = (APRON.y0 + 1) * w + APRON.x0 + 1;
+    const queue = [start];
+    main[start] = 1;
+    for (let head = 0; head < queue.length; head++) {
+      const i = queue[head];
+      const x = i % w;
+      const y = (i - x) / w;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = x + dx;
+        const ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+        const ni = ny * w + nx;
+        if (main[ni] || !open(ni)) continue;
+        main[ni] = 1;
+        queue.push(ni);
+      }
+    }
+  };
+  const reachable = (b) => {
+    for (let x = b.x - 1; x <= b.x + b.w; x++) {
+      for (const y of [b.y - 1, b.y + b.h]) {
+        if (x >= 0 && y >= 0 && x < w && y < h && main[y * w + x]) return true;
+      }
+    }
+    for (let y = b.y; y < b.y + b.h; y++) {
+      for (const x of [b.x - 1, b.x + b.w]) {
+        if (x >= 0 && y >= 0 && x < w && y < h && main[y * w + x]) return true;
+      }
+    }
+    return false;
+  };
+  const remove = (b) => {
+    for (let y = b.y; y < b.y + b.h; y++) for (let x = b.x; x < b.x + b.w; x++) blocked[y * w + x] = 0;
+    buildings.splice(buildings.indexOf(b), 1);
+  };
+  const mass = (b) => b.w * b.h * (0.7 + 0.15 * b.floors);
+  const touching = (a, b) => a.x - 1 < b.x + b.w && b.x - 1 < a.x + a.w && a.y - 1 < b.y + b.h && b.y - 1 < a.y + a.h;
+
+  flood();
+  let removed = 0;
+  for (const b of buildings.slice()) {
+    if (b.type === 'station' || b.type === 'hospital' || reachable(b)) continue;
+    // Open a gap: take away the smallest neighbour (never a station or hospital).
+    for (let tries = 0; tries < 6 && !reachable(b); tries++) {
+      const neighbours = buildings
+        .filter((n) => n !== b && n.type !== 'station' && n.type !== 'hospital' && touching(b, n))
+        .sort((p, q) => mass(p) - mass(q));
+      if (neighbours.length === 0) break;
+      remove(neighbours[0]);
+      removed++;
+      flood();
+    }
+    if (!reachable(b)) {
+      remove(b);
+      removed++;
+      flood();
+    }
+  }
+  // Enclosed ground nobody can drive into: fence it off as a walled yard.
+  let fenced = 0;
+  for (let i = 0; i < w * h; i++) {
+    if (!main[i] && open(i) && !road[i] && !apron[i]) {
+      blocked[i] = 1;
+      fenced++;
+    }
+  }
+  return { removed, fenced };
+}
+
 // How the buildings of a city should split by size.
 export const SIZE_TARGET = { small: 0.5, medium: 0.3, large: 0.12, huge: 0.08 };
 
@@ -1281,6 +1363,7 @@ export function createCity(seed = 7) {
   cluster(blocks.filter((b) => b.kind === 'houses'), 3, HOUSING_NAMES);
   cluster(blocks.filter((b) => b.kind === 'industry'), 3, INDUSTRY_NAMES);
 
+  ensureAccess({ w, h, road, apron, blocked, water, woods, buildings });
   rebalanceSizes(buildings);
 
   const bays1 = BAYS.map((b) => ({ x: b.x * TILE, y: b.y * TILE, station: 0 }));
