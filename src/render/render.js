@@ -11,18 +11,44 @@ import {
 } from '../data/city.js';
 
 const PALETTE = {
-  sidewalk: '#8b9198',
-  sidewalkJoint: 'rgba(30,36,42,0.13)',
-  park: '#5f7d4a',
-  parkEdge: '#557141',
-  road: '#414850',
-  apron: '#767e86',
-  marking: 'rgba(228,220,186,0.7)',
-  crosswalk: 'rgba(235,235,228,0.5)',
+  sidewalk: '#a3a49f',
+  sidewalkJoint: 'rgba(40,40,38,0.16)',
+  park: '#586b40',
+  parkEdge: '#4d5f38',
+  road: '#36393c',
+  apron: '#6d7073',
+  marking: 'rgba(226,226,218,0.75)',
+  centre: '#d4a62a',
+  crosswalk: 'rgba(232,232,226,0.62)',
   shadow: 'rgba(12,17,22,0.22)',
   select: '#5fd0ff',
   fire: '#ff7a1f',
 };
+
+// Speckled tiles for asphalt, concrete and grass, painted once and repeated, so
+// large flat areas read as material instead of flat colour.
+const textures = {};
+function texture(ctx, name, base, speckles) {
+  if (textures[name] !== undefined) return textures[name];
+  textures[name] = base;
+  if (typeof document === 'undefined') return base;
+  const c = document.createElement('canvas');
+  c.width = 128;
+  c.height = 128;
+  const t = c.getContext('2d');
+  t.fillStyle = base;
+  t.fillRect(0, 0, 128, 128);
+  let s = 12345 + name.length * 977;
+  const rnd = () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296);
+  for (let i = 0; i < speckles; i++) {
+    const light = rnd() < 0.5;
+    t.fillStyle = light ? `rgba(255,255,255,${0.03 + rnd() * 0.07})` : `rgba(0,0,0,${0.04 + rnd() * 0.1})`;
+    const sz = rnd() < 0.85 ? 1 : 2;
+    t.fillRect((rnd() * 128) | 0, (rnd() * 128) | 0, sz, sz);
+  }
+  textures[name] = ctx.createPattern(c, 'repeat') ?? base;
+  return textures[name];
+}
 
 // --------------------------------------------------------------- helpers ---
 
@@ -202,11 +228,14 @@ function drawGround(ctx, state, b, z) {
   const vr = V_ROADS.filter((vx) => vx + 2 >= b.x0 && vx <= b.x1 + 1);
   const hr = H_ROADS.filter((hy) => hy + 2 >= b.y0 && hy <= b.y1 + 1);
 
-  ctx.fillStyle = PALETTE.sidewalk;
+  const concrete = texture(ctx, 'concrete', PALETTE.sidewalk, 900);
+  const asphalt = texture(ctx, 'asphalt', PALETTE.road, 1800);
+  const grass = texture(ctx, 'grass', PALETTE.park, 1400);
+  ctx.fillStyle = concrete;
   ctx.fillRect(left, top, width, height);
 
   // Grass under the blocks, then the streets on top of it.
-  ctx.fillStyle = '#33482a';
+  ctx.fillStyle = '#2f4226';
   for (const area of city.forestAreas ?? []) {
     ctx.fillRect(
       area.x0 * TILE,
@@ -215,7 +244,7 @@ function drawGround(ctx, state, b, z) {
       (area.y1 - area.y0 + 1) * TILE,
     );
   }
-  ctx.fillStyle = PALETTE.park;
+  ctx.fillStyle = grass;
   for (const p of city.parks) {
     ctx.fillRect(
       p.x0 * TILE,
@@ -245,32 +274,46 @@ function drawGround(ctx, state, b, z) {
 
   // Streets stop at the quay.
   const roadH = Math.max(0, Math.min(top + height, SEA_Y * TILE) - top);
-  ctx.fillStyle = PALETTE.road;
+  ctx.fillStyle = asphalt;
   for (const vx of vr) ctx.fillRect(vx * TILE, top, 2 * TILE, roadH);
   for (const hy of hr) ctx.fillRect(left, hy * TILE, width, 2 * TILE);
 
-  // Centre lines, then intersections painted back over them so the dashes stop
-  // at the junction like they should.
-  if (z >= 0.7) {
-    ctx.strokeStyle = PALETTE.marking;
+  // Kerbs: a pale lip and a dark gutter line along both sides of every street.
+  if (z >= 0.5) {
     ctx.lineWidth = 2;
-    ctx.setLineDash([11, 13]);
+    ctx.strokeStyle = 'rgba(20,20,20,0.35)';
+    ctx.beginPath();
+    for (const vx of vr) {
+      ctx.moveTo(vx * TILE + 1, top); ctx.lineTo(vx * TILE + 1, top + roadH);
+      ctx.moveTo((vx + 2) * TILE - 1, top); ctx.lineTo((vx + 2) * TILE - 1, top + roadH);
+    }
+    for (const hy of hr) {
+      ctx.moveTo(left, hy * TILE + 1); ctx.lineTo(left + width, hy * TILE + 1);
+      ctx.moveTo(left, (hy + 2) * TILE - 1); ctx.lineTo(left + width, (hy + 2) * TILE - 1);
+    }
+    ctx.stroke();
+  }
+
+  // Double yellow centre lines, then intersections painted back over them so
+  // the lines stop at the junction like they should.
+  if (z >= 0.5) {
+    ctx.strokeStyle = PALETTE.centre;
+    ctx.lineWidth = 1.6;
     ctx.beginPath();
     for (const vx of vr) {
       const x = (vx + 1) * TILE;
-      ctx.moveTo(x, top);
-      ctx.lineTo(x, top + roadH);
+      ctx.moveTo(x - 2, top); ctx.lineTo(x - 2, top + roadH);
+      ctx.moveTo(x + 2, top); ctx.lineTo(x + 2, top + roadH);
     }
     for (const hy of hr) {
       const y = (hy + 1) * TILE;
-      ctx.moveTo(left, y);
-      ctx.lineTo(left + width, y);
+      ctx.moveTo(left, y - 2); ctx.lineTo(left + width, y - 2);
+      ctx.moveTo(left, y + 2); ctx.lineTo(left + width, y + 2);
     }
     ctx.stroke();
-    ctx.setLineDash([]);
   }
 
-  ctx.fillStyle = PALETTE.road;
+  ctx.fillStyle = asphalt;
   for (const vx of vr) {
     for (const hy of hr) {
       ctx.fillRect(vx * TILE, hy * TILE, 2 * TILE, 2 * TILE);
@@ -366,9 +409,9 @@ function drawWater(ctx, state, b, z) {
   if (b.y1 >= SEA_Y) {
     const y0 = Math.max(b.y0, SEA_Y) * TILE;
     const y1 = (b.y1 + 1) * TILE;
-    ctx.fillStyle = '#245b82';
+    ctx.fillStyle = '#2f5f73';
     ctx.fillRect(left, y0, right - left, y1 - y0);
-    ctx.fillStyle = '#1d4d70';
+    ctx.fillStyle = '#244d60';
     ctx.fillRect(left, Math.max(y0, (SEA_Y + 10) * TILE), right - left, Math.max(0, y1 - Math.max(y0, (SEA_Y + 10) * TILE)));
     ctx.fillStyle = 'rgba(255,255,255,0.35)';
     ctx.fillRect(left, SEA_Y * TILE, right - left, 3); // the foam line on the quay
@@ -377,7 +420,7 @@ function drawWater(ctx, state, b, z) {
   // River: one span per row of tiles.
   const rowTop = Math.max(0, b.y0);
   const rowBottom = Math.min(SEA_Y - 1, b.y1);
-  ctx.fillStyle = '#2b6a94';
+  ctx.fillStyle = '#33697c';
   for (let y = rowTop; y <= rowBottom; y++) {
     const c = riverCentre(y + 0.5);
     ctx.fillRect((c - RIVER_HALF_WIDTH) * TILE, y * TILE, RIVER_HALF_WIDTH * 2 * TILE, TILE + 1);
@@ -457,15 +500,27 @@ function drawCar(ctx, car) {
   ctx.ellipse(2, 3, 14, 8, 0, 0, Math.PI * 2);
   ctx.fill();
   ctx.rotate(car.angle);
+  // Wheels peeking out, body, glasshouse with raked screens, bonnet highlight.
+  ctx.fillStyle = '#15171a';
+  ctx.fillRect(-15, -9.5, 8, 3); ctx.fillRect(7, -9.5, 8, 3);
+  ctx.fillRect(-15, 6.5, 8, 3); ctx.fillRect(7, 6.5, 8, 3);
+  ctx.fillStyle = shade(car.color, -0.18);
+  rr(ctx, -20, -8, 40, 16, 4);
+  ctx.fill();
   ctx.fillStyle = car.color;
-  rr(ctx, -20, -8, 40, 16, 5);
+  rr(ctx, -19, -7, 38, 14, 4);
   ctx.fill();
-  ctx.fillStyle = shade(car.color, -0.32);
-  rr(ctx, -8, -7, 16, 14, 3);
+  ctx.fillStyle = '#1f2a33';
+  ctx.beginPath();
+  ctx.moveTo(10, -6); ctx.lineTo(10, 6); ctx.lineTo(6, 7); ctx.lineTo(-9, 7);
+  ctx.lineTo(-11, 5.5); ctx.lineTo(-11, -5.5); ctx.lineTo(-9, -7); ctx.lineTo(6, -7);
+  ctx.closePath();
   ctx.fill();
-  ctx.fillStyle = 'rgba(170,205,225,0.4)';
-  ctx.fillRect(7, -6, 3, 12);
-  ctx.fillRect(-10, -6, 3, 12);
+  ctx.fillStyle = car.color;
+  rr(ctx, -6, -5.5, 11, 11, 2); // roof
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.16)';
+  ctx.fillRect(11, -6, 7, 3);
   ctx.restore();
 }
 
@@ -511,14 +566,18 @@ function drawTree(ctx, tree, z) {
   ctx.ellipse(tree.x + 4, tree.y + 5, tree.r * 1.05, tree.r * 0.75, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  ctx.fillStyle = tree.tone;
+  ctx.fillStyle = shade(tree.tone, -0.25);
   ctx.beginPath();
   ctx.arc(tree.x, tree.y, tree.r, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = shade(tree.tone, 0.18);
-  ctx.beginPath();
-  ctx.arc(tree.x - tree.r * 0.3, tree.y - tree.r * 0.3, tree.r * 0.55, 0, Math.PI * 2);
-  ctx.fill();
+  // Foliage as a cluster of lobes, lit from the top-left.
+  const lobes = [[-0.35, -0.3, 0.62], [0.4, -0.15, 0.55], [-0.1, 0.4, 0.55], [0.1, -0.1, 0.5]];
+  lobes.forEach(([dx, dy, k], i) => {
+    ctx.fillStyle = shade(tree.tone, -0.08 + i * 0.07);
+    ctx.beginPath();
+    ctx.arc(tree.x + dx * tree.r, tree.y + dy * tree.r, tree.r * k, 0, Math.PI * 2);
+    ctx.fill();
+  });
   if (z >= 1.1) {
     ctx.strokeStyle = 'rgba(20,40,20,0.35)';
     ctx.lineWidth = 1;
@@ -614,10 +673,18 @@ function drawBuilding(ctx, state, b, now, z) {
 
   // South wall: masonry, darker toward the pavement, with a cornice under the
   // roof so the two surfaces never blur into one another.
-  ctx.fillStyle = shade(b.roofColor, -0.5);
+  ctx.fillStyle = shade(b.roofColor, -0.42);
   ctx.fillRect(x, facadeTop, w, e);
-  ctx.fillStyle = 'rgba(0,0,0,0.16)';
-  ctx.fillRect(x, facadeTop + e * 0.66, w, e * 0.34);
+  if (detailed) {
+    const wall = ctx.createLinearGradient(0, facadeTop, 0, facadeTop + e);
+    wall.addColorStop(0, 'rgba(255,255,255,0.07)');
+    wall.addColorStop(1, 'rgba(0,0,0,0.3)');
+    ctx.fillStyle = wall;
+    ctx.fillRect(x, facadeTop, w, e);
+  } else {
+    ctx.fillStyle = 'rgba(0,0,0,0.16)';
+    ctx.fillRect(x, facadeTop + e * 0.66, w, e * 0.34);
+  }
   ctx.fillStyle = 'rgba(255,255,255,0.06)';
   ctx.fillRect(x, facadeTop, w, 2);
 
@@ -630,6 +697,11 @@ function drawBuilding(ctx, state, b, now, z) {
   // east, reads as sunlight from the top-left without a gradient per frame.
   ctx.fillStyle = b.roofColor;
   ctx.fillRect(x, y - e, w, h);
+  if (detailed) {
+    // Gravel / membrane roofing grain over the colour.
+    ctx.fillStyle = texture(ctx, 'roof', 'rgba(0,0,0,0)', 1600);
+    ctx.fillRect(x, y - e, w, h);
+  }
   ctx.fillStyle = 'rgba(255,255,255,0.11)';
   ctx.fillRect(x, y - e, w, 3);
   ctx.fillRect(x, y - e, 3, h);
@@ -685,8 +757,13 @@ function drawFacadeWindows(ctx, b, x, y, w, h) {  const seed = hashString(b.id);
       if (b.state === 'burning' && hash(seed + r * 19 + c * 53) < b.fire) color = '#ffb24a';
       ctx.fillStyle = color;
       ctx.fillRect(wx, wy, ww, wh);
-      ctx.fillStyle = 'rgba(150,190,220,0.2)';
-      ctx.fillRect(wx, wy, ww, Math.max(1, wh * 0.3));
+      ctx.fillStyle = 'rgba(150,190,220,0.14)';
+      ctx.beginPath(); // a diagonal glint across the glass
+      ctx.moveTo(wx, wy + wh); ctx.lineTo(wx + ww * 0.55, wy); ctx.lineTo(wx + ww, wy); ctx.lineTo(wx + ww * 0.45, wy + wh);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = 'rgba(210,210,200,0.35)'; // sill
+      ctx.fillRect(wx - 1, wy + wh + 1, ww + 2, 1);
     }
   }
 }
