@@ -157,6 +157,7 @@ export function render(ctx, state, cam, view, opts = {}) {
   const z = cam.zoom;
   const bounds = visibleTiles(cam, view);
   currentDark = daylight(state.clock);
+  currentSun = sunShadow(state.clock);
 
   ctx.save();
   ctx.setTransform(dpr * z, 0, 0, dpr * z, dpr * (W / 2 - cam.x * z), dpr * (H / 2 - cam.y * z));
@@ -213,6 +214,7 @@ export function daylight(clockMinutes) {
 
 // Dark amount of the frame being drawn, shared with the helpers below.
 let currentDark = 0;
+let currentSun = { dx: 0.3, dy: 0.5 };
 
 // Colour grade: warm low sun at either end of the day, a cool haze when the
 // whole city is in view, and a deep blue at night.
@@ -1250,30 +1252,58 @@ function drawAirtanker(ctx, e, now) {
 
   ctx.translate(0, -lift);
   ctx.rotate(e.angle);
-  // Wings, tailplane, fuselage.
-  ctx.fillStyle = '#e8e4d8';
+  // High wing with aileron lines, tailplane, tapered fuselage.
+  ctx.fillStyle = '#e6e2d6';
   ctx.fillRect(-6, -52, 18, 104);
   ctx.fillStyle = '#c93a2f';
-  ctx.fillRect(-6, -52, 18, 7);
-  ctx.fillRect(-6, 45, 18, 7);
-  ctx.fillStyle = '#d9d5c8';
-  ctx.fillRect(-58, -20, 12, 40);
-  ctx.fillStyle = '#f2efe6';
+  ctx.fillRect(-6, -52, 18, 6);
+  ctx.fillRect(-6, 46, 18, 6);
+  ctx.strokeStyle = 'rgba(0,0,0,0.22)';
+  ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.moveTo(52, 0);
+  ctx.moveTo(8, -50);
+  ctx.lineTo(8, 50);
+  ctx.moveTo(-6, -30);
+  ctx.lineTo(12, -30);
+  ctx.moveTo(-6, 30);
+  ctx.lineTo(12, 30);
+  ctx.stroke();
+  ctx.fillStyle = '#d6d2c5';
+  ctx.fillRect(-58, -20, 12, 40);
+  ctx.fillStyle = '#c93a2f';
+  ctx.fillRect(-58, -20, 12, 3);
+  ctx.fillRect(-58, 17, 12, 3);
+  const fg = ctx.createLinearGradient(0, -11, 0, 11);
+  fg.addColorStop(0, '#fbf8ef');
+  fg.addColorStop(0.5, '#ece8dc');
+  fg.addColorStop(1, '#b3b0a4');
+  ctx.fillStyle = fg;
+  ctx.beginPath();
+  ctx.moveTo(54, 0);
   ctx.quadraticCurveTo(46, -11, 28, -11);
-  ctx.lineTo(-52, -6);
-  ctx.lineTo(-52, 6);
+  ctx.lineTo(-52, -5);
+  ctx.lineTo(-52, 5);
   ctx.lineTo(28, 11);
-  ctx.quadraticCurveTo(46, 11, 52, 0);
+  ctx.quadraticCurveTo(46, 11, 54, 0);
   ctx.closePath();
   ctx.fill();
   ctx.fillStyle = '#c93a2f';
-  ctx.fillRect(-40, -3, 70, 6);
-  ctx.fillStyle = '#1b2b3a';
+  ctx.fillRect(-42, -2.5, 72, 5);
+  ctx.fillStyle = '#bfc4c9'; // fin
+  ctx.fillRect(-56, -1, 14, 2);
+  const cg = ctx.createLinearGradient(30, -6, 42, 6);
+  cg.addColorStop(0, '#5f8199');
+  cg.addColorStop(1, '#101c27');
+  ctx.fillStyle = cg;
   ctx.beginPath();
-  ctx.ellipse(36, 0, 8, 6, 0, 0, Math.PI * 2);
+  ctx.ellipse(37, 0, 8, 5.5, 0, 0, Math.PI * 2);
   ctx.fill();
+  ctx.fillStyle = '#8b9095'; // engine nacelles
+  for (const y of [-22, 22]) {
+    ctx.beginPath();
+    ctx.ellipse(8, y, 12, 4.6, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
   // Propellers, blurred.
   const spin = now * 40;
   for (const y of [-22, 22]) {
@@ -1322,54 +1352,132 @@ function drawBoat(ctx, e, now) {
   ctx.lineTo(-34 - wake, 20 + Math.sin(now * 6) * 2);
   ctx.stroke();
 
-  // Hull.
-  ctx.fillStyle = fire ? '#bf2f27' : '#e86f1f';
-  ctx.beginPath();
-  ctx.moveTo(48, 0);
-  ctx.quadraticCurveTo(38, -17, 8, -18);
-  ctx.lineTo(-38, -16);
-  ctx.lineTo(-38, 16);
-  ctx.lineTo(8, 18);
-  ctx.quadraticCurveTo(38, 17, 48, 0);
-  ctx.closePath();
+  // Hull: gradient paint, white gunwale, a dark boot-top line.
+  const hull = () => {
+    ctx.beginPath();
+    ctx.moveTo(48, 0);
+    ctx.quadraticCurveTo(38, -17, 8, -18);
+    ctx.lineTo(-38, -16);
+    ctx.lineTo(-38, 16);
+    ctx.lineTo(8, 18);
+    ctx.quadraticCurveTo(38, 17, 48, 0);
+    ctx.closePath();
+  };
+  const base = fire ? '#b3261e' : '#e0651a';
+  const hg = ctx.createLinearGradient(0, -18, 0, 18);
+  hg.addColorStop(0, shade(base, 0.22));
+  hg.addColorStop(0.5, base);
+  hg.addColorStop(1, shade(base, -0.35));
+  ctx.fillStyle = hg;
+  hull();
   ctx.fill();
-  ctx.fillStyle = 'rgba(255,255,255,0.18)';
-  ctx.fillRect(-36, -2, 70, 4);
+  ctx.strokeStyle = 'rgba(245,245,240,0.85)';
+  ctx.lineWidth = 1.6;
+  hull();
+  ctx.stroke();
+
+  // Foam at the bow and stern.
+  ctx.fillStyle = 'rgba(240,248,252,0.5)';
+  ctx.beginPath();
+  ctx.ellipse(46, 0, 5, 7, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillRect(-42, -9, 5, 18);
 
   if (fire) {
-    ctx.fillStyle = '#efece1';
-    rr(ctx, -22, -11, 30, 22, 4);
-    ctx.fill();
-    ctx.fillStyle = '#17222d';
-    ctx.fillRect(2, -8, 5, 16);
-    // Water monitor on the bow.
-    ctx.fillStyle = '#3a3f45';
+    // Deck in non-slip grey, a wheelhouse with raked glass, mast and monitor.
+    ctx.fillStyle = '#8d9398';
     ctx.beginPath();
-    ctx.arc(26, 0, 6, 0, Math.PI * 2);
+    ctx.moveTo(42, 0);
+    ctx.quadraticCurveTo(34, -12, 8, -13);
+    ctx.lineTo(-34, -12);
+    ctx.lineTo(-34, 12);
+    ctx.lineTo(8, 13);
+    ctx.quadraticCurveTo(34, 12, 42, 0);
+    ctx.closePath();
+    ctx.fill();
+    const wg = ctx.createLinearGradient(0, -11, 0, 11);
+    wg.addColorStop(0, '#f6f3ea');
+    wg.addColorStop(1, '#b9b6aa');
+    ctx.fillStyle = wg;
+    rr(ctx, -24, -11, 30, 22, 4);
+    ctx.fill();
+    const gg = ctx.createLinearGradient(2, 0, 8, 0);
+    gg.addColorStop(0, '#0e161d');
+    gg.addColorStop(1, '#58788f');
+    ctx.fillStyle = gg;
+    ctx.beginPath();
+    ctx.moveTo(1, -9);
+    ctx.lineTo(8, -10);
+    ctx.lineTo(8, 10);
+    ctx.lineTo(1, 9);
+    ctx.closePath();
     ctx.fill();
     ctx.strokeStyle = '#3a3f45';
-    ctx.lineWidth = 4;
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(-12, 0);
+    ctx.lineTo(-12, -2);
+    ctx.stroke();
+    ctx.fillStyle = '#2c3136';
+    ctx.fillRect(-18, -2, 12, 1.4); // radar bar
+    // Water monitor on the foredeck.
+    ctx.fillStyle = '#d8dadc';
+    ctx.beginPath();
+    ctx.arc(26, 0, 5.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#2f3438';
+    ctx.lineWidth = 3.4;
     ctx.beginPath();
     ctx.moveTo(26, 0);
-    ctx.lineTo(38, 0);
+    ctx.lineTo(39, 0);
     ctx.stroke();
-  } else {
-    // Inflatable tubes and a little console.
-    ctx.strokeStyle = '#2a2f35';
-    ctx.lineWidth = 5;
+    ctx.fillStyle = '#ff6a3d'; // life rings
     ctx.beginPath();
-    ctx.moveTo(46, 0);
-    ctx.quadraticCurveTo(38, -17, 8, -18);
-    ctx.lineTo(-36, -16);
-    ctx.moveTo(46, 0);
-    ctx.quadraticCurveTo(38, 17, 8, 18);
-    ctx.lineTo(-36, 16);
+    ctx.arc(-30, -9, 2.6, 0, Math.PI * 2);
+    ctx.arc(-30, 9, 2.6, 0, Math.PI * 2);
+    ctx.fill();
+  } else {
+    // Inflatable tubes with seams, a floor, console with screen and outboard.
+    ctx.fillStyle = '#8f8a80';
+    ctx.beginPath();
+    ctx.moveTo(40, 0);
+    ctx.quadraticCurveTo(34, -11, 8, -12);
+    ctx.lineTo(-34, -11);
+    ctx.lineTo(-34, 11);
+    ctx.lineTo(8, 12);
+    ctx.quadraticCurveTo(34, 11, 40, 0);
+    ctx.closePath();
+    ctx.fill();
+    for (const side of [-1, 1]) {
+      const tube = ctx.createLinearGradient(0, side * 12, 0, side * 19);
+      tube.addColorStop(0, side < 0 ? '#c9501a' : '#f08a3c');
+      tube.addColorStop(1, side < 0 ? '#f08a3c' : '#c9501a');
+      ctx.strokeStyle = tube;
+      ctx.lineWidth = 6;
+      ctx.beginPath();
+      ctx.moveTo(47, 0);
+      ctx.quadraticCurveTo(38, side * 16, 8, side * 16.5);
+      ctx.lineTo(-36, side * 14.5);
+      ctx.stroke();
+    }
+    ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let x = -30; x <= 30; x += 12) {
+      ctx.moveTo(x, -19);
+      ctx.lineTo(x, -13);
+      ctx.moveTo(x, 19);
+      ctx.lineTo(x, 13);
+    }
     ctx.stroke();
-    ctx.fillStyle = '#efece1';
+    ctx.fillStyle = '#e9e6dc';
     rr(ctx, -10, -7, 18, 14, 3);
     ctx.fill();
-    ctx.fillStyle = '#2d7fd0';
-    ctx.fillRect(-34, -4, 10, 8);
+    ctx.fillStyle = '#17222d';
+    ctx.fillRect(4, -5, 3, 10);
+    ctx.fillStyle = '#2b3035'; // outboard
+    rr(ctx, -42, -5, 9, 10, 2);
+    ctx.fill();
   }
 
   const busy = e.status === 'responding' || e.pumping;
@@ -1462,52 +1570,92 @@ function drawHelicopter(ctx, e, now) {
   ctx.translate(0, -lift);
   ctx.rotate(e.angle);
 
-  // Tail boom, fuselage, cockpit.
-  ctx.fillStyle = '#b8bec4';
-  ctx.fillRect(-58, -3, 40, 6);
-  ctx.fillStyle = '#d9dde0';
-  ctx.fillRect(-62, -9, 8, 18);
-  ctx.fillStyle = '#c93a2f';
+  // Tail boom tapering to a fin, with a horizontal stabiliser.
+  ctx.fillStyle = '#c4c9ce';
   ctx.beginPath();
-  ctx.ellipse(0, 0, 28, 15, 0, 0, Math.PI * 2);
+  ctx.moveTo(-14, -5.5);
+  ctx.lineTo(-62, -1.8);
+  ctx.lineTo(-62, 1.8);
+  ctx.lineTo(-14, 5.5);
+  ctx.closePath();
   ctx.fill();
-  ctx.fillStyle = '#f0ece2';
-  ctx.fillRect(-18, -3, 30, 6);
-  ctx.fillStyle = '#1b2b3a';
+  ctx.fillStyle = '#b6342b';
+  ctx.fillRect(-64, -1.1, 14, 2.2);
+  ctx.fillStyle = '#d3d7da';
+  ctx.fillRect(-60, -9, 7, 18);
+  ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+  ctx.lineWidth = 0.8;
+  ctx.strokeRect(-60, -9, 7, 18);
+
+  // Skids with cross tubes.
+  ctx.strokeStyle = '#2c3136';
+  ctx.lineWidth = 2.6;
   ctx.beginPath();
-  ctx.ellipse(16, 0, 11, 9, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = 'rgba(140,200,235,0.35)';
-  ctx.beginPath();
-  ctx.ellipse(18, -2, 6, 4, 0, 0, Math.PI * 2);
-  ctx.fill();
-  // Skids.
-  ctx.strokeStyle = '#3a3f45';
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(-22, -16);
-  ctx.lineTo(24, -16);
-  ctx.moveTo(-22, 16);
-  ctx.lineTo(24, 16);
+  ctx.moveTo(-24, -17);
+  ctx.lineTo(26, -17);
+  ctx.moveTo(-24, 17);
+  ctx.lineTo(26, 17);
+  ctx.moveTo(-10, -17);
+  ctx.lineTo(-10, 17);
+  ctx.moveTo(14, -17);
+  ctx.lineTo(14, 17);
   ctx.stroke();
 
-  // Main rotor: a translucent disc and two blades.
-  const spin = now * 26;
-  ctx.fillStyle = 'rgba(210,220,230,0.12)';
+  // Fuselage: lit from above, white belly line, engine deck, canopy glass.
+  const fg = ctx.createLinearGradient(0, -15, 0, 15);
+  fg.addColorStop(0, '#ec5a4c');
+  fg.addColorStop(0.45, '#c3342a');
+  fg.addColorStop(1, '#7c1c16');
+  ctx.fillStyle = fg;
   ctx.beginPath();
-  ctx.arc(0, 0, 50, 0, Math.PI * 2);
+  ctx.ellipse(-2, 0, 31, 14.5, 0, 0, Math.PI * 2);
   ctx.fill();
-  ctx.strokeStyle = 'rgba(40,46,52,0.85)';
-  ctx.lineWidth = 3.5;
+  ctx.fillStyle = '#efeadd';
+  ctx.fillRect(-24, -2.4, 28, 4.8);
+  ctx.fillStyle = '#7d8388';
   ctx.beginPath();
-  ctx.moveTo(Math.cos(spin) * 50, Math.sin(spin) * 50);
-  ctx.lineTo(-Math.cos(spin) * 50, -Math.sin(spin) * 50);
-  ctx.moveTo(Math.cos(spin + Math.PI / 2) * 50, Math.sin(spin + Math.PI / 2) * 50);
-  ctx.lineTo(-Math.cos(spin + Math.PI / 2) * 50, -Math.sin(spin + Math.PI / 2) * 50);
-  ctx.stroke();
-  ctx.fillStyle = '#2a2f35';
+  ctx.ellipse(-10, 0, 9, 6.5, 0, 0, Math.PI * 2);
+  ctx.fill();
+  const cg = ctx.createLinearGradient(8, -10, 26, 10);
+  cg.addColorStop(0, '#6f94ad');
+  cg.addColorStop(0.5, '#1f3445');
+  cg.addColorStop(1, '#0d1822');
+  ctx.fillStyle = cg;
   ctx.beginPath();
-  ctx.arc(0, 0, 5, 0, Math.PI * 2);
+  ctx.ellipse(17, 0, 12.5, 10.5, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.28)';
+  ctx.beginPath();
+  ctx.ellipse(19, -4, 6, 2.6, -0.4, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Main rotor: a faint disc, a ghost pair of blades and the sharp pair.
+  const spin = now * 26;
+  const disc = ctx.createRadialGradient(0, 0, 8, 0, 0, 52);
+  disc.addColorStop(0, 'rgba(210,220,230,0.16)');
+  disc.addColorStop(1, 'rgba(210,220,230,0.04)');
+  ctx.fillStyle = disc;
+  ctx.beginPath();
+  ctx.arc(0, 0, 52, 0, Math.PI * 2);
+  ctx.fill();
+  for (const [off, alpha] of [[-0.35, 0.2], [0, 0.85]]) {
+    ctx.strokeStyle = `rgba(34,38,42,${alpha})`;
+    ctx.lineWidth = 3.2;
+    ctx.beginPath();
+    for (const q of [0, Math.PI / 2]) {
+      const a = spin + off + q;
+      ctx.moveTo(Math.cos(a) * 52, Math.sin(a) * 52);
+      ctx.lineTo(-Math.cos(a) * 52, -Math.sin(a) * 52);
+    }
+    ctx.stroke();
+  }
+  ctx.fillStyle = '#23272b';
+  ctx.beginPath();
+  ctx.arc(0, 0, 5.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#6a7076';
+  ctx.beginPath();
+  ctx.arc(-1, -1, 2, 0, Math.PI * 2);
   ctx.fill();
 
   // Beacon.
@@ -1526,227 +1674,376 @@ function drawHelicopter(ctx, e, now) {
   ctx.fillText(`${(e.spec?.label ?? 'H')[0]}${e.number}`, e.x, e.y - lift - 22);
 }
 
+// Painted body panel: lit from the north-west, darker toward the south edge,
+// with a thin dark seam so panels read as sheet metal.
+function paint(ctx, x, y, w, h, r, color) {
+  const g = ctx.createLinearGradient(0, y, 0, y + h);
+  g.addColorStop(0, shade(color, 0.2));
+  g.addColorStop(0.45, color);
+  g.addColorStop(1, shade(color, -0.3));
+  ctx.fillStyle = g;
+  rr(ctx, x, y, w, h, r);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.4)';
+  ctx.lineWidth = 0.8;
+  ctx.stroke();
+}
+
+function tyres(ctx, xs, y) {
+  for (const wx of xs) {
+    for (const s of [-1, 1]) {
+      ctx.fillStyle = '#0d0f11';
+      rr(ctx, wx - 7, s * y - 4.5, 14, 9, 3);
+      ctx.fill();
+      ctx.fillStyle = '#2a2e32';
+      ctx.fillRect(wx - 4, s * y - 2, 8, 4);
+    }
+  }
+}
+
+// Cab: roof, raked windscreen with sky reflection, mirrors, headlamps.
+function cab(ctx, x0, w, color) {
+  paint(ctx, x0, -17, w, 34, 5, color);
+  ctx.fillStyle = 'rgba(255,255,255,0.1)';
+  ctx.fillRect(x0 + 3, -13, w * 0.42, 26);
+  const gl = ctx.createLinearGradient(x0 + w - 11, 0, x0 + w - 2, 0);
+  gl.addColorStop(0, '#0e161d');
+  gl.addColorStop(0.6, '#26384a');
+  gl.addColorStop(1, '#5d7d95');
+  ctx.fillStyle = gl;
+  ctx.beginPath();
+  ctx.moveTo(x0 + w - 11, -13);
+  ctx.lineTo(x0 + w - 3, -15);
+  ctx.lineTo(x0 + w - 3, 15);
+  ctx.lineTo(x0 + w - 11, 13);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.18)';
+  ctx.fillRect(x0 + w - 9, -12, 1.5, 24);
+  ctx.fillStyle = '#16191c';
+  ctx.fillRect(x0 + w - 12, -20.5, 4, 3.5);
+  ctx.fillRect(x0 + w - 12, 17, 4, 3.5);
+  ctx.fillStyle = '#fff3cf';
+  ctx.fillRect(x0 + w - 1.5, -14, 2, 5);
+  ctx.fillRect(x0 + w - 1.5, 9, 2, 5);
+  if (currentDark > 0.25) {
+    ctx.globalCompositeOperation = 'lighter';
+    const beam = ctx.createLinearGradient(x0 + w, 0, x0 + w + 46, 0);
+    beam.addColorStop(0, `rgba(255,236,190,${0.42 * currentDark})`);
+    beam.addColorStop(1, 'rgba(255,236,190,0)');
+    ctx.fillStyle = beam;
+    ctx.beginPath();
+    ctx.moveTo(x0 + w, -13);
+    ctx.lineTo(x0 + w + 50, -26);
+    ctx.lineTo(x0 + w + 50, 26);
+    ctx.lineTo(x0 + w, 13);
+    ctx.closePath();
+    ctx.fill();
+    ctx.globalCompositeOperation = 'source-over';
+  }
+}
+
+// Diamond-plate walkway.
+function plate(ctx, x, y, w, h) {
+  ctx.fillStyle = '#8d9399';
+  ctx.fillRect(x, y, w, h);
+  ctx.strokeStyle = 'rgba(255,255,255,0.22)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let px = x + 3; px < x + w; px += 5) {
+    ctx.moveTo(px, y);
+    ctx.lineTo(px - 3, y + h);
+  }
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+  ctx.strokeRect(x, y, w, h);
+}
+
+// Roller-shutter lockers down both sides.
+function lockers(ctx, x0, x1) {
+  ctx.fillStyle = 'rgba(0,0,0,0.22)';
+  ctx.fillRect(x0, -18, x1 - x0, 4);
+  ctx.fillRect(x0, 14, x1 - x0, 4);
+  ctx.strokeStyle = 'rgba(255,255,255,0.14)';
+  ctx.lineWidth = 0.8;
+  ctx.beginPath();
+  for (let x = x0 + 4; x < x1; x += 6) {
+    ctx.moveTo(x, -18);
+    ctx.lineTo(x, -14);
+    ctx.moveTo(x, 14);
+    ctx.lineTo(x, 18);
+  }
+  ctx.stroke();
+}
+
+// Rear chevrons: red and fluorescent yellow, the way real appliances are marked.
+function chevrons(ctx, x, w = 5) {
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x, -17, w, 34);
+  ctx.clip();
+  for (let i = -3; i < 7; i++) {
+    ctx.fillStyle = i % 2 ? '#d62d24' : '#e8e04a';
+    ctx.beginPath();
+    ctx.moveTo(x, -17 + i * 6);
+    ctx.lineTo(x + w, -17 + i * 6 + w);
+    ctx.lineTo(x + w, -17 + i * 6 + w + 6);
+    ctx.lineTo(x, -17 + i * 6 + 6);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+// Coiled hose in a hose bed.
+function hoseBed(ctx, x, y, w, h) {
+  ctx.fillStyle = '#23272b';
+  ctx.fillRect(x, y, w, h);
+  ctx.strokeStyle = '#c9b15a';
+  ctx.lineWidth = 2.4;
+  for (let i = 0; i < 3; i++) {
+    ctx.beginPath();
+    ctx.ellipse(x + w * (0.2 + i * 0.3), y + h / 2, w * 0.13, h * 0.38, 0, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+}
+
+// Emergency lights: a bar with a glow that alternates when the unit is working.
+function lightBar(ctx, x, busy, now, colors = ['#ff3b30', '#2f8cff']) {
+  const phase = Math.floor(now * 7) % 2;
+  ctx.fillStyle = '#1a1d20';
+  ctx.fillRect(x - 1.5, -13, 7, 26);
+  for (let i = 0; i < 4; i++) {
+    const left = i < 2;
+    const on = busy && ((phase === 0) === left);
+    const c = colors[left ? 0 : 1];
+    ctx.fillStyle = on ? c : shade(c, -0.6);
+    const y = -12 + i * 6.2;
+    ctx.fillRect(x - 0.5, y, 5, 5);
+    if (on) {
+      ctx.globalCompositeOperation = 'lighter';
+      const g = ctx.createRadialGradient(x + 2, y + 2.5, 0, x + 2, y + 2.5, 22);
+      g.addColorStop(0, c + 'aa');
+      g.addColorStop(1, c + '00');
+      ctx.fillStyle = g;
+      ctx.fillRect(x - 20, y - 20, 44, 44);
+      ctx.globalCompositeOperation = 'source-over';
+    }
+  }
+}
+
 function drawEngine(ctx, e, now) {
   const type = e.type ?? 'engine';
   const label = `${(e.spec?.label ?? 'Engine')[0]}${e.number}`;
+  const busy = e.status === 'responding' || e.pumping;
 
   ctx.save();
   ctx.translate(e.x, e.y);
 
-  ctx.fillStyle = 'rgba(10,14,18,0.34)';
-  ctx.beginPath();
-  ctx.ellipse(4, 6, 44, 24, 0, 0, Math.PI * 2);
+  // Ground shadow, thrown by the sun and rotated with the vehicle.
+  ctx.save();
+  ctx.translate(currentSun.dx * 9 + 3, currentSun.dy * 9 + 4);
+  ctx.rotate(e.angle);
+  ctx.fillStyle = `rgba(10,14,18,${0.3 * (1 - currentDark * 0.85)})`;
+  rr(ctx, -42, -19, 84, 38, 7);
   ctx.fill();
+  ctx.restore();
 
   ctx.rotate(e.angle);
-
-  // Wheels.
-  ctx.fillStyle = '#15191e';
-  for (const wx of [-26, 20]) {
-    for (const wy of [-19, 19]) {
-      ctx.fillRect(wx - 6, wy - 4, 12, 8);
-    }
-  }
+  tyres(ctx, [-27, 20], 18.5);
 
   // Small and large relatives of the ambulance reuse its art, scaled.
   if (type === 'medcar') ctx.scale(0.62, 0.78);
   else if (type === 'ambubus') ctx.scale(1.38, 1.04);
-  const body = type === 'divetruck' ? '#f0f2f2' : type === 'command' ? '#f2f0ea' : type === 'tanker' ? '#a9b1b8'
-    : type === 'rescue' ? '#d97a2b'
-      : type === 'ambulance' ? '#f1efe8' : '#bf2f27';
-  ctx.fillStyle = body;
-  rr(ctx, -42, -19, 84, 38, 6);
-  ctx.fill();
 
   if (type === 'divetruck') {
-    // A white van with a blue stripe, a rooftop rack and a dive flag.
-    ctx.fillStyle = '#f0f2f2';
-    rr(ctx, -40, -17, 60, 34, 5);
-    ctx.fill();
+    paint(ctx, -41, -17, 58, 34, 5, '#eceff0');
     ctx.fillStyle = '#2d7fd0';
-    ctx.fillRect(-40, 2, 60, 7);
-    ctx.fillStyle = '#e04a2f';
-    ctx.fillRect(-30, -13, 14, 8);
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(-27, -11.5, 8, 2);
-    ctx.fillStyle = '#e8e5dc';
-    rr(ctx, 14, -17, 27, 34, 4);
-    ctx.fill();
-    ctx.fillStyle = '#17222d';
-    ctx.fillRect(31, -13, 7, 26);
+    ctx.fillRect(-41, -2, 58, 4);
     ctx.fillStyle = '#c9ced3';
-    ctx.fillRect(-14, -16, 22, 3);
-    ctx.fillRect(-14, 13, 22, 3);
+    ctx.fillRect(-36, -14, 30, 1.6);
+    ctx.fillRect(-36, 12.4, 30, 1.6);
+    ctx.fillStyle = '#e04a2f';
+    rr(ctx, -34, -10, 14, 7, 1.5);
+    ctx.fill();
+    ctx.fillStyle = '#31373d';
+    rr(ctx, -14, 3, 20, 8, 2);
+    ctx.fill();
+    ctx.fillStyle = '#8a9096';
+    ctx.fillRect(-12, 5, 16, 1.4);
+    cab(ctx, 15, 26, '#dfe2e3');
+    lightBar(ctx, 22, busy, now, ['#ff3b30', '#ff3b30']);
+    chevrons(ctx, -41, 3);
   } else if (type === 'command') {
-    // A white-and-red command SUV with a roof light bar and a mast.
-    ctx.fillStyle = '#f2f0ea';
-    rr(ctx, -36, -16, 74, 32, 7);
-    ctx.fill();
+    paint(ctx, -37, -16, 76, 32, 8, '#f1efe9');
     ctx.fillStyle = '#c93a2f';
-    ctx.fillRect(-36, -3, 74, 6);
-    ctx.fillStyle = '#17222d';
-    ctx.fillRect(6, -12, 14, 24);
-    ctx.fillRect(-26, -12, 10, 24);
-    ctx.fillStyle = 'rgba(130,190,230,0.25)';
-    ctx.fillRect(6, -12, 5, 24);
-    ctx.strokeStyle = '#3a3f45';
-    ctx.lineWidth = 2;
+    ctx.fillRect(-37, -2.5, 76, 5);
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    ctx.fillRect(-30, -12, 24, 24);
+    const sg = ctx.createLinearGradient(6, 0, 28, 0);
+    sg.addColorStop(0, '#0e161d');
+    sg.addColorStop(1, '#5d7d95');
+    ctx.fillStyle = sg;
     ctx.beginPath();
-    ctx.moveTo(-8, 0);
-    ctx.lineTo(-8, -24);
+    ctx.moveTo(10, -12);
+    ctx.lineTo(26, -14);
+    ctx.lineTo(26, 14);
+    ctx.lineTo(10, 12);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#2d3136';
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(-14, 0);
+    ctx.lineTo(-14, -22);
     ctx.stroke();
-    ctx.fillStyle = '#2d7fd0';
-    ctx.fillRect(-2, -12, 5, 24);
+    ctx.fillStyle = '#fff3cf';
+    ctx.fillRect(37, -12, 2, 4);
+    ctx.fillRect(37, 8, 2, 4);
+    ctx.fillStyle = '#16191c';
+    ctx.fillRect(18, -19.5, 4, 3.5);
+    ctx.fillRect(18, 16, 4, 3.5);
+    lightBar(ctx, -4, busy, now);
   } else if (type === 'ambulance' || type === 'medcar' || type === 'ambubus') {
-    // White box body, a red stripe and a cross on the side, light bar on the cab.
-    ctx.fillStyle = '#f7f5ee';
-    rr(ctx, -40, -17, 60, 34, 5);
-    ctx.fill();
+    paint(ctx, -41, -17, 59, 34, 5, '#f4f3ee');
     ctx.fillStyle = '#d3382f';
-    ctx.fillRect(-40, 3, 60, 5);
-    ctx.fillRect(-14, -9, 8, 22);
-    ctx.fillRect(-21, -2, 22, 8);
-    ctx.strokeStyle = 'rgba(0,0,0,0.18)';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(-28, -16);
-    ctx.lineTo(-28, 16);
-    ctx.stroke();
-    ctx.fillStyle = '#e8e5dc';
-    rr(ctx, 14, -17, 27, 34, 4);
-    ctx.fill();
-    ctx.fillStyle = '#17222d';
-    ctx.fillRect(31, -13, 7, 26);
-    ctx.fillStyle = 'rgba(130,190,230,0.22)';
-    ctx.fillRect(31, -13, 3, 26);
-    ctx.fillStyle = '#d3382f';
-    ctx.fillRect(18, -17, 3, 34);
-  } else if (type === 'rescue') {
-    // A boxy rescue van with an orange stripe and equipment lockers.
-    ctx.fillStyle = '#ece7db';
-    rr(ctx, -40, -17, 60, 34, 5);
-    ctx.fill();
-    ctx.fillStyle = '#d97a2b';
-    ctx.fillRect(-40, -7, 60, 14);
-    ctx.strokeStyle = 'rgba(0,0,0,0.2)';
-    ctx.lineWidth = 1.5;
-    for (const dx of [-34, -22, -10]) {
-      ctx.beginPath();
-      ctx.moveTo(dx, -16);
-      ctx.lineTo(dx, 16);
-      ctx.stroke();
+    ctx.fillRect(-41, -17, 59, 3.5);
+    ctx.fillRect(-41, 13.5, 59, 3.5);
+    ctx.fillStyle = '#e5de45';
+    for (let x = -41; x < 18; x += 8) {
+      ctx.fillRect(x, -17, 4, 3.5);
+      ctx.fillRect(x + 4, 13.5, 4, 3.5);
     }
-    ctx.fillStyle = '#b7601c';
-    rr(ctx, 14, -17, 27, 34, 4);
+    ctx.fillStyle = '#d3382f';
+    ctx.fillRect(-18, -8, 7, 16);
+    ctx.fillRect(-22.5, -3.5, 16, 7);
+    ctx.fillStyle = '#c9ced1';
+    rr(ctx, -34, -4, 8, 8, 2);
     ctx.fill();
-    ctx.fillStyle = '#17222d';
-    ctx.fillRect(31, -13, 7, 26);
-    ctx.fillStyle = 'rgba(130,190,230,0.22)';
-    ctx.fillRect(31, -13, 3, 26);
+    ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(-26, -16);
+    ctx.lineTo(-26, 16);
+    ctx.stroke();
+    cab(ctx, 15, 27, '#eceae3');
+    lightBar(ctx, 21, busy, now);
+    chevrons(ctx, -41, 3);
+  } else if (type === 'rescue') {
+    paint(ctx, -41, -17, 58, 34, 5, '#e9e4d8');
+    ctx.fillStyle = '#d97a2b';
+    ctx.fillRect(-41, -17, 58, 4);
+    ctx.fillRect(-41, 13, 58, 4);
+    plate(ctx, -36, -9, 30, 18);
+    ctx.fillStyle = '#c9ced3';
+    ctx.fillRect(-4, -12, 1.8, 24);
+    ctx.fillRect(8, -12, 1.8, 24);
+    ctx.fillStyle = '#3a3f45';
+    ctx.fillRect(-2, -8, 10, 4);
+    ctx.fillRect(-2, 3, 10, 5);
+    lockers(ctx, -40, 12);
+    cab(ctx, 15, 27, '#b7601c');
+    lightBar(ctx, 21, busy, now);
+    chevrons(ctx, -41, 4);
   } else if (type === 'tanker') {
-    // A big cylindrical tank on the back, red cab in front.
-    ctx.fillStyle = '#cdd3d8';
-    rr(ctx, -39, -16, 57, 32, 12);
+    const tg = ctx.createLinearGradient(0, -16, 0, 16);
+    tg.addColorStop(0, '#8e969d');
+    tg.addColorStop(0.35, '#e3e8ec');
+    tg.addColorStop(0.55, '#c9d0d6');
+    tg.addColorStop(1, '#6d757c');
+    ctx.fillStyle = tg;
+    rr(ctx, -41, -16, 58, 32, 13);
     ctx.fill();
-    ctx.fillStyle = 'rgba(255,255,255,0.25)';
-    ctx.fillRect(-39, -16, 57, 5);
-    ctx.strokeStyle = 'rgba(70,80,90,0.45)';
-    ctx.lineWidth = 2;
-    for (const dx of [-24, -8, 8]) {
-      ctx.beginPath();
+    ctx.strokeStyle = 'rgba(40,48,56,0.45)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (const dx of [-30, -16, -2, 11]) {
       ctx.moveTo(dx, -15);
       ctx.lineTo(dx, 15);
-      ctx.stroke();
     }
-    ctx.fillStyle = '#b23a2c';
-    rr(ctx, 15, -17, 26, 34, 4);
-    ctx.fill();
-    ctx.fillStyle = '#17222d';
-    ctx.fillRect(32, -13, 7, 26);
-    ctx.fillStyle = 'rgba(130,190,230,0.22)';
-    ctx.fillRect(32, -13, 3, 26);
-  } else {
-    // Pump / ladder body: white band, red cab, compartment doors.
-    ctx.fillStyle = '#efece1';
-    ctx.fillRect(-41, -4, 82, 8);
-    ctx.fillStyle = 'rgba(0,0,0,0.18)';
-    ctx.fillRect(-42, 12, 84, 3);
-    ctx.fillStyle = '#9d211b';
-    rr(ctx, 14, -17, 27, 34, 4);
-    ctx.fill();
-    ctx.fillStyle = '#17222d';
-    ctx.fillRect(31, -13, 7, 26);
-    ctx.fillStyle = 'rgba(130,190,230,0.22)';
-    ctx.fillRect(31, -13, 3, 26);
-    ctx.fillStyle = '#243341';
-    ctx.fillRect(18, -17, 3, 34);
-
-    ctx.strokeStyle = 'rgba(0,0,0,0.25)';
-    ctx.lineWidth = 1.5;
-    for (const dx of [-36, -24, -12]) {
+    ctx.stroke();
+    for (const dx of [-24, -6]) {
+      ctx.fillStyle = '#9aa2a9';
       ctx.beginPath();
-      ctx.moveTo(dx, -18);
-      ctx.lineTo(dx, 18);
+      ctx.arc(dx, 0, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#575e64';
       ctx.stroke();
     }
+    ctx.fillStyle = '#23272b';
+    ctx.fillRect(-42, -7, 4, 14);
+    cab(ctx, 16, 25, '#a8281f');
+    lightBar(ctx, 22, busy, now);
+    chevrons(ctx, -42, 3);
+  } else {
+    // Pump / ladder: red body, aluminium walkway, hose bed, lockers, ladders.
+    paint(ctx, -42, -19, 58, 38, 5, '#b3241d');
+    ctx.fillStyle = '#efe9d6';
+    ctx.fillRect(-42, -19, 58, 2.2);
+    ctx.fillRect(-42, 16.8, 58, 2.2);
+    lockers(ctx, -40, 14);
+    plate(ctx, -36, -9, 36, 18);
+    hoseBed(ctx, -35, -8, 22, 16);
+    cab(ctx, 15, 26, '#9d211b');
+    lightBar(ctx, 21, busy, now);
+    chevrons(ctx, -42, 4);
 
     if (type === 'ladder') {
-      // Turntable and the aerial ladder, longer than the truck itself.
-      ctx.fillStyle = '#6d7278';
+      ctx.fillStyle = '#5b6168';
       ctx.beginPath();
-      ctx.arc(-16, 0, 10, 0, Math.PI * 2);
+      ctx.arc(-16, 0, 9, 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = '#d9d4c4';
-      ctx.lineWidth = 3;
+      ctx.strokeStyle = '#c9ccd0';
+      ctx.lineWidth = 2.6;
       ctx.beginPath();
-      ctx.moveTo(-36, -9);
-      ctx.lineTo(46, -9);
-      ctx.moveTo(-36, 9);
-      ctx.lineTo(46, 9);
-      for (let x = -34; x <= 44; x += 8) {
-        ctx.moveTo(x, -9);
-        ctx.lineTo(x, 9);
+      ctx.moveTo(-38, -8);
+      ctx.lineTo(46, -8);
+      ctx.moveTo(-38, 8);
+      ctx.lineTo(46, 8);
+      ctx.stroke();
+      ctx.lineWidth = 1.4;
+      ctx.strokeStyle = '#e4e6e8';
+      ctx.beginPath();
+      for (let x = -36; x <= 44; x += 5) {
+        ctx.moveTo(x, -8);
+        ctx.lineTo(x, 8);
       }
       ctx.stroke();
-      ctx.strokeStyle = '#3a3f45';
+      ctx.fillStyle = '#e7e0cc';
+      ctx.fillRect(-12, -3, 6, 6);
+      ctx.strokeStyle = '#2f3438';
       ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.moveTo(-24, -18);
-      ctx.lineTo(-24, -28);
-      ctx.moveTo(-24, 18);
-      ctx.lineTo(-24, 28);
+      ctx.moveTo(-26, -19);
+      ctx.lineTo(-26, -27);
+      ctx.moveTo(-26, 19);
+      ctx.lineTo(-26, 27);
       ctx.stroke();
     } else {
-      // Roof ladder on the pump.
-      ctx.strokeStyle = '#dad5c5';
-      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#d4d7da';
+      ctx.lineWidth = 1.8;
       ctx.beginPath();
-      ctx.moveTo(-38, -11);
-      ctx.lineTo(6, -11);
-      ctx.moveTo(-38, 11);
-      ctx.lineTo(6, 11);
-      for (let x = -36; x <= 4; x += 7) {
-        ctx.moveTo(x, -11);
-        ctx.lineTo(x, 11);
+      ctx.moveTo(-10, -5);
+      ctx.lineTo(12, -5);
+      ctx.moveTo(-10, 5);
+      ctx.lineTo(12, 5);
+      ctx.stroke();
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let x = -8; x <= 10; x += 4) {
+        ctx.moveTo(x, -5);
+        ctx.lineTo(x, 5);
       }
       ctx.stroke();
     }
   }
 
-  // Beacon bar on the cab.
-  const flash = Math.floor(now * 6) % 2 === 0;
-  const busy = e.status === 'responding' || e.pumping;
-  ctx.fillStyle = busy && flash ? '#ff4b3e' : '#7d2a24';
-  ctx.fillRect(22, -13, 5, 6);
-  ctx.fillStyle = busy && !flash ? '#58b8ff' : '#24455f';
-  ctx.fillRect(22, 7, 5, 6);
-
-  // Unit number.
-  ctx.fillStyle = 'rgba(255,255,255,0.92)';
-  ctx.font = 'bold 10px "Segoe UI", system-ui, sans-serif';
+  // Unit number on the roof.
+  ctx.fillStyle = 'rgba(255,255,255,0.9)';
+  ctx.font = 'bold 9px "Segoe UI", system-ui, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(label, -24, 0);
+  ctx.fillText(label, type === 'ladder' || type === 'tanker' ? -30 : -22, type === 'ladder' ? 13 : 0);
 
   ctx.restore();
 }
@@ -1770,37 +2067,51 @@ function drawCrew(ctx, c, now) {
   ctx.save();
   ctx.translate(c.x, c.y + bob);
 
-  ctx.fillStyle = 'rgba(10,14,18,0.3)';
+  ctx.fillStyle = `rgba(10,14,18,${0.3 * (1 - currentDark * 0.85)})`;
   ctx.beginPath();
-  ctx.ellipse(2, 4, 9, 5.5, 0, 0, Math.PI * 2);
+  ctx.ellipse(currentSun.dx * 4 + 1, currentSun.dy * 4 + 3, 8.5, 5, 0, 0, Math.PI * 2);
   ctx.fill();
 
   ctx.rotate(c.angle + Math.PI / 2);
 
-  // Jacket: yellow for firefighters, white and green for paramedics, a black
-  // wetsuit and an orange tank for divers.
-  ctx.fillStyle = c.diver ? '#20262c' : c.medic ? '#f1f4f0' : '#e0ae3c';
+  // A person seen from above: arms swinging, shoulders, kit on the back and a
+  // helmet. Firefighters in tan turnout gear, paramedics in white and green,
+  // divers in black with an orange tank.
+  const swing = c.status === 'moving' ? Math.sin(now * 12 + c.x * 0.1) * 2.6 : 0;
+  const coat = c.diver ? '#262c33' : c.medic ? '#e9eee9' : '#c9a24a';
+  const coatDark = c.diver ? '#14181c' : c.medic ? '#aeb8b0' : '#8c6d2b';
+  ctx.fillStyle = coatDark; // arms
   ctx.beginPath();
-  ctx.arc(0, 0, 7.2, 0, Math.PI * 2);
+  ctx.ellipse(-7.6, 0.5 + swing, 2.5, 4, 0, 0, Math.PI * 2);
+  ctx.ellipse(7.6, 0.5 - swing, 2.5, 4, 0, 0, Math.PI * 2);
   ctx.fill();
-  ctx.strokeStyle = c.diver ? '#e86f1f' : c.medic ? '#3a9d6a' : '#8f6a1e';
-  ctx.lineWidth = 1.4;
-  ctx.stroke();
-
-  // Reflective band.
-  ctx.fillStyle = c.diver ? '#e86f1f' : c.medic ? '#3a9d6a' : '#ece8d9';
-  ctx.fillRect(-7.2, -2, 14.4, 2.4);
-
-  // Helmet toward the direction of travel.
-  ctx.fillStyle = c.diver ? '#2d7fd0' : c.medic ? '#e6f1ea' : '#f3d34a';
+  ctx.fillStyle = '#15181b'; // boots peeking out front and back
+  ctx.fillRect(-4.6, -8.2 + swing * 0.5, 3.4, 3.4);
+  ctx.fillRect(1.2, -8.2 - swing * 0.5, 3.4, 3.4);
+  const body = ctx.createLinearGradient(0, -5, 0, 6);
+  body.addColorStop(0, shade(coat, 0.15));
+  body.addColorStop(1, shade(coat, -0.2));
+  ctx.fillStyle = body;
   ctx.beginPath();
-  ctx.arc(0, -4.8, 3.8, 0, Math.PI * 2);
+  ctx.ellipse(0, 1, 7.8, 5, 0, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = c.medic ? '#d64535' : '#c33a2c';
+  ctx.fillStyle = c.diver ? '#e86f1f' : c.medic ? '#3a9d6a' : '#e4e0c8'; // reflective bands
+  ctx.fillRect(-4.6, -3.6, 1.8, 9.2);
+  ctx.fillRect(2.8, -3.6, 1.8, 9.2);
+  ctx.fillStyle = c.diver ? '#e86f1f' : c.medic ? '#2f6f9a' : '#3a3f44'; // tank / pack
+  rr(ctx, -3.4, 2.4, 6.8, 4.6, 1.5);
+  ctx.fill();
+  // Helmet: shell, brim to the front, reflective crest.
+  ctx.fillStyle = c.diver ? '#2d7fd0' : c.medic ? '#f2f6f3' : '#e6c93d';
   ctx.beginPath();
-  ctx.arc(0, -4.8, 1.6, 0, Math.PI * 2);
+  ctx.ellipse(0, -0.5, 4.2, 4.6, 0, 0, Math.PI * 2);
   ctx.fill();
-
+  ctx.fillStyle = 'rgba(0,0,0,0.22)';
+  ctx.beginPath();
+  ctx.ellipse(0, -3.6, 4, 1.8, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = c.medic ? '#d64535' : '#b92f23';
+  ctx.fillRect(-0.7, -4, 1.4, 7);
   ctx.restore();
 
   // Treatment progress, drawn upright above the paramedic.
@@ -1963,21 +2274,30 @@ function drawCivilian(ctx, person, now) {
   ctx.save();
   ctx.translate(person.x, person.y + bob);
 
-  ctx.fillStyle = 'rgba(10,14,18,0.26)';
+  ctx.fillStyle = `rgba(10,14,18,${0.26 * (1 - currentDark * 0.85)})`;
   ctx.beginPath();
-  ctx.ellipse(1, 3, 6, 3.5, 0, 0, Math.PI * 2);
+  ctx.ellipse(currentSun.dx * 3 + 1, currentSun.dy * 3 + 3, 6, 3.4, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  ctx.fillStyle = person.color;
+  const stride = Math.sin(now * 10 + person.phase) * 2;
+  ctx.fillStyle = shade(person.color, -0.4); // arms
   ctx.beginPath();
-  ctx.arc(0, 0, 4.4, 0, Math.PI * 2);
+  ctx.ellipse(-5.4, stride, 1.8, 3.2, 0, 0, Math.PI * 2);
+  ctx.ellipse(5.4, -stride, 1.8, 3.2, 0, 0, Math.PI * 2);
   ctx.fill();
-
-  ctx.fillStyle = '#efd3b4';
+  ctx.fillStyle = person.color; // shoulders
   ctx.beginPath();
-  ctx.arc(0, -4.2, 2.4, 0, Math.PI * 2);
+  ctx.ellipse(0, 0.5, 5.8, 3.8, 0, 0, Math.PI * 2);
   ctx.fill();
-
+  const hair = ['#2a211b', '#5a3b22', '#a8793a', '#8a8a86'][Math.floor(person.phase * 3) % 4];
+  ctx.fillStyle = hair;
+  ctx.beginPath();
+  ctx.arc(0, -0.4, 3.1, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#e6c3a0';
+  ctx.beginPath();
+  ctx.arc(0, -2.2, 1.6, 0, Math.PI * 2);
+  ctx.fill();
   ctx.restore();
 }
 
