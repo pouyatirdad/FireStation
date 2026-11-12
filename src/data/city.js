@@ -54,15 +54,15 @@ const SPEC = {
 };
 
 const ROOFS = {
-  house: ['#9e4f3a', '#a85c40', '#8f4a38', '#a3593f'],
-  apartment: ['#8f5f48', '#9c6b50', '#7f5642'],
-  shop: ['#a86b3a', '#b07a45', '#9c5f38'],
-  office: ['#6b7683', '#74808e', '#616c78', '#707680'],
-  hotel: ['#8a6250', '#96705e', '#7d594a'],
-  warehouse: ['#6d747b', '#7a7f76', '#616a70'],
-  pharmacy: ['#d9e3dc', '#cfdcd4', '#e0e6df'],
-  hospital: ['#e4e9ec', '#dce3e7', '#e9eceb'],
-  station: ['#8c4b3f'],
+  house: ['#7d5a4c', '#5f6368', '#6e5348', '#74706a'],
+  apartment: ['#85594a', '#8c7a68', '#6f5a4e'],
+  shop: ['#8a7358', '#7a6b5e', '#8c6a52'],
+  office: ['#59636d', '#646d76', '#4f5a64', '#6a6f74'],
+  hotel: ['#7d6a5c', '#8a786a', '#6f5f53'],
+  warehouse: ['#6a6f72', '#76796f', '#5d6569'],
+  pharmacy: ['#cdd6d0', '#c4cfc8', '#d4dad4'],
+  hospital: ['#d9dfe2', '#d0d8dc', '#dfe2e1'],
+  station: ['#7e473d'],
 };
 
 const KIND_TYPES = {
@@ -400,7 +400,7 @@ export function createCity(seed = 7) {
   const stationLot = { x0: 63, y0: 44, x1: 69, y1: 49 };
   for (const [tx, ty] of [[49, 40], [60, 40], [70, 39], [47, 52], [68, 57], [70, 46]]) {
     if (inb(tx, ty) && !blocked[at(tx, ty)] && !road[at(tx, ty)] && !apron[at(tx, ty)]) {
-      trees.push({ x: (tx + 0.5) * TILE, y: (ty + 0.5) * TILE, r: rng.range(9, 13), tone: rng.pick(['#4f7a3d', '#58853f', '#456f37']) });
+      trees.push({ x: (tx + 0.5) * TILE, y: (ty + 0.5) * TILE, r: rng.range(9, 13), tone: rng.pick(['#46683a', '#4f7339', '#3d5e32']) });
     }
   }
 
@@ -419,7 +419,7 @@ export function createCity(seed = 7) {
         x: wx * TILE,
         y: wy * TILE,
         r: rng.range(8, 15),
-        tone: rng.pick(['#4f7a3d', '#58853f', '#456f37', '#628c46']),
+        tone: rng.pick(['#46683a', '#4f7339', '#3d5e32', '#587b3f']),
       });
     }
   }
@@ -438,7 +438,7 @@ export function createCity(seed = 7) {
               x: (x + 0.5 + rng.range(-0.3, 0.3)) * TILE,
               y: (y + 0.5 + rng.range(-0.3, 0.3)) * TILE,
               r: rng.range(9, 16),
-              tone: rng.pick(['#3f6a32', '#466f36', '#385f2c']),
+              tone: rng.pick(['#36572c', '#3d5e30', '#2f4e27']),
             });
           }
         }
@@ -515,7 +515,7 @@ export function createCity(seed = 7) {
   }
   for (const [tx, ty] of [[b2.x0 + 5, b2.y0 + 2], [b2.x0 + 16, b2.y0 + 2], [b2.x0 + 2, b2.y0 + 10]]) {
     if (inb(tx, ty) && !blocked[at(tx, ty)] && !road[at(tx, ty)] && !apron[at(tx, ty)]) {
-      trees.push({ x: (tx + 0.5) * TILE, y: (ty + 0.5) * TILE, r: rng.range(9, 13), tone: '#4f7a3d' });
+      trees.push({ x: (tx + 0.5) * TILE, y: (ty + 0.5) * TILE, r: rng.range(9, 13), tone: '#46683a' });
     }
   }
 
@@ -584,14 +584,14 @@ export function createCity(seed = 7) {
         x: (tx + 0.5) * TILE,
         y: (ty + 0.5) * TILE,
         r: rng.range(7, 11),
-        tone: rng.pick(['#4f7a3d', '#58853f', '#456f37']),
+        tone: rng.pick(['#46683a', '#4f7339', '#3d5e32']),
       });
     }
   }
 
   // --- parked cars -------------------------------------------------------
   const cars = [];
-  const CAR_COLORS = ['#cfd3d8', '#3d4d63', '#8f2f27', '#e7e3d6', '#4c5c50', '#b98a3a', '#6b6f76'];
+  const CAR_COLORS = ['#c3c6c9', '#34404f', '#6e2b27', '#d8d4c8', '#3f4a43', '#8c7440', '#55595e'];
   const nearCrossStreet = (y) => H_ROADS.some((hy) => Math.abs(y - hy) < 2);
   const nearCrossAvenue = (x) => V_ROADS.some((vx) => Math.abs(x - vx) < 2);
 
