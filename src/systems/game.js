@@ -623,7 +623,7 @@ export { orderEngine, orderCrew };
 
 export function serialize(state) {
   return {
-    version: 9,
+    version: 10,
     seed: state.seed,
     time: state.time,
     clock: state.clock,
@@ -646,6 +646,7 @@ export function serialize(state) {
       reward: b.reward ?? 0,
       incidentType: b.incidentType ?? null,
       incidentLabel: b.incidentLabel ?? null,
+      neglect: b.neglect ?? 0,
       hazmat: Boolean(b.hazmat),
       big: Boolean(b.big),
     })),
@@ -736,6 +737,8 @@ export function loadState(data) {
     b.reward = saved.reward ?? 0;
     b.incidentType = saved.incidentType ?? null;
     b.incidentLabel = saved.incidentLabel ?? null;
+    b.neglect = saved.neglect ?? 0;
+    b.tookHold = (saved.neglect ?? 0) >= 0.5;
     b.hazmat = Boolean(saved.hazmat);
     b.big = Boolean(saved.big);
   }

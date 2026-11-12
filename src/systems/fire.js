@@ -1,7 +1,7 @@
 // Fire, smoke and debris. Fire is the only thing in the game that can win.
 
 import { CONFIG, TILE } from '../core/config.js';
-import { rectsTouch } from '../core/math.js';
+import { clamp, lerp, rectsTouch } from '../core/math.js';
 import { addEvent } from './events.js';
 import { evacuate } from './civilians.js';
 import { downwindFactor } from './wind.js';
@@ -22,10 +22,40 @@ export function activeFires(state) {
   return list;
 }
 
+/**
+ * How many times harder than a plain fire this one is to knock down.
+ *  - Size: a small house is easy (below 1); a big building is hard (up to 2).
+ *  - Stage: the size only counts as the fire takes hold. An early fire in a big
+ *    building is still easy, so a fast response keeps it that way.
+ *  - Neglect: a fire nobody has fought for a while has taken hold of the whole
+ *    building and is much harder, whatever its size.
+ */
+export function fireResistance(b) {
+  const F = CONFIG.fire;
+  const mass = b.w * b.h * (0.7 + 0.15 * (b.floors ?? 1));
+  const sizeFactor = lerp(F.sizeEasy, F.sizeHard, clamp((mass - F.sizeRange[0]) / (F.sizeRange[1] - F.sizeRange[0]), 0, 1));
+  const neglect = b.neglect ?? 0;
+  const stage = clamp(Math.max(neglect, (b.fire - 0.15) / 0.6), 0, 1);
+  // Only the part of the size penalty above 1 is held back early on.
+  const size = sizeFactor > 1 ? 1 + (sizeFactor - 1) * (F.earlyShare + (1 - F.earlyShare) * stage) : sizeFactor;
+  return size * (1 + F.neglectHard * neglect);
+}
+
+/** A word for how hard a fire is to fight, for the HUD. */
+export function fireDifficulty(b) {
+  const r = fireResistance(b);
+  if (r < 0.8) return { label: 'Easy', tone: 'good', value: r };
+  if (r < 1.35) return { label: 'Moderate', tone: '', value: r };
+  if (r < 2.2) return { label: 'Hard', tone: 'warn', value: r };
+  return { label: 'Very hard', tone: 'bad', value: r };
+}
+
 export function ignite(state, building, cause = 'alarm') {
   if (!building || building.state !== 'ok') return false;
   building.state = 'burning';
   building.dryTime = 0;
+  building.neglect = 0;
+  building.tookHold = false;
   building.runaway = false;
   building.fire = Math.max(building.fire, 0.1);
   building.spreadTimer = CONFIG.fire.spreadEvery;
@@ -143,12 +173,25 @@ export function updateFire(state, dt) {
     // Time spent burning with no water on it.
     b.dryTime = water > 0 ? Math.max(0, (b.dryTime ?? 0) - dt * 2) : (b.dryTime ?? 0) + dt;
     if (b.dryTime < 20) b.runaway = false;
+    // A fire nobody is fighting takes hold (twice as fast once it is roaring); it
+    // eases only slowly when water is on it.
+    const T = CONFIG.fire.neglectTime;
+    b.neglect = clamp(
+      (b.neglect ?? 0) + (water > 0 ? (-dt * CONFIG.fire.neglectEase) / T : (dt / T) * (b.fire >= 0.5 ? 2 : 1)),
+      0,
+      1,
+    );
+    if (b.neglect >= 0.5 && !b.tookHold) {
+      b.tookHold = true;
+      addEvent(state, `The fire at ${b.name} has taken hold — it will be hard to put out now`, 'warn');
+    }
+    const resistance = fireResistance(b);
     b.fire = Math.min(
       1,
       b.fire + CONFIG.fire.growth * dt * (0.75 + 0.5 * (1 - b.fire)) * b.risk,
     );
     if (water > 0) {
-      b.fire -= water * dt * 1.7;
+      b.fire -= (water * dt * 1.7) / resistance;
       b.integrity = Math.min(b.maxIntegrity, b.integrity + 2.5 * dt);
     }
     b.fire = Math.max(0, b.fire);
@@ -166,7 +209,7 @@ export function updateFire(state, dt) {
     }
 
     // An industrial fire left to run can take the whole building up with it.
-    if (b.type === 'warehouse' && b.fire >= (b.hazmat ? 0.7 : 0.85) && !b.exploded && state.rng.float() < dt * (b.hazmat ? 0.08 : 0.04)) {
+    if ((b.type === 'warehouse' || b.type === 'factory' || b.type === 'tankfarm') && b.fire >= (b.hazmat ? 0.7 : 0.85) && !b.exploded && state.rng.float() < dt * (b.hazmat ? 0.08 : 0.04)) {
       b.exploded = true;
       state.onExplosion?.(b);
     }

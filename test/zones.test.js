@@ -76,18 +76,64 @@ test('the city has housing, business, shopping and industrial districts', () => 
   assert.ok(!types('housing').has('warehouse'));
 });
 
-test('industry sits by the water: the quay in the south and the river banks', () => {
+test('industry sits by the sea; the river banks are commercial', () => {
   const industrial = city.buildings.filter((b) => b.zone === 'industrial');
-  const byWater = industrial.filter((b) => {
-    const cy = b.y + b.h / 2;
-    const cx = b.x + b.w / 2;
-    return SEA_Y - cy < 80 || Math.abs(cx - riverCentre(cy)) < 50;
-  });
-  assert.ok(byWater.length / industrial.length > 0.97, `${byWater.length} of ${industrial.length} industrial buildings are by water`);
+  assert.ok(industrial.length >= 40);
+  const bySea = industrial.filter((b) => SEA_Y - (b.y + b.h / 2) < 90);
+  assert.equal(bySea.length, industrial.length, 'industry away from the sea');
   assert.ok(industrial.some((b) => b.waterfront), 'no industrial building is on the waterfront');
-  // And the housing is not.
+  // Along the river: shops, offices, hotels, towers.
+  const river = city.buildings.filter((b) => {
+    const cy = b.y + b.h / 2;
+    return Math.abs(b.x + b.w / 2 - riverCentre(cy)) < 28 && cy < SEA_Y - 60;
+  });
+  const commercial = river.filter((b) => b.zone === 'commercial' || b.zone === 'company');
+  assert.ok(river.length >= 40 && commercial.length / river.length > 0.8, `${commercial.length} of ${river.length} by the river are commercial`);
+  // And the housing is not on the water.
   const housing = city.buildings.filter((b) => b.zone === 'housing');
   assert.ok(housing.filter((b) => b.waterfront).length / housing.length < 0.15);
+});
+
+test('housing west of the river is apartment blocks, east of it villas', () => {
+  const side = (b) => (b.x + b.w / 2 < riverCentre(b.y + b.h / 2) ? 'west' : 'east');
+  const west = city.buildings.filter((b) => b.zone === 'housing' && side(b) === 'west' && b.x + b.w / 2 > riverCentre(b.y + b.h / 2) - 170);
+  const east = city.buildings.filter((b) => b.zone === 'housing' && side(b) === 'east');
+  const share = (list, type) => list.filter((b) => b.type === type).length / list.length;
+  assert.ok(west.length >= 40 && share(west, 'apartment') > 0.6, 'west apartments: ' + share(west, 'apartment'));
+  assert.ok(east.length >= 10 && share(east, 'villa') > 0.5, 'east villas: ' + share(east, 'villa'));
+  assert.ok(city.buildings.filter((b) => b.type === 'villa').every((b) => side(b) === 'east'), 'a villa west of the river');
+  // A villa is a big house with a garden.
+  const villas = city.buildings.filter((b) => b.type === 'villa');
+  assert.ok(villas.every((b) => b.w >= 6 && b.h >= 6 && b.floors >= 2));
+});
+
+test('the very large building types exist, each in its own district', () => {
+  const of = (type) => city.buildings.filter((b) => b.type === type);
+  assert.ok(of('tower').length >= 10 && of('tower').every((b) => b.zone === 'company' && b.floors >= 12), 'towers');
+  assert.ok(of('mall').length >= 2 && of('mall').every((b) => b.w >= 14 && b.h >= 10), 'malls');
+  assert.ok(of('factory').length >= 5 && of('factory').every((b) => b.zone === 'industrial'), 'factories');
+  assert.ok(of('tankfarm').length >= 3 && of('tankfarm').every((b) => b.zone === 'industrial' && b.waterfront && b.hazmat), 'tank farms by the sea');
+  // Towers are the tallest things in the city.
+  const tallest = Math.max(...city.buildings.map((b) => b.floors));
+  assert.ok(tallest >= 20);
+});
+
+test('the map is about half small buildings, three in ten medium, one in eight large, one in twelve very large', () => {
+  for (const seed of [7, 3, 11]) {
+    const c = createCity(seed);
+    const list = c.buildings.filter((b) => b.type !== 'station' && b.type !== 'hospital');
+    const share = (cls) => list.filter((b) => b.sizeClass === cls).length / list.length;
+    const near = (cls, want, tol = 0.025) => assert.ok(Math.abs(share(cls) - want) <= tol, `seed ${seed} ${cls}: ${(share(cls) * 100).toFixed(1)}%`);
+    near('small', 0.5);
+    near('medium', 0.3);
+    near('large', 0.12);
+    near('huge', 0.08);
+    // The class really follows the size: a very large building is bigger than a small one.
+    const mass = (b) => b.w * b.h * (0.7 + 0.15 * b.floors);
+    const maxSmall = Math.max(...list.filter((b) => b.sizeClass === 'small').map(mass));
+    const minHuge = Math.min(...list.filter((b) => b.sizeClass === 'huge').map(mass));
+    assert.ok(maxSmall < 30 && minHuge >= 200);
+  }
 });
 
 test('blocks differ in size and buildings differ in size', () => {
@@ -144,11 +190,18 @@ test('major incidents come from the industrial estates and the business towers',
 test('a chemical fire spreads further than an ordinary one', () => {
   const state = createGame(7);
   startShift(state);
-  const warehouse = state.buildings.find((b) => b.type === 'warehouse');
+  // A works with a neighbour just inside a chemical fire's reach but outside an ordinary one's.
+  const gap = (a, b) => Math.max(
+    Math.max(a.x - (b.x + b.w), b.x - (a.x + a.w), 0),
+    Math.max(a.y - (b.y + b.h), b.y - (a.y + a.h), 0),
+  );
+  const warehouse = state.buildings.find((b) => (b.type === 'warehouse' || b.type === 'factory')
+    && state.buildings.some((o) => o !== b && o.type !== 'station' && gap(b, o) > 0 && gap(b, o) <= 2.6));
+  assert.ok(warehouse, 'no works with a close neighbour');
   assert.equal(warehouse.zone, 'industrial');
   const spreadFrom = (hazmat) => {
     let n = 0;
-    for (let trial = 0; trial < 30; trial++) {
+    for (let trial = 0; trial < 120; trial++) {
       for (const b of state.buildings) {
         b.state = 'ok'; b.fire = 0; b.dryTime = 0; b.spreadTimer = 3;
       }
@@ -156,7 +209,7 @@ test('a chemical fire spreads further than an ordinary one', () => {
       warehouse.exploded = true; // no blast: just the spread
       warehouse.state = 'burning';
       warehouse.integrity = warehouse.maxIntegrity = 1e9;
-      for (let i = 0; i < 30 * 25; i++) {
+      for (let i = 0; i < 30 * 9; i++) {
         warehouse.fire = 0.9;
         state.streams.length = 0;
         updateFire(state, 1 / 30);

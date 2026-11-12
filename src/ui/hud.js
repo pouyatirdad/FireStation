@@ -7,6 +7,7 @@ import {
   freeBay, hydrantInReach, ownsStation, toolCount, toolsFree, totalBays, totalBerths, vehicleTools,
 } from '../systems/units.js';
 import { contractProgress } from '../systems/contracts.js';
+import { fireDifficulty } from '../systems/fire.js';
 import { TRAINING_LABEL, hourlyBudget } from '../systems/economy.js';
 import { windLabel } from '../systems/wind.js';
 
@@ -19,6 +20,12 @@ const TYPE_LABEL = {
   office: 'Office',
   hotel: 'Hotel',
   warehouse: 'Warehouse',
+  villa: 'Villa',
+  tower: 'Office tower',
+  mall: 'Shopping centre',
+  factory: 'Factory',
+  school: 'School',
+  tankfarm: 'Fuel tank farm',
   pharmacy: 'Pharmacy',
   hospital: 'Hospital',
   station: 'Fire station',
@@ -441,7 +448,7 @@ function collectIncidents(state) {
     if (b.state === 'burning') {
       list.push({
         kind: 'building', id: b.id, tone: 'fire', urgency: 600 + b.fire * 100 + (b.trapped ?? 0) * 40 + (b.dryTime ?? 0) / 4,
-        title: b.name, meta: (b.incidentLabel ? b.incidentLabel + ' · ' : '') + Math.round(b.fire * 100) + '% burning' + ((b.trapped ?? 0) > 0 ? ' · ' + b.trapped + ' trapped' : '') + (b.runaway ? ' · out of control' : ''),
+        title: b.name, meta: (b.incidentLabel ? b.incidentLabel + ' · ' : '') + Math.round(b.fire * 100) + '% burning · ' + fireDifficulty(b).label + ((b.trapped ?? 0) > 0 ? ' · ' + b.trapped + ' trapped' : '') + (b.runaway ? ' · out of control' : ''),
         handled: claimed((e) => e.targetId === b.id) || state.streams.some((st) => st.targetId === b.id),
       });
     } else if ((b.trapped ?? 0) > 0 && b.state !== 'rubble') {
@@ -754,6 +761,8 @@ function crewCard(state, crew) {
     </div>`;
 }
 
+const SIZE_LABEL = { small: 'Small building', medium: 'Medium building', large: 'Large building', huge: 'Very large building' };
+
 const ZONE_LABEL = {
   housing: 'Housing',
   company: 'Business district',
@@ -761,6 +770,17 @@ const ZONE_LABEL = {
   industrial: 'Industrial',
   civic: 'Civic',
 };
+
+/** How hard this fire is to fight, and why: size, how far it has taken hold. */
+function difficultyRow(b) {
+  const d = fireDifficulty(b);
+  const why = [];
+  if ((b.neglect ?? 0) >= 0.5) why.push('it has taken hold');
+  else if ((b.neglect ?? 0) >= 0.2) why.push('it is taking hold — get water on it');
+  if (b.sizeClass === 'huge' || b.sizeClass === 'large') why.push(b.fire < 0.3 && (b.neglect ?? 0) < 0.2 ? 'big, but still early: act now' : 'a big building');
+  if (b.sizeClass === 'small') why.push('small building');
+  return `<div class="sel__status sel__difficulty" data-tone="${d.tone}"><i></i>Fire fight: ${d.label}${why.length ? ' — ' + why.join(', ') : ''}</div>`;
+}
 
 function buildingCard(state, building) {
   const type = TYPE_LABEL[building.type] ?? 'Building';
@@ -788,7 +808,8 @@ function buildingCard(state, building) {
     ${building.state !== 'rubble' ? `
       <div class="bar__label"><span>Structure</span><span>${healthValue}%</span></div>
       <div class="bar bar--health"><i style="width:${healthPct}"></i></div>` : ''}
-    <p class="sel__meta">${esc(type)} · ${building.floors} floor${building.floors === 1 ? '' : 's'}${trapped > 0 ? '<br>A crew at the building will bring them out.' : ''}</p>
+    ${burning ? difficultyRow(building) : ''}
+    <p class="sel__meta">${esc(type)} · ${building.floors} floor${building.floors === 1 ? '' : 's'} · ${SIZE_LABEL[building.sizeClass] ?? ''}${trapped > 0 ? '<br>A crew at the building will bring them out.' : ''}</p>
     <div class="sel__actions">
       ${burning ? '<button type="button" class="btn" data-action="dispatch">Dispatch<kbd>D</kbd></button>' : ''}
       <button type="button" class="btn" data-action="center">Locate<kbd>C</kbd></button>

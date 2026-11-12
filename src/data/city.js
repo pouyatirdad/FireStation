@@ -94,7 +94,21 @@ const SPEC = {
   pharmacy: { floors: [1, 2], hp: [75, 100], risk: 0.85 },
   hospital: { floors: [3, 5], hp: [150, 190], risk: 0.55 },
   station: { floors: [2, 2], hp: [180, 180], risk: 0.7 },
+  // The very large buildings: rare, hard to fight once they have taken hold.
+  villa: { floors: [2, 3], hp: [85, 110], risk: 0.85 },
+  tower: { floors: [12, 24], hp: [210, 270], risk: 0.5 },
+  mall: { floors: [2, 3], hp: [150, 190], risk: 0.8 },
+  factory: { floors: [1, 3], hp: [140, 180], risk: 1.25 },
+  school: { floors: [2, 3], hp: [110, 140], risk: 0.7 },
+  tankfarm: { floors: [1, 1], hp: [160, 210], risk: 1.45 },
 };
+
+// Size classes by building mass (footprint x floors, the measure the fire logic
+// uses): the map is meant to be about half small buildings, three in ten medium,
+// one in eight large and one in twelve very large.
+export const SIZE_CLASSES = [['small', 30], ['medium', 80], ['large', 200], ['huge', Infinity]];
+export const buildingMass = (w, h, floors) => w * h * (0.7 + 0.15 * floors);
+export const sizeClassOf = (mass) => SIZE_CLASSES.find(([, max]) => mass < max)[0];
 
 const ROOFS = {
   house: ['#7d5a4c', '#5f6368', '#6e5348', '#74706a'],
@@ -106,13 +120,24 @@ const ROOFS = {
   pharmacy: ['#cdd6d0', '#c4cfc8', '#d4dad4'],
   hospital: ['#d9dfe2', '#d0d8dc', '#dfe2e1'],
   station: ['#7e473d'],
+  villa: ['#8a4f3f', '#7d5a4c', '#94604a', '#6f4a3e'],
+  tower: ['#4a5663', '#55616d', '#434e5a'],
+  mall: ['#8d8f93', '#9a9c9f', '#7f8387'],
+  factory: ['#6c7276', '#797d79', '#5f676b'],
+  school: ['#8f6a52', '#9b7658', '#84624d'],
+  tankfarm: ['#8a8f93', '#7b8286', '#969b9e'],
 };
 
+// What is built in each kind of block (by lot style), with weights. The big
+// types only fit big lots, so the mix of sizes comes from these weights and the
+// lot sizes together.
 const KIND_TYPES = {
-  houses: [['house', 6], ['apartment', 1.2], ['shop', 0.4]],
-  downtown: [['office', 4], ['shop', 1.5], ['hotel', 2], ['apartment', 1]],
-  industry: [['warehouse', 6], ['office', 1], ['shop', 0.3]],
-  market: [['shop', 4], ['apartment', 2], ['house', 1]],
+  villa: [['villa', 8], ['house', 0.8], ['school', 0.15], ['apartment', 0.15]],
+  suburb: [['house', 8], ['apartment', 1.6], ['school', 0.12], ['shop', 0.3]],
+  flats: [['apartment', 5], ['house', 1.5], ['school', 0.4], ['shop', 0.4]],
+  downtown: [['office', 3.2], ['tower', 3], ['hotel', 1.8], ['mall', 1.8], ['apartment', 0.7], ['shop', 0.6]],
+  industry: [['warehouse', 4], ['factory', 3.5], ['tankfarm', 1.6], ['office', 0.4]],
+  market: [['shop', 4], ['apartment', 2.6], ['house', 0.6], ['hotel', 0.25]],
 };
 
 // How many people are inside at 07:00. Homes are nearly empty in the morning;
@@ -127,6 +152,12 @@ const OCCUPANTS = {
   pharmacy: [2, 7],
   hospital: [22, 46],
   station: [0, 0],
+  villa: [2, 6],
+  tower: [60, 150],
+  mall: [40, 110],
+  factory: [12, 40],
+  school: [40, 120],
+  tankfarm: [1, 4],
 };
 
 const NAMES = {
@@ -175,6 +206,32 @@ const NAMES = {
     'City Pharmacy', 'Healthwell Pharmacy', 'Green Cross Chemist', 'Corner Rx',
     'Harbor Apothecary', 'Wellspring Pharmacy', 'Lifeline Drugstore', 'Maple Pharmacy',
     'Northgate Chemist', 'Riverside Rx', 'Sunrise Pharmacy', 'Unity Medical Supply',
+  ],
+  villa: [
+    'Villa Rosa', 'The Willows', 'Ashgrove Villa', 'Cypress House', 'Villa Serena', 'The Laurels',
+    'Hillcrest Villa', 'Oakridge Manor', 'Villa Bianca', 'Rosewood House', 'The Cedars', 'Linden Villa',
+    'Villa Aurora', 'Meadowbank House', 'Thornfield', 'Brookside Villa',
+  ],
+  tower: [
+    'Meridian Tower', 'Halcyon Plaza', 'Pinnacle Tower', 'Cobalt Centre', 'Harbor Exchange',
+    'Beacon Tower', 'Keystone Plaza', 'Ardent House Tower', 'Northgate Tower', 'Union Square Tower',
+    'Granite Tower', 'Sterling Plaza', 'Vantage Tower', 'Crown Point',
+  ],
+  mall: [
+    'Harbor Mall', 'Northgate Galleria', 'Civic Arcade', 'Eastside Centre', 'Riverside Shopping Centre',
+    'Midtown Plaza', 'Old Town Arcade', 'The Pavilion',
+  ],
+  factory: [
+    'Vulcan Steelworks', 'Kessler Chemicals', 'Atlas Foundry', 'Redline Plastics', 'Tidewater Cannery',
+    'Ironbridge Engineering', 'Harbor Paint Works', 'Crane & Sons Mill', 'Southbank Refinery', 'Pier Nine Packaging',
+  ],
+  school: [
+    'Lincoln High School', 'St. Clair Academy', 'Maple Grove School', 'Westfield Primary', 'Riverside College',
+    'Holloway Secondary', 'Elmgrove School', 'Fairmount Academy',
+  ],
+  tankfarm: [
+    'Tidewater Fuel Terminal', 'South Quay Oil Depot', 'Harbor Bulk Storage', 'Dockside Fuel Farm',
+    'Ironbridge Tank Park', 'Freight Yard Fuel Depot',
   ],
   warehouse: [
     'Harbor Freight', 'Kessler Storage', 'Atlas Depot', 'Dockside Bonded',
@@ -285,16 +342,23 @@ const TYPE_RULES = {
   hotel: { minW: 6, minH: 6, maxW: 11, maxH: 10 },
   warehouse: { minW: 7, minH: 5, maxW: 24, maxH: 14 },
   pharmacy: { minW: 3, minH: 3, maxW: 6, maxH: 6 },
+  villa: { minW: 6, minH: 6, maxW: 8, maxH: 7 },
+  tower: { minW: 7, minH: 7, maxW: 11, maxH: 11 },
+  mall: { minW: 14, minH: 10, maxW: 22, maxH: 15 },
+  factory: { minW: 12, minH: 9, maxW: 24, maxH: 14 },
+  school: { minW: 10, minH: 8, maxW: 16, maxH: 11 },
+  tankfarm: { minW: 12, minH: 10, maxW: 20, maxH: 14 },
 };
 
 // How each kind of block is cut into lots: lot sizes, the lane between lots, how
 // often a lot is split further than it has to be, and how a building sits on it.
 const LOT_PARAMS = {
   suburb: { minW: 3, maxW: 5, minH: 4, maxH: 6, gap: [1, 1], split: 0.2, setback: [1, 2], flush: 0.15, empty: 0.06 },
-  flats: { minW: 5, maxW: 9, minH: 5, maxH: 9, gap: [1, 2], split: 0.15, setback: [1, 2], flush: 0.4, empty: 0.08 },
+  flats: { minW: 6, maxW: 12, minH: 6, maxH: 10, gap: [1, 2], split: 0.15, setback: [1, 2], flush: 0.4, empty: 0.08 },
+  villa: { minW: 7, maxW: 10, minH: 7, maxH: 9, gap: [2, 3], split: 0.15, setback: [2, 3], flush: 0.1, empty: 0.12 },
   market: { minW: 4, maxW: 7, minH: 5, maxH: 9, gap: [0, 1], split: 0.25, setback: [1, 1], flush: 0.8, empty: 0.04 },
-  downtown: { minW: 6, maxW: 14, minH: 6, maxH: 12, gap: [1, 2], split: 0.2, setback: [1, 1], flush: 0.6, empty: 0.12 },
-  industry: { minW: 9, maxW: 22, minH: 7, maxH: 13, gap: [2, 4], split: 0.15, setback: [1, 3], flush: 0.3, empty: 0.16 },
+  downtown: { minW: 8, maxW: 20, minH: 8, maxH: 15, gap: [1, 2], split: 0.2, setback: [1, 1], flush: 0.6, empty: 0.1 },
+  industry: { minW: 11, maxW: 22, minH: 9, maxH: 14, gap: [2, 3], split: 0.1, setback: [1, 2], flush: 0.3, empty: 0.08 },
 };
 
 /** Cut a rectangle into lots by repeated random splits, with a lane between neighbours. */
@@ -396,7 +460,9 @@ function buildBlocks(seed = 7) {
         99,
       );
       const roll = rng.float();
-      const waterfront = row >= lastRow - 3 || (col >= RIVER_COLS[0] && col <= RIVER_COLS[1] && row >= 1);
+      // Industry is on the sea front; the river banks are for business and shops.
+      const waterfront = row >= lastRow - 3;
+      const riverBank = col >= RIVER_COLS[0] && col <= RIVER_COLS[1] && row >= 1 && !waterfront;
       let kind;
       let zone;
       if (row === lastRow) kind = 'sea';
@@ -409,11 +475,14 @@ function buildBlocks(seed = 7) {
       else if (near === 0) kind = roll < 0.03 ? 'park' : 'downtown';
       else if (near === 1 && !waterfront) kind = roll < 0.55 ? 'downtown' : 'market';
       else if (waterfront) kind = near === 1 ? 'downtown' : 'industry';
+      else if (riverBank) kind = roll < 0.5 ? 'downtown' : 'market';
       else if (roll < 0.06) kind = 'park';
       else if (near === 2) kind = roll < 0.55 ? 'market' : 'houses';
       else kind = roll < 0.12 ? 'market' : 'houses';
       const woods = kind === 'forest' ? (zone === BIG_FOREST.zone ? 'pine' : 'mixed') : undefined;
-      grid.push({ col, row, x0, y0, x1, y1, kind, zone, woods, style: Math.floor(tileHash(col, row, 31) * 3) });
+      // Housing west of the river is apartment blocks, east of it villas.
+      const side = col <= RIVER_COLS[0] - 1 && col >= RIVER_COLS[0] - 5 ? 'west' : col >= RIVER_COLS[1] ? 'east' : null;
+      grid.push({ col, row, x0, y0, x1, y1, kind, zone, woods, waterfront, riverSide: side, style: Math.floor(tileHash(col, row, 31) * 3) });
     }
   }
 
@@ -451,6 +520,54 @@ function buildBlocks(seed = 7) {
     other.gone = true;
   }
   return { blocks: grid.filter((b) => !b.gone), removed };
+}
+
+// How the buildings of a city should split by size.
+export const SIZE_TARGET = { small: 0.5, medium: 0.3, large: 0.12, huge: 0.08 };
+
+// The tallest each kind of building can be given (storeys).
+const FLOOR_CAP = {
+  house: 3, villa: 3, shop: 4, pharmacy: 3, apartment: 12, hotel: 14, office: 16, mall: 5,
+  school: 4, warehouse: 3, factory: 5, tower: 28,
+};
+
+/**
+ * Nudge the mix of sizes towards SIZE_TARGET: where a class has too few
+ * buildings, the ones just below its threshold get an extra storey or two
+ * (a taller block of flats, a three-storey shop, a bigger warehouse) until
+ * they cross it. Nothing changes footprint, so the layout is untouched.
+ */
+function rebalanceSizes(buildings) {
+  const list = buildings.filter((b) => b.type !== 'station' && b.type !== 'hospital');
+  const N = list.length;
+  const order = ['small', 'medium', 'large', 'huge'];
+  const upper = Object.fromEntries(SIZE_CLASSES.map(([name, max]) => [name, max]));
+  const count = (cls) => list.filter((b) => b.sizeClass === cls).length;
+  const setFloors = (b, floors) => {
+    b.occupants = Math.round(b.occupants * (floors / b.floors));
+    b.floors = floors;
+    b.elevation = 11 + floors * 5;
+    b.sizeClass = sizeClassOf(buildingMass(b.w, b.h, floors));
+  };
+  // Promote from the class below until `to` has its share.
+  for (const to of ['huge', 'large', 'medium']) {
+    const from = order[order.indexOf(to) - 1];
+    const want = Math.round(N * SIZE_TARGET[to]);
+    const threshold = upper[from];
+    const candidates = list
+      .filter((b) => b.sizeClass === from && FLOOR_CAP[b.type])
+      .map((b) => {
+        let f = b.floors;
+        while (f < FLOOR_CAP[b.type] && buildingMass(b.w, b.h, f) < threshold) f++;
+        return { b, f, ok: buildingMass(b.w, b.h, f) >= threshold, extra: f - b.floors };
+      })
+      .filter((c) => c.ok && c.extra > 0)
+      .sort((a, c) => a.extra - c.extra || buildingMass(c.b.w, c.b.h, c.b.floors) - buildingMass(a.b.w, a.b.h, a.b.floors));
+    for (const c of candidates) {
+      if (count(to) >= want) break;
+      setFloors(c.b, c.f);
+    }
+  }
 }
 
 export function createCity(seed = 7) {
@@ -626,6 +743,8 @@ export function createCity(seed = 7) {
       type,
       zone: extra.zone ?? 'civic',
       waterfront: false,
+      sizeClass: sizeClassOf(buildingMass(wid, hei, floors)),
+      hazmat: type === 'tankfarm' || (type === 'factory' && rng.chance(0.5)),
       name: extra.name ?? takeName(type),
       x,
       y,
@@ -768,7 +887,9 @@ export function createCity(seed = 7) {
     if (kind === 'station' || kind === 'dock' || kind === 'sea') return;
 
     const zone = ZONE_OF[kind];
-    const variant = kind === 'houses' ? (block.style === 2 ? 'flats' : 'suburb') : kind;
+    const variant = kind === 'houses'
+      ? (block.riverSide === 'east' ? 'villa' : block.riverSide === 'west' || block.style === 2 ? 'flats' : 'suburb')
+      : kind;
     const p = LOT_PARAMS[variant];
     // The pavement round the block: a different width on each side.
     const side = () => rng.int(p.setback[0], p.setback[1]);
@@ -800,8 +921,10 @@ export function createCity(seed = 7) {
         continue;
       }
       // Which buildings fit this lot.
-      let options = KIND_TYPES[kind].filter(([type]) => {
+      let options = KIND_TYPES[variant].filter(([type]) => {
         const r = TYPE_RULES[type];
+        // Fuel is stored on the quay itself, within reach of the water.
+        if (type === 'tankfarm' && (!block.waterfront || lot.y1 + 1 < SEA_Y - 7)) return false;
         return lw >= r.minW && lh >= r.minH;
       });
       if (wantsPharmacy && lw >= TYPE_RULES.pharmacy.minW && lh >= TYPE_RULES.pharmacy.minH) options = [['pharmacy', 1]];
@@ -815,23 +938,27 @@ export function createCity(seed = 7) {
       options = options.map(([type, weight]) => {
         const r = TYPE_RULES[type];
         const fit = Math.min(1, (Math.min(lw, r.maxW) * Math.min(lh, r.maxH)) / Math.max(12, big));
-        return [type, weight * (0.3 + fit)];
+        // The quay is where the fuel is kept: the few lots that reach it favour tank farms.
+        return [type, weight * (0.3 + fit) * (type === 'tankfarm' ? 4 : 1)];
       });
       const type = weightedPick(rng, options);
       if (type === 'pharmacy') wantsPharmacy = false;
       const r = TYPE_RULES[type];
       let bwid = Math.min(lw, r.maxW);
       let bhei = Math.min(lh, r.maxH);
-      if (bwid > r.minW && rng.chance(0.35)) bwid -= rng.int(1, Math.min(2, bwid - r.minW));
-      if (bhei > r.minH && rng.chance(0.35)) bhei -= rng.int(1, Math.min(2, bhei - r.minH));
+      // The very big types keep (nearly) the whole lot; the small ones vary.
+      const shrink = ['warehouse', 'factory', 'tankfarm', 'mall', 'tower'].includes(type) ? 0.1 : 0.35;
+      if (bwid > r.minW && rng.chance(shrink)) bwid -= rng.int(1, Math.min(2, bwid - r.minW));
+      if (bhei > r.minH && rng.chance(shrink)) bhei -= rng.int(1, Math.min(2, bhei - r.minH));
       // Shops and offices front the street; homes sit back in their lots.
       const flush = rng.chance(p.flush);
       const bx = lot.x0 + (flush ? 0 : rng.int(0, lw - bwid));
-      const by = lot.y0 + (flush ? 0 : rng.int(0, lh - bhei));
+      const by = type === 'tankfarm' ? lot.y1 + 1 - bhei : lot.y0 + (flush ? 0 : rng.int(0, lh - bhei));
       if (waterIn(bx, by, bwid, bhei) || roadIn(bx, by, bwid, bhei)) continue;
       const area = bwid * bhei;
       let floors;
       if ((type === 'office' || type === 'hotel') && area >= 70) floors = rng.int(SPEC[type].floors[1] - 1, SPEC[type].floors[1] + 2);
+      else if (type === 'tower') floors = rng.int(SPEC.tower.floors[0] + 2 + Math.floor(area / 12), SPEC.tower.floors[1] + 2);
       else if (type === 'apartment' && area >= 40) floors = rng.int(3, 6);
       addBuilding(bx, by, bwid, bhei, type, { zone, floors });
     }
@@ -1153,6 +1280,8 @@ export function createCity(seed = 7) {
   };
   cluster(blocks.filter((b) => b.kind === 'houses'), 3, HOUSING_NAMES);
   cluster(blocks.filter((b) => b.kind === 'industry'), 3, INDUSTRY_NAMES);
+
+  rebalanceSizes(buildings);
 
   const bays1 = BAYS.map((b) => ({ x: b.x * TILE, y: b.y * TILE, station: 0 }));
   const bays2 = BAYS.map((b) => ({

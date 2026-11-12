@@ -98,6 +98,25 @@ Selling returns 60% of the price. Every incident carries its own reward:
 | Major block fire | $1,800 |
 | Forest fire (major) | $2,200 |
 
+### Buildings: small to very large
+
+The city is meant to be about **50% small buildings** (houses, small shops, pharmacies), **30% medium** (apartment blocks,
+bigger shops, villas), **12% large** (flats, offices, hotels, schools, warehouses) and **8% very large and rare**: **office
+towers** (twelve to twenty-six storeys, with a helipad ring and a mast), **shopping centres**, **factories** (with chimney
+stacks), **fuel tank farms** on the quay, and the biggest warehouses. Size is the footprint times the storeys; a final pass adds
+storeys to buildings just under a class boundary until the mix is on target. **Commercial buildings (shops, offices, hotels,
+towers) line the river**; industry is by the sea.
+
+### How hard a fire is to fight
+
+- **Size:** a small house is easy (water works almost twice as well as on an average building); a big or very large building is
+  hard once the fire has taken hold (a third to half as well).
+- **Early response:** the size only counts as the fire takes hold. A fire in a big building is still easy in its first minute or
+  so, so a **fast response keeps a big fire easy**.
+- **Neglect:** a fire nobody fights for a while (about seventy seconds, half that once it is roaring) takes hold of the whole
+  building: the log says so, and from then on it is much harder, whatever its size. That only eases slowly once water is on it.
+- The incident list and the building card show **Easy / Moderate / Hard / Very hard** for each fire, and why.
+
 ### Districts and their calls
 
 The city is zoned like a real one, and the calls depend on where they come from (they start near your
@@ -106,10 +125,10 @@ the dock or Station 2 is open or the shift is well along):
 
 | District | Where | Calls |
 |---|---|---|
-| **Housing** (green lawns) | the neighbourhoods round the shopping streets: houses, flats, a pharmacy now and then | **Kitchen fire** ($330; the family may be trapped upstairs), **apartment block fire** ($560; three to six residents trapped), **gas explosion** ($460; the house is alight and two people are hurt), a resident who collapsed at home, a resident locked in behind a door |
+| **Housing** (green lawns) | the neighbourhoods round the shopping streets: houses, **apartment blocks west of the river** and **villas with big gardens east of it**, a pharmacy and a school now and then | **Kitchen fire** ($330; the family may be trapped upstairs), **apartment block fire** ($560; three to six residents trapped), **gas explosion** ($460; the house is alight and two people are hurt), a resident who collapsed at home, a resident locked in behind a door |
 | **Business districts** (pale paving) | round the seven commercial centres: offices, hotels, a few shops | **Office fire** ($650) and **hotel fire** ($720) with staff and guests trapped on the upper floors, **lift rescues** ($380), a worker who collapsed at the office; the major incident is a **high-rise fire** ($2,400, four to eight trapped) |
 | **Shopping streets** | a ring of shops and flats round each centre | **Shopping-street fire**: the whole terrace goes up ($760 shared), a shopper who fainted |
-| **Industrial** (dark yards) | on the water: the quay rows along the sea and the river banks. Big warehouses with yards | **Chemical fire** ($1,400; toxic smoke, spreads further and faster, may explode), **dockside fuel fire** ($1,550) on the waterfront, where a fireboat can reach it, an **industrial accident** (a worker crushed by machinery), a worker pinned under a fallen load, **a dock worker who has fallen off the quay** (divers); the major incident is an **industrial fire** at a works or a **fuel depot** on the waterfront |
+| **Industrial** (dark yards) | **by the sea**: the quay rows along the harbour. Big warehouses, factories and, right on the quay, fuel tank farms | **Chemical fire** ($1,400; toxic smoke, spreads further and faster, may explode), **dockside fuel fire** ($1,550) on the waterfront, where a fireboat can reach it, an **industrial accident** (a worker crushed by machinery), a worker pinned under a fallen load, **a dock worker who has fallen off the quay** (divers); the major incident is an **industrial fire** at a works or a **fuel depot** on the waterfront |
 
 The incident list and the building card show the kind of call (and the district) so you know what you
 are driving into. The minimap is tinted by district.

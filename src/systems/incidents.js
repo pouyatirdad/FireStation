@@ -144,6 +144,29 @@ function structureFire(state) {
     });
   }
 
+  // The very big buildings have their own stories, wherever they stand.
+  if (b.type === 'tower') {
+    const n = rng.int(3, 7);
+    return scenario(state, b, {
+      label: 'High-rise fire', kind: 'tower', fire: 0.2, trapped: n,
+      text: `High-rise fire in ${where} — ${n} people trapped above the fire in ${b.name}`,
+    });
+  }
+  if (b.type === 'mall') {
+    const n = rng.int(4, 8);
+    return scenario(state, b, {
+      label: 'Shopping centre fire', kind: 'mall', fire: 0.25, trapped: n,
+      text: `Shopping centre fire — ${n} shoppers cut off inside ${b.name}`,
+    });
+  }
+  if (b.type === 'school') {
+    const n = rng.int(2, 4);
+    return scenario(state, b, {
+      label: 'School fire', kind: 'school', fire: 0.2, trapped: n,
+      text: `School fire at ${b.name} — the pupils are out, ${n} staff are still inside`,
+    });
+  }
+
   if (b.zone === 'company') {
     if (b.type === 'hotel') {
       const n = rng.int(2, 5);
@@ -161,7 +184,15 @@ function structureFire(state) {
     }
   }
 
-  if (b.zone === 'industrial' && b.type === 'warehouse') {
+  if (b.type === 'tankfarm') {
+    b.hazmat = true;
+    return scenario(state, b, {
+      label: 'Fuel tank fire', kind: 'dockFuel', fire: 0.45,
+      text: `Fuel tank fire at ${b.name} — it burns hot, will spread and may explode; a fireboat can reach it`,
+    });
+  }
+
+  if (b.zone === 'industrial' && (b.type === 'warehouse' || b.type === 'factory')) {
     if (rng.chance(0.3)) {
       // An accident, not a fire: somebody is badly hurt in the works.
       b.incidentLabel = 'Industrial accident';
@@ -217,22 +248,26 @@ function blockFire(state, count) {
 }
 
 function rescueJob(state) {
-  const building = pick(state, ['office', 'hotel', 'apartment', 'shop', 'warehouse']);
+  const building = pick(state, ['office', 'hotel', 'apartment', 'shop', 'warehouse', 'tower', 'mall', 'factory']);
   if (!building) return null;
   const n = state.rng.int(1, 2);
   building.trapped = n;
   building.incidentType = 'rescue';
-  const lift = building.type === 'office' || building.type === 'hotel';
+  const lift = building.type === 'office' || building.type === 'hotel' || building.type === 'tower';
   building.reward = price(state, lift ? 'lift' : 'rescue');
   const text = {
     office: `Lift failure — ${n} stuck between floors at ${building.name}`,
+    tower: `Lift failure — ${n} stuck high up in ${building.name}`,
+    mall: `Escalator accident — a shopper is trapped at ${building.name}`,
+    factory: `Worker caught in a machine at ${building.name}`,
     hotel: `Lift failure — ${n} guests stuck at ${building.name}`,
     apartment: `Resident collapsed behind a locked door — ${building.name}`,
     shop: `Shelving has collapsed on a customer — ${building.name}`,
     warehouse: `Worker pinned under a fallen load — ${building.name}`,
   }[building.type];
   building.incidentLabel = {
-    office: 'Lift rescue', hotel: 'Lift rescue', apartment: 'Locked-in resident', shop: 'Collapse rescue', warehouse: 'Industrial rescue',
+    office: 'Lift rescue', tower: 'Lift rescue', hotel: 'Lift rescue', apartment: 'Locked-in resident', shop: 'Collapse rescue', warehouse: 'Industrial rescue',
+    mall: 'Escalator rescue', factory: 'Industrial rescue',
   }[building.type];
   addEvent(state, text ?? `Person reported trapped — ${building.name}`, 'warn');
   return building;
@@ -240,7 +275,7 @@ function rescueJob(state) {
 
 function industrialFire(state) {
   // A works or a quay warehouse if one is in reach, else whatever is big.
-  const works = pickZone(state, 'industrial', ['warehouse']);
+  const works = pickZone(state, 'industrial', ['warehouse', 'factory', 'tankfarm']);
   if (works) {
     works.hazmat = true;
     works.reward = price(state, works.waterfront ? 'dockFuel' : 'industrial');
@@ -271,7 +306,7 @@ function industrialFire(state) {
 
 /** A tall office or hotel in a business district, with people on every floor. */
 function towerFire(state) {
-  const tower = pickZone(state, 'company', ['office', 'hotel']);
+  const tower = pickZone(state, 'company', ['tower']) ?? pickZone(state, 'company', ['office', 'hotel', 'mall']);
   if (!tower || tower.floors < 5) return bigBlockFire(state);
   const n = state.rng.int(4, 8);
   tower.trapped = n;
@@ -323,7 +358,7 @@ function forestFire(state) {
 
 function medicalCall(state) {
   if (state.patients.filter((p) => !p.treated).length >= 5) return null;
-  const building = pick(state, ['house', 'apartment', 'office', 'hotel', 'shop', 'pharmacy']);
+  const building = pick(state, ['house', 'villa', 'apartment', 'office', 'tower', 'hotel', 'shop', 'mall', 'school', 'pharmacy']);
   if (!building) return null;
   const reason = {
     housing: 'Resident collapsed at home — suspected cardiac arrest at',

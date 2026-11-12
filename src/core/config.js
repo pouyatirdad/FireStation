@@ -42,6 +42,7 @@ export const CONFIG = {
     value: {
       house: 0.8, apartment: 1.2, shop: 1, pharmacy: 1.1, office: 1.6,
       hotel: 1.8, warehouse: 1.3, hospital: 2.2, station: 2,
+      villa: 1.4, tower: 2.4, mall: 1.9, factory: 1.7, school: 1.5, tankfarm: 1.6,
     },
     budget: {
       hourEvery: 120, // real seconds per game hour (60 / clockRate)
@@ -236,6 +237,16 @@ export const CONFIG = {
     spreadChance: 0.06,
     spreadRange: 2.2, // tile gap between footprints that can catch
     outAt: 0.02,
+    // How hard a fire is to put out. A small house is easy; a big building is hard
+    // once the fire has taken hold, but an early fire in it is still easy; and a
+    // fire nobody fights takes hold, which only eases slowly once water is on it.
+    sizeEasy: 0.55, // resistance of a small house (water works this many times better)
+    sizeHard: 2.0, // resistance of a big building with a fire that has taken hold
+    sizeRange: [18, 168], // building mass (footprint x floors) from "small" to "big"
+    earlyShare: 0.15, // share of the size penalty that applies to a fire that has only just started
+    neglectTime: 70, // seconds without water for a fire to take hold completely
+    neglectHard: 1.5, // extra resistance (a share of it) at full neglect
+    neglectEase: 0.25, // how fast neglect eases while water is on it, relative to how it builds
     firstAlarm: 18, // seconds of calm before the first call
     alarmBase: 50, // seconds between calls at the start
     alarmMin: 28,
@@ -269,7 +280,7 @@ export const CONFIG = {
       crash: 250, chain: 700, pileup: 1800,
       // Calls that belong to one kind of district.
       kitchen: 330, gas: 460, apartment: 560, office: 650, hotel: 720, lift: 380, shopRow: 760,
-      chemical: 1400, dockFuel: 1550, tower: 2400, trapped: 400,
+      chemical: 1400, dockFuel: 1550, tower: 2400, trapped: 400, mall: 900, school: 700,
     },
     crashCall: 0.16, // share of small calls that are a traffic accident
     drownCall: 0.1, // share of small calls that are someone in the water

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { createGame, startShift, update, commandDispatch, orderEngine } from '../src/systems/game.js';
-import { ignite, updateFire } from '../src/systems/fire.js';
+import { ignite, updateFire, fireResistance, fireDifficulty } from '../src/systems/fire.js';
 import { CONFIG } from '../src/core/config.js';
 
 const step = (state, seconds, dt = 1 / 30) => {
@@ -115,4 +115,98 @@ test('the engine never drives through a building and stops beside the target', (
     if (state.engines[0].path.length === 0 && state.engines[0].arrived) break;
   }
   assert.equal(state.engines[0].arrived, true, 'engine never arrived');
+});
+
+// ----------------------------------------------------- how hard a fire is ---
+
+function bySize(state, cls, types = null) {
+  return state.buildings.find((b) => b.sizeClass === cls && b.state === 'ok' && (!types || types.includes(b.type)));
+}
+
+/** Seconds of water at a steady rate to put out a fire that starts at `fire`, after `dry` seconds of burning unfought. */
+function timeToPutOut(building, { dry = 0, fire = 0.3, power = 0.25 } = {}) {
+  const state = createGame(7);
+  state.running = true;
+  const b = state.buildings.find((x) => x.id === building.id);
+  ignite(state, b, 'test');
+  b.integrity = b.maxIntegrity = 1e9;
+  b.fire = fire;
+  for (let t = 0; t < dry; t += 1 / 30) {
+    state.streams.length = 0;
+    updateFire(state, 1 / 30);
+  }
+  let t = 0;
+  while (b.state === 'burning' && t < 600) {
+    state.streams = [{ targetId: b.id, power }];
+    updateFire(state, 1 / 30);
+    t += 1 / 30;
+  }
+  return b.state === 'burning' ? Infinity : t;
+}
+
+test('a small house is easy to put out and a big building is hard once the fire has taken hold', () => {
+  const state = createGame(7);
+  const house = bySize(state, 'small', ['house']);
+  const tower = bySize(state, 'huge', ['tower', 'warehouse', 'factory', 'mall']);
+  assert.ok(house && tower);
+  house.fire = 0.9;
+  tower.fire = 0.9;
+  assert.ok(fireResistance(house) < 0.8, 'house: ' + fireResistance(house));
+  assert.ok(fireResistance(tower) > 1.7, 'tower: ' + fireResistance(tower));
+  assert.equal(fireDifficulty(house).label, 'Easy');
+  assert.ok(['Hard', 'Very hard'].includes(fireDifficulty(tower).label));
+  // And it takes much longer to put the big one out with the same water.
+  const a = timeToPutOut(house, { fire: 0.6 });
+  const b = timeToPutOut(tower, { fire: 0.6 });
+  assert.ok(b > a * 2, `house ${a.toFixed(1)}s, big building ${b.toFixed(1)}s`);
+});
+
+test('a big building is still easy while the fire is early: a fast response keeps it easy', () => {
+  const state = createGame(7);
+  const big = bySize(state, 'huge', ['tower', 'warehouse', 'factory', 'mall']);
+  big.state = 'burning';
+  big.neglect = 0;
+  big.fire = 0.15;
+  const early = fireResistance(big);
+  big.fire = 0.9;
+  const late = fireResistance(big);
+  assert.ok(early < 1.3, 'early ' + early);
+  assert.ok(late > early * 1.5, `early ${early.toFixed(2)} late ${late.toFixed(2)}`);
+  // Water inside half a minute is far quicker than after a long delay.
+  const fast = timeToPutOut(big, { dry: 8, fire: 0.2 });
+  const slow = timeToPutOut(big, { dry: 90, fire: 0.2 });
+  assert.ok(fast * 2 < slow, `fast ${fast.toFixed(1)}s, slow ${slow.toFixed(1)}s`);
+});
+
+test('a fire nobody fights takes hold, and that does not ease quickly once water arrives', () => {
+  const state = createGame(7);
+  state.running = true;
+  const b = bySize(state, 'medium', ['apartment', 'shop']);
+  ignite(state, b, 'test');
+  b.integrity = b.maxIntegrity = 1e9;
+  const start = fireResistance(b);
+  for (let i = 0; i < 30 * 40; i++) {
+    state.streams.length = 0;
+    updateFire(state, 1 / 30);
+    b.fire = Math.max(b.fire, 0.3);
+  }
+  assert.ok(b.neglect > 0.4, 'neglect ' + b.neglect);
+  assert.ok(fireResistance(b) > start * 1.4, 'resistance barely rose');
+  // Ten seconds of water (the fire kept alight) only eases it a little.
+  const taken = b.neglect;
+  for (let i = 0; i < 30 * 10; i++) {
+    state.streams = [{ targetId: b.id, power: 0.0001 }];
+    updateFire(state, 1 / 30);
+    b.fire = Math.max(b.fire, 0.3);
+  }
+  assert.ok(b.neglect > taken * 0.85, `neglect fell from ${taken.toFixed(2)} to ${b.neglect.toFixed(2)} too quickly`);
+  assert.ok(state.events.some((e) => e.text.includes('taken hold')), 'no warning that it has taken hold');
+});
+
+test('a late fire is harder than an early one, for a small building too', () => {
+  const state = createGame(7);
+  const house = bySize(state, 'small', ['house']);
+  const early = timeToPutOut(house, { dry: 5, fire: 0.3 });
+  const late = timeToPutOut(house, { dry: 80, fire: 0.3 });
+  assert.ok(late > early * 1.5, `early ${early.toFixed(1)}s late ${late.toFixed(1)}s`);
 });

@@ -2197,6 +2197,7 @@ const CONFIG = {
     value: {
       house: 0.8, apartment: 1.2, shop: 1, pharmacy: 1.1, office: 1.6,
       hotel: 1.8, warehouse: 1.3, hospital: 2.2, station: 2,
+      villa: 1.4, tower: 2.4, mall: 1.9, factory: 1.7, school: 1.5, tankfarm: 1.6,
     },
     budget: {
       hourEvery: 120, // real seconds per game hour (60 / clockRate)
@@ -2391,6 +2392,16 @@ const CONFIG = {
     spreadChance: 0.06,
     spreadRange: 2.2, // tile gap between footprints that can catch
     outAt: 0.02,
+    // How hard a fire is to put out. A small house is easy; a big building is hard
+    // once the fire has taken hold, but an early fire in it is still easy; and a
+    // fire nobody fights takes hold, which only eases slowly once water is on it.
+    sizeEasy: 0.55, // resistance of a small house (water works this many times better)
+    sizeHard: 2.0, // resistance of a big building with a fire that has taken hold
+    sizeRange: [18, 168], // building mass (footprint x floors) from "small" to "big"
+    earlyShare: 0.15, // share of the size penalty that applies to a fire that has only just started
+    neglectTime: 70, // seconds without water for a fire to take hold completely
+    neglectHard: 1.5, // extra resistance (a share of it) at full neglect
+    neglectEase: 0.25, // how fast neglect eases while water is on it, relative to how it builds
     firstAlarm: 18, // seconds of calm before the first call
     alarmBase: 50, // seconds between calls at the start
     alarmMin: 28,
@@ -2424,7 +2435,7 @@ const CONFIG = {
       crash: 250, chain: 700, pileup: 1800,
       // Calls that belong to one kind of district.
       kitchen: 330, gas: 460, apartment: 560, office: 650, hotel: 720, lift: 380, shopRow: 760,
-      chemical: 1400, dockFuel: 1550, tower: 2400, trapped: 400,
+      chemical: 1400, dockFuel: 1550, tower: 2400, trapped: 400, mall: 900, school: 700,
     },
     crashCall: 0.16, // share of small calls that are a traffic accident
     drownCall: 0.1, // share of small calls that are someone in the water
@@ -2650,7 +2661,21 @@ const SPEC = {
   pharmacy: { floors: [1, 2], hp: [75, 100], risk: 0.85 },
   hospital: { floors: [3, 5], hp: [150, 190], risk: 0.55 },
   station: { floors: [2, 2], hp: [180, 180], risk: 0.7 },
+  // The very large buildings: rare, hard to fight once they have taken hold.
+  villa: { floors: [2, 3], hp: [85, 110], risk: 0.85 },
+  tower: { floors: [12, 24], hp: [210, 270], risk: 0.5 },
+  mall: { floors: [2, 3], hp: [150, 190], risk: 0.8 },
+  factory: { floors: [1, 3], hp: [140, 180], risk: 1.25 },
+  school: { floors: [2, 3], hp: [110, 140], risk: 0.7 },
+  tankfarm: { floors: [1, 1], hp: [160, 210], risk: 1.45 },
 };
+
+// Size classes by building mass (footprint x floors, the measure the fire logic
+// uses): the map is meant to be about half small buildings, three in ten medium,
+// one in eight large and one in twelve very large.
+const SIZE_CLASSES = [['small', 30], ['medium', 80], ['large', 200], ['huge', Infinity]];
+const buildingMass = (w, h, floors) => w * h * (0.7 + 0.15 * floors);
+const sizeClassOf = (mass) => SIZE_CLASSES.find(([, max]) => mass < max)[0];
 
 const ROOFS = {
   house: ['#7d5a4c', '#5f6368', '#6e5348', '#74706a'],
@@ -2662,13 +2687,24 @@ const ROOFS = {
   pharmacy: ['#cdd6d0', '#c4cfc8', '#d4dad4'],
   hospital: ['#d9dfe2', '#d0d8dc', '#dfe2e1'],
   station: ['#7e473d'],
+  villa: ['#8a4f3f', '#7d5a4c', '#94604a', '#6f4a3e'],
+  tower: ['#4a5663', '#55616d', '#434e5a'],
+  mall: ['#8d8f93', '#9a9c9f', '#7f8387'],
+  factory: ['#6c7276', '#797d79', '#5f676b'],
+  school: ['#8f6a52', '#9b7658', '#84624d'],
+  tankfarm: ['#8a8f93', '#7b8286', '#969b9e'],
 };
 
+// What is built in each kind of block (by lot style), with weights. The big
+// types only fit big lots, so the mix of sizes comes from these weights and the
+// lot sizes together.
 const KIND_TYPES = {
-  houses: [['house', 6], ['apartment', 1.2], ['shop', 0.4]],
-  downtown: [['office', 4], ['shop', 1.5], ['hotel', 2], ['apartment', 1]],
-  industry: [['warehouse', 6], ['office', 1], ['shop', 0.3]],
-  market: [['shop', 4], ['apartment', 2], ['house', 1]],
+  villa: [['villa', 8], ['house', 0.8], ['school', 0.15], ['apartment', 0.15]],
+  suburb: [['house', 8], ['apartment', 1.6], ['school', 0.12], ['shop', 0.3]],
+  flats: [['apartment', 5], ['house', 1.5], ['school', 0.4], ['shop', 0.4]],
+  downtown: [['office', 3.2], ['tower', 3], ['hotel', 1.8], ['mall', 1.8], ['apartment', 0.7], ['shop', 0.6]],
+  industry: [['warehouse', 4], ['factory', 3.5], ['tankfarm', 1.6], ['office', 0.4]],
+  market: [['shop', 4], ['apartment', 2.6], ['house', 0.6], ['hotel', 0.25]],
 };
 
 // How many people are inside at 07:00. Homes are nearly empty in the morning;
@@ -2683,6 +2719,12 @@ const OCCUPANTS = {
   pharmacy: [2, 7],
   hospital: [22, 46],
   station: [0, 0],
+  villa: [2, 6],
+  tower: [60, 150],
+  mall: [40, 110],
+  factory: [12, 40],
+  school: [40, 120],
+  tankfarm: [1, 4],
 };
 
 const NAMES = {
@@ -2731,6 +2773,32 @@ const NAMES = {
     'City Pharmacy', 'Healthwell Pharmacy', 'Green Cross Chemist', 'Corner Rx',
     'Harbor Apothecary', 'Wellspring Pharmacy', 'Lifeline Drugstore', 'Maple Pharmacy',
     'Northgate Chemist', 'Riverside Rx', 'Sunrise Pharmacy', 'Unity Medical Supply',
+  ],
+  villa: [
+    'Villa Rosa', 'The Willows', 'Ashgrove Villa', 'Cypress House', 'Villa Serena', 'The Laurels',
+    'Hillcrest Villa', 'Oakridge Manor', 'Villa Bianca', 'Rosewood House', 'The Cedars', 'Linden Villa',
+    'Villa Aurora', 'Meadowbank House', 'Thornfield', 'Brookside Villa',
+  ],
+  tower: [
+    'Meridian Tower', 'Halcyon Plaza', 'Pinnacle Tower', 'Cobalt Centre', 'Harbor Exchange',
+    'Beacon Tower', 'Keystone Plaza', 'Ardent House Tower', 'Northgate Tower', 'Union Square Tower',
+    'Granite Tower', 'Sterling Plaza', 'Vantage Tower', 'Crown Point',
+  ],
+  mall: [
+    'Harbor Mall', 'Northgate Galleria', 'Civic Arcade', 'Eastside Centre', 'Riverside Shopping Centre',
+    'Midtown Plaza', 'Old Town Arcade', 'The Pavilion',
+  ],
+  factory: [
+    'Vulcan Steelworks', 'Kessler Chemicals', 'Atlas Foundry', 'Redline Plastics', 'Tidewater Cannery',
+    'Ironbridge Engineering', 'Harbor Paint Works', 'Crane & Sons Mill', 'Southbank Refinery', 'Pier Nine Packaging',
+  ],
+  school: [
+    'Lincoln High School', 'St. Clair Academy', 'Maple Grove School', 'Westfield Primary', 'Riverside College',
+    'Holloway Secondary', 'Elmgrove School', 'Fairmount Academy',
+  ],
+  tankfarm: [
+    'Tidewater Fuel Terminal', 'South Quay Oil Depot', 'Harbor Bulk Storage', 'Dockside Fuel Farm',
+    'Ironbridge Tank Park', 'Freight Yard Fuel Depot',
   ],
   warehouse: [
     'Harbor Freight', 'Kessler Storage', 'Atlas Depot', 'Dockside Bonded',
@@ -2841,16 +2909,23 @@ const TYPE_RULES = {
   hotel: { minW: 6, minH: 6, maxW: 11, maxH: 10 },
   warehouse: { minW: 7, minH: 5, maxW: 24, maxH: 14 },
   pharmacy: { minW: 3, minH: 3, maxW: 6, maxH: 6 },
+  villa: { minW: 6, minH: 6, maxW: 8, maxH: 7 },
+  tower: { minW: 7, minH: 7, maxW: 11, maxH: 11 },
+  mall: { minW: 14, minH: 10, maxW: 22, maxH: 15 },
+  factory: { minW: 12, minH: 9, maxW: 24, maxH: 14 },
+  school: { minW: 10, minH: 8, maxW: 16, maxH: 11 },
+  tankfarm: { minW: 12, minH: 10, maxW: 20, maxH: 14 },
 };
 
 // How each kind of block is cut into lots: lot sizes, the lane between lots, how
 // often a lot is split further than it has to be, and how a building sits on it.
 const LOT_PARAMS = {
   suburb: { minW: 3, maxW: 5, minH: 4, maxH: 6, gap: [1, 1], split: 0.2, setback: [1, 2], flush: 0.15, empty: 0.06 },
-  flats: { minW: 5, maxW: 9, minH: 5, maxH: 9, gap: [1, 2], split: 0.15, setback: [1, 2], flush: 0.4, empty: 0.08 },
+  flats: { minW: 6, maxW: 12, minH: 6, maxH: 10, gap: [1, 2], split: 0.15, setback: [1, 2], flush: 0.4, empty: 0.08 },
+  villa: { minW: 7, maxW: 10, minH: 7, maxH: 9, gap: [2, 3], split: 0.15, setback: [2, 3], flush: 0.1, empty: 0.12 },
   market: { minW: 4, maxW: 7, minH: 5, maxH: 9, gap: [0, 1], split: 0.25, setback: [1, 1], flush: 0.8, empty: 0.04 },
-  downtown: { minW: 6, maxW: 14, minH: 6, maxH: 12, gap: [1, 2], split: 0.2, setback: [1, 1], flush: 0.6, empty: 0.12 },
-  industry: { minW: 9, maxW: 22, minH: 7, maxH: 13, gap: [2, 4], split: 0.15, setback: [1, 3], flush: 0.3, empty: 0.16 },
+  downtown: { minW: 8, maxW: 20, minH: 8, maxH: 15, gap: [1, 2], split: 0.2, setback: [1, 1], flush: 0.6, empty: 0.1 },
+  industry: { minW: 11, maxW: 22, minH: 9, maxH: 14, gap: [2, 3], split: 0.1, setback: [1, 2], flush: 0.3, empty: 0.08 },
 };
 
 /** Cut a rectangle into lots by repeated random splits, with a lane between neighbours. */
@@ -2952,7 +3027,9 @@ function buildBlocks(seed = 7) {
         99,
       );
       const roll = rng.float();
-      const waterfront = row >= lastRow - 3 || (col >= RIVER_COLS[0] && col <= RIVER_COLS[1] && row >= 1);
+      // Industry is on the sea front; the river banks are for business and shops.
+      const waterfront = row >= lastRow - 3;
+      const riverBank = col >= RIVER_COLS[0] && col <= RIVER_COLS[1] && row >= 1 && !waterfront;
       let kind;
       let zone;
       if (row === lastRow) kind = 'sea';
@@ -2965,11 +3042,14 @@ function buildBlocks(seed = 7) {
       else if (near === 0) kind = roll < 0.03 ? 'park' : 'downtown';
       else if (near === 1 && !waterfront) kind = roll < 0.55 ? 'downtown' : 'market';
       else if (waterfront) kind = near === 1 ? 'downtown' : 'industry';
+      else if (riverBank) kind = roll < 0.5 ? 'downtown' : 'market';
       else if (roll < 0.06) kind = 'park';
       else if (near === 2) kind = roll < 0.55 ? 'market' : 'houses';
       else kind = roll < 0.12 ? 'market' : 'houses';
       const woods = kind === 'forest' ? (zone === BIG_FOREST.zone ? 'pine' : 'mixed') : undefined;
-      grid.push({ col, row, x0, y0, x1, y1, kind, zone, woods, style: Math.floor(tileHash(col, row, 31) * 3) });
+      // Housing west of the river is apartment blocks, east of it villas.
+      const side = col <= RIVER_COLS[0] - 1 && col >= RIVER_COLS[0] - 5 ? 'west' : col >= RIVER_COLS[1] ? 'east' : null;
+      grid.push({ col, row, x0, y0, x1, y1, kind, zone, woods, waterfront, riverSide: side, style: Math.floor(tileHash(col, row, 31) * 3) });
     }
   }
 
@@ -3007,6 +3087,54 @@ function buildBlocks(seed = 7) {
     other.gone = true;
   }
   return { blocks: grid.filter((b) => !b.gone), removed };
+}
+
+// How the buildings of a city should split by size.
+const SIZE_TARGET = { small: 0.5, medium: 0.3, large: 0.12, huge: 0.08 };
+
+// The tallest each kind of building can be given (storeys).
+const FLOOR_CAP = {
+  house: 3, villa: 3, shop: 4, pharmacy: 3, apartment: 12, hotel: 14, office: 16, mall: 5,
+  school: 4, warehouse: 3, factory: 5, tower: 28,
+};
+
+/**
+ * Nudge the mix of sizes towards SIZE_TARGET: where a class has too few
+ * buildings, the ones just below its threshold get an extra storey or two
+ * (a taller block of flats, a three-storey shop, a bigger warehouse) until
+ * they cross it. Nothing changes footprint, so the layout is untouched.
+ */
+function rebalanceSizes(buildings) {
+  const list = buildings.filter((b) => b.type !== 'station' && b.type !== 'hospital');
+  const N = list.length;
+  const order = ['small', 'medium', 'large', 'huge'];
+  const upper = Object.fromEntries(SIZE_CLASSES.map(([name, max]) => [name, max]));
+  const count = (cls) => list.filter((b) => b.sizeClass === cls).length;
+  const setFloors = (b, floors) => {
+    b.occupants = Math.round(b.occupants * (floors / b.floors));
+    b.floors = floors;
+    b.elevation = 11 + floors * 5;
+    b.sizeClass = sizeClassOf(buildingMass(b.w, b.h, floors));
+  };
+  // Promote from the class below until `to` has its share.
+  for (const to of ['huge', 'large', 'medium']) {
+    const from = order[order.indexOf(to) - 1];
+    const want = Math.round(N * SIZE_TARGET[to]);
+    const threshold = upper[from];
+    const candidates = list
+      .filter((b) => b.sizeClass === from && FLOOR_CAP[b.type])
+      .map((b) => {
+        let f = b.floors;
+        while (f < FLOOR_CAP[b.type] && buildingMass(b.w, b.h, f) < threshold) f++;
+        return { b, f, ok: buildingMass(b.w, b.h, f) >= threshold, extra: f - b.floors };
+      })
+      .filter((c) => c.ok && c.extra > 0)
+      .sort((a, c) => a.extra - c.extra || buildingMass(c.b.w, c.b.h, c.b.floors) - buildingMass(a.b.w, a.b.h, a.b.floors));
+    for (const c of candidates) {
+      if (count(to) >= want) break;
+      setFloors(c.b, c.f);
+    }
+  }
 }
 
 function createCity(seed = 7) {
@@ -3182,6 +3310,8 @@ function createCity(seed = 7) {
       type,
       zone: extra.zone ?? 'civic',
       waterfront: false,
+      sizeClass: sizeClassOf(buildingMass(wid, hei, floors)),
+      hazmat: type === 'tankfarm' || (type === 'factory' && rng.chance(0.5)),
       name: extra.name ?? takeName(type),
       x,
       y,
@@ -3324,7 +3454,9 @@ function createCity(seed = 7) {
     if (kind === 'station' || kind === 'dock' || kind === 'sea') return;
 
     const zone = ZONE_OF[kind];
-    const variant = kind === 'houses' ? (block.style === 2 ? 'flats' : 'suburb') : kind;
+    const variant = kind === 'houses'
+      ? (block.riverSide === 'east' ? 'villa' : block.riverSide === 'west' || block.style === 2 ? 'flats' : 'suburb')
+      : kind;
     const p = LOT_PARAMS[variant];
     // The pavement round the block: a different width on each side.
     const side = () => rng.int(p.setback[0], p.setback[1]);
@@ -3356,8 +3488,10 @@ function createCity(seed = 7) {
         continue;
       }
       // Which buildings fit this lot.
-      let options = KIND_TYPES[kind].filter(([type]) => {
+      let options = KIND_TYPES[variant].filter(([type]) => {
         const r = TYPE_RULES[type];
+        // Fuel is stored on the quay itself, within reach of the water.
+        if (type === 'tankfarm' && (!block.waterfront || lot.y1 + 1 < SEA_Y - 7)) return false;
         return lw >= r.minW && lh >= r.minH;
       });
       if (wantsPharmacy && lw >= TYPE_RULES.pharmacy.minW && lh >= TYPE_RULES.pharmacy.minH) options = [['pharmacy', 1]];
@@ -3371,23 +3505,27 @@ function createCity(seed = 7) {
       options = options.map(([type, weight]) => {
         const r = TYPE_RULES[type];
         const fit = Math.min(1, (Math.min(lw, r.maxW) * Math.min(lh, r.maxH)) / Math.max(12, big));
-        return [type, weight * (0.3 + fit)];
+        // The quay is where the fuel is kept: the few lots that reach it favour tank farms.
+        return [type, weight * (0.3 + fit) * (type === 'tankfarm' ? 4 : 1)];
       });
       const type = weightedPick(rng, options);
       if (type === 'pharmacy') wantsPharmacy = false;
       const r = TYPE_RULES[type];
       let bwid = Math.min(lw, r.maxW);
       let bhei = Math.min(lh, r.maxH);
-      if (bwid > r.minW && rng.chance(0.35)) bwid -= rng.int(1, Math.min(2, bwid - r.minW));
-      if (bhei > r.minH && rng.chance(0.35)) bhei -= rng.int(1, Math.min(2, bhei - r.minH));
+      // The very big types keep (nearly) the whole lot; the small ones vary.
+      const shrink = ['warehouse', 'factory', 'tankfarm', 'mall', 'tower'].includes(type) ? 0.1 : 0.35;
+      if (bwid > r.minW && rng.chance(shrink)) bwid -= rng.int(1, Math.min(2, bwid - r.minW));
+      if (bhei > r.minH && rng.chance(shrink)) bhei -= rng.int(1, Math.min(2, bhei - r.minH));
       // Shops and offices front the street; homes sit back in their lots.
       const flush = rng.chance(p.flush);
       const bx = lot.x0 + (flush ? 0 : rng.int(0, lw - bwid));
-      const by = lot.y0 + (flush ? 0 : rng.int(0, lh - bhei));
+      const by = type === 'tankfarm' ? lot.y1 + 1 - bhei : lot.y0 + (flush ? 0 : rng.int(0, lh - bhei));
       if (waterIn(bx, by, bwid, bhei) || roadIn(bx, by, bwid, bhei)) continue;
       const area = bwid * bhei;
       let floors;
       if ((type === 'office' || type === 'hotel') && area >= 70) floors = rng.int(SPEC[type].floors[1] - 1, SPEC[type].floors[1] + 2);
+      else if (type === 'tower') floors = rng.int(SPEC.tower.floors[0] + 2 + Math.floor(area / 12), SPEC.tower.floors[1] + 2);
       else if (type === 'apartment' && area >= 40) floors = rng.int(3, 6);
       addBuilding(bx, by, bwid, bhei, type, { zone, floors });
     }
@@ -3710,6 +3848,8 @@ function createCity(seed = 7) {
   cluster(blocks.filter((b) => b.kind === 'houses'), 3, HOUSING_NAMES);
   cluster(blocks.filter((b) => b.kind === 'industry'), 3, INDUSTRY_NAMES);
 
+  rebalanceSizes(buildings);
+
   const bays1 = BAYS.map((b) => ({ x: b.x * TILE, y: b.y * TILE, station: 0 }));
   const bays2 = BAYS.map((b) => ({
     x: (b.x - APRON.x0 + apron2.x0) * TILE,
@@ -3767,7 +3907,7 @@ function createCity(seed = 7) {
   };
 }
 
-return { CITY_W, CITY_H, CITY_NAME, V_ROADS, H_ROADS, SEA_Y, RIVER_HALF_WIDTH, riverCentre, APRON, createCity };
+return { CITY_W, CITY_H, CITY_NAME, V_ROADS, H_ROADS, SEA_Y, RIVER_HALF_WIDTH, riverCentre, APRON, SIZE_CLASSES, buildingMass, sizeClassOf, SIZE_TARGET, createCity };
 })();
 
 // ---- src/core/hotkeys.js ----
@@ -4969,7 +5109,7 @@ return { createWind, updateWind, windVector, downwindFactor, alignment, windFrom
 // ---- src/systems/fire.js ----
 __m["src/systems/fire.js"] = (function () {
 const { CONFIG, TILE } = __m["src/core/config.js"];
-const { rectsTouch } = __m["src/core/math.js"];
+const { clamp, lerp, rectsTouch } = __m["src/core/math.js"];
 const { addEvent } = __m["src/systems/events.js"];
 const { evacuate } = __m["src/systems/civilians.js"];
 const { downwindFactor } = __m["src/systems/wind.js"];
@@ -4996,10 +5136,40 @@ function activeFires(state) {
   return list;
 }
 
+/**
+ * How many times harder than a plain fire this one is to knock down.
+ *  - Size: a small house is easy (below 1); a big building is hard (up to 2).
+ *  - Stage: the size only counts as the fire takes hold. An early fire in a big
+ *    building is still easy, so a fast response keeps it that way.
+ *  - Neglect: a fire nobody has fought for a while has taken hold of the whole
+ *    building and is much harder, whatever its size.
+ */
+function fireResistance(b) {
+  const F = CONFIG.fire;
+  const mass = b.w * b.h * (0.7 + 0.15 * (b.floors ?? 1));
+  const sizeFactor = lerp(F.sizeEasy, F.sizeHard, clamp((mass - F.sizeRange[0]) / (F.sizeRange[1] - F.sizeRange[0]), 0, 1));
+  const neglect = b.neglect ?? 0;
+  const stage = clamp(Math.max(neglect, (b.fire - 0.15) / 0.6), 0, 1);
+  // Only the part of the size penalty above 1 is held back early on.
+  const size = sizeFactor > 1 ? 1 + (sizeFactor - 1) * (F.earlyShare + (1 - F.earlyShare) * stage) : sizeFactor;
+  return size * (1 + F.neglectHard * neglect);
+}
+
+/** A word for how hard a fire is to fight, for the HUD. */
+function fireDifficulty(b) {
+  const r = fireResistance(b);
+  if (r < 0.8) return { label: 'Easy', tone: 'good', value: r };
+  if (r < 1.35) return { label: 'Moderate', tone: '', value: r };
+  if (r < 2.2) return { label: 'Hard', tone: 'warn', value: r };
+  return { label: 'Very hard', tone: 'bad', value: r };
+}
+
 function ignite(state, building, cause = 'alarm') {
   if (!building || building.state !== 'ok') return false;
   building.state = 'burning';
   building.dryTime = 0;
+  building.neglect = 0;
+  building.tookHold = false;
   building.runaway = false;
   building.fire = Math.max(building.fire, 0.1);
   building.spreadTimer = CONFIG.fire.spreadEvery;
@@ -5117,12 +5287,25 @@ function updateFire(state, dt) {
     // Time spent burning with no water on it.
     b.dryTime = water > 0 ? Math.max(0, (b.dryTime ?? 0) - dt * 2) : (b.dryTime ?? 0) + dt;
     if (b.dryTime < 20) b.runaway = false;
+    // A fire nobody is fighting takes hold (twice as fast once it is roaring); it
+    // eases only slowly when water is on it.
+    const T = CONFIG.fire.neglectTime;
+    b.neglect = clamp(
+      (b.neglect ?? 0) + (water > 0 ? (-dt * CONFIG.fire.neglectEase) / T : (dt / T) * (b.fire >= 0.5 ? 2 : 1)),
+      0,
+      1,
+    );
+    if (b.neglect >= 0.5 && !b.tookHold) {
+      b.tookHold = true;
+      addEvent(state, `The fire at ${b.name} has taken hold — it will be hard to put out now`, 'warn');
+    }
+    const resistance = fireResistance(b);
     b.fire = Math.min(
       1,
       b.fire + CONFIG.fire.growth * dt * (0.75 + 0.5 * (1 - b.fire)) * b.risk,
     );
     if (water > 0) {
-      b.fire -= water * dt * 1.7;
+      b.fire -= (water * dt * 1.7) / resistance;
       b.integrity = Math.min(b.maxIntegrity, b.integrity + 2.5 * dt);
     }
     b.fire = Math.max(0, b.fire);
@@ -5140,7 +5323,7 @@ function updateFire(state, dt) {
     }
 
     // An industrial fire left to run can take the whole building up with it.
-    if (b.type === 'warehouse' && b.fire >= (b.hazmat ? 0.7 : 0.85) && !b.exploded && state.rng.float() < dt * (b.hazmat ? 0.08 : 0.04)) {
+    if ((b.type === 'warehouse' || b.type === 'factory' || b.type === 'tankfarm') && b.fire >= (b.hazmat ? 0.7 : 0.85) && !b.exploded && state.rng.float() < dt * (b.hazmat ? 0.08 : 0.04)) {
       b.exploded = true;
       state.onExplosion?.(b);
     }
@@ -5153,7 +5336,7 @@ function updateFire(state, dt) {
   }
 }
 
-return { buildingRect, activeFires, ignite, unattendedFactor, updateFire };
+return { buildingRect, activeFires, fireResistance, fireDifficulty, ignite, unattendedFactor, updateFire };
 })();
 
 // ---- src/systems/effects.js ----
@@ -8284,10 +8467,12 @@ const { CONFIG } = __m["src/core/config.js"];
 const { formatClock } = __m["src/core/math.js"];
 const { freeBay, hydrantInReach, ownsStation, toolCount, toolsFree, totalBays, totalBerths, vehicleTools } = __m["src/systems/units.js"];
 const { contractProgress } = __m["src/systems/contracts.js"];
+const { fireDifficulty } = __m["src/systems/fire.js"];
 const { TRAINING_LABEL, hourlyBudget } = __m["src/systems/economy.js"];
 const { windLabel } = __m["src/systems/wind.js"];
 // All DOM: the top bar, the selection card, the dispatch log, the unit roster
 // and the overlay screens. The renderer never touches an element.
+
 
 
 
@@ -8305,6 +8490,12 @@ const TYPE_LABEL = {
   office: 'Office',
   hotel: 'Hotel',
   warehouse: 'Warehouse',
+  villa: 'Villa',
+  tower: 'Office tower',
+  mall: 'Shopping centre',
+  factory: 'Factory',
+  school: 'School',
+  tankfarm: 'Fuel tank farm',
   pharmacy: 'Pharmacy',
   hospital: 'Hospital',
   station: 'Fire station',
@@ -8727,7 +8918,7 @@ function collectIncidents(state) {
     if (b.state === 'burning') {
       list.push({
         kind: 'building', id: b.id, tone: 'fire', urgency: 600 + b.fire * 100 + (b.trapped ?? 0) * 40 + (b.dryTime ?? 0) / 4,
-        title: b.name, meta: (b.incidentLabel ? b.incidentLabel + ' · ' : '') + Math.round(b.fire * 100) + '% burning' + ((b.trapped ?? 0) > 0 ? ' · ' + b.trapped + ' trapped' : '') + (b.runaway ? ' · out of control' : ''),
+        title: b.name, meta: (b.incidentLabel ? b.incidentLabel + ' · ' : '') + Math.round(b.fire * 100) + '% burning · ' + fireDifficulty(b).label + ((b.trapped ?? 0) > 0 ? ' · ' + b.trapped + ' trapped' : '') + (b.runaway ? ' · out of control' : ''),
         handled: claimed((e) => e.targetId === b.id) || state.streams.some((st) => st.targetId === b.id),
       });
     } else if ((b.trapped ?? 0) > 0 && b.state !== 'rubble') {
@@ -9040,6 +9231,8 @@ function crewCard(state, crew) {
     </div>`;
 }
 
+const SIZE_LABEL = { small: 'Small building', medium: 'Medium building', large: 'Large building', huge: 'Very large building' };
+
 const ZONE_LABEL = {
   housing: 'Housing',
   company: 'Business district',
@@ -9047,6 +9240,17 @@ const ZONE_LABEL = {
   industrial: 'Industrial',
   civic: 'Civic',
 };
+
+/** How hard this fire is to fight, and why: size, how far it has taken hold. */
+function difficultyRow(b) {
+  const d = fireDifficulty(b);
+  const why = [];
+  if ((b.neglect ?? 0) >= 0.5) why.push('it has taken hold');
+  else if ((b.neglect ?? 0) >= 0.2) why.push('it is taking hold — get water on it');
+  if (b.sizeClass === 'huge' || b.sizeClass === 'large') why.push(b.fire < 0.3 && (b.neglect ?? 0) < 0.2 ? 'big, but still early: act now' : 'a big building');
+  if (b.sizeClass === 'small') why.push('small building');
+  return `<div class="sel__status sel__difficulty" data-tone="${d.tone}"><i></i>Fire fight: ${d.label}${why.length ? ' — ' + why.join(', ') : ''}</div>`;
+}
 
 function buildingCard(state, building) {
   const type = TYPE_LABEL[building.type] ?? 'Building';
@@ -9074,7 +9278,8 @@ function buildingCard(state, building) {
     ${building.state !== 'rubble' ? `
       <div class="bar__label"><span>Structure</span><span>${healthValue}%</span></div>
       <div class="bar bar--health"><i style="width:${healthPct}"></i></div>` : ''}
-    <p class="sel__meta">${esc(type)} · ${building.floors} floor${building.floors === 1 ? '' : 's'}${trapped > 0 ? '<br>A crew at the building will bring them out.' : ''}</p>
+    ${burning ? difficultyRow(building) : ''}
+    <p class="sel__meta">${esc(type)} · ${building.floors} floor${building.floors === 1 ? '' : 's'} · ${SIZE_LABEL[building.sizeClass] ?? ''}${trapped > 0 ? '<br>A crew at the building will bring them out.' : ''}</p>
     <div class="sel__actions">
       ${burning ? '<button type="button" class="btn" data-action="dispatch">Dispatch<kbd>D</kbd></button>' : ''}
       <button type="button" class="btn" data-action="center">Locate<kbd>C</kbd></button>
@@ -10227,6 +10432,29 @@ function structureFire(state) {
     });
   }
 
+  // The very big buildings have their own stories, wherever they stand.
+  if (b.type === 'tower') {
+    const n = rng.int(3, 7);
+    return scenario(state, b, {
+      label: 'High-rise fire', kind: 'tower', fire: 0.2, trapped: n,
+      text: `High-rise fire in ${where} — ${n} people trapped above the fire in ${b.name}`,
+    });
+  }
+  if (b.type === 'mall') {
+    const n = rng.int(4, 8);
+    return scenario(state, b, {
+      label: 'Shopping centre fire', kind: 'mall', fire: 0.25, trapped: n,
+      text: `Shopping centre fire — ${n} shoppers cut off inside ${b.name}`,
+    });
+  }
+  if (b.type === 'school') {
+    const n = rng.int(2, 4);
+    return scenario(state, b, {
+      label: 'School fire', kind: 'school', fire: 0.2, trapped: n,
+      text: `School fire at ${b.name} — the pupils are out, ${n} staff are still inside`,
+    });
+  }
+
   if (b.zone === 'company') {
     if (b.type === 'hotel') {
       const n = rng.int(2, 5);
@@ -10244,7 +10472,15 @@ function structureFire(state) {
     }
   }
 
-  if (b.zone === 'industrial' && b.type === 'warehouse') {
+  if (b.type === 'tankfarm') {
+    b.hazmat = true;
+    return scenario(state, b, {
+      label: 'Fuel tank fire', kind: 'dockFuel', fire: 0.45,
+      text: `Fuel tank fire at ${b.name} — it burns hot, will spread and may explode; a fireboat can reach it`,
+    });
+  }
+
+  if (b.zone === 'industrial' && (b.type === 'warehouse' || b.type === 'factory')) {
     if (rng.chance(0.3)) {
       // An accident, not a fire: somebody is badly hurt in the works.
       b.incidentLabel = 'Industrial accident';
@@ -10300,22 +10536,26 @@ function blockFire(state, count) {
 }
 
 function rescueJob(state) {
-  const building = pick(state, ['office', 'hotel', 'apartment', 'shop', 'warehouse']);
+  const building = pick(state, ['office', 'hotel', 'apartment', 'shop', 'warehouse', 'tower', 'mall', 'factory']);
   if (!building) return null;
   const n = state.rng.int(1, 2);
   building.trapped = n;
   building.incidentType = 'rescue';
-  const lift = building.type === 'office' || building.type === 'hotel';
+  const lift = building.type === 'office' || building.type === 'hotel' || building.type === 'tower';
   building.reward = price(state, lift ? 'lift' : 'rescue');
   const text = {
     office: `Lift failure — ${n} stuck between floors at ${building.name}`,
+    tower: `Lift failure — ${n} stuck high up in ${building.name}`,
+    mall: `Escalator accident — a shopper is trapped at ${building.name}`,
+    factory: `Worker caught in a machine at ${building.name}`,
     hotel: `Lift failure — ${n} guests stuck at ${building.name}`,
     apartment: `Resident collapsed behind a locked door — ${building.name}`,
     shop: `Shelving has collapsed on a customer — ${building.name}`,
     warehouse: `Worker pinned under a fallen load — ${building.name}`,
   }[building.type];
   building.incidentLabel = {
-    office: 'Lift rescue', hotel: 'Lift rescue', apartment: 'Locked-in resident', shop: 'Collapse rescue', warehouse: 'Industrial rescue',
+    office: 'Lift rescue', tower: 'Lift rescue', hotel: 'Lift rescue', apartment: 'Locked-in resident', shop: 'Collapse rescue', warehouse: 'Industrial rescue',
+    mall: 'Escalator rescue', factory: 'Industrial rescue',
   }[building.type];
   addEvent(state, text ?? `Person reported trapped — ${building.name}`, 'warn');
   return building;
@@ -10323,7 +10563,7 @@ function rescueJob(state) {
 
 function industrialFire(state) {
   // A works or a quay warehouse if one is in reach, else whatever is big.
-  const works = pickZone(state, 'industrial', ['warehouse']);
+  const works = pickZone(state, 'industrial', ['warehouse', 'factory', 'tankfarm']);
   if (works) {
     works.hazmat = true;
     works.reward = price(state, works.waterfront ? 'dockFuel' : 'industrial');
@@ -10354,7 +10594,7 @@ function industrialFire(state) {
 
 /** A tall office or hotel in a business district, with people on every floor. */
 function towerFire(state) {
-  const tower = pickZone(state, 'company', ['office', 'hotel']);
+  const tower = pickZone(state, 'company', ['tower']) ?? pickZone(state, 'company', ['office', 'hotel', 'mall']);
   if (!tower || tower.floors < 5) return bigBlockFire(state);
   const n = state.rng.int(4, 8);
   tower.trapped = n;
@@ -10406,7 +10646,7 @@ function forestFire(state) {
 
 function medicalCall(state) {
   if (state.patients.filter((p) => !p.treated).length >= 5) return null;
-  const building = pick(state, ['house', 'apartment', 'office', 'hotel', 'shop', 'pharmacy']);
+  const building = pick(state, ['house', 'villa', 'apartment', 'office', 'tower', 'hotel', 'shop', 'mall', 'school', 'pharmacy']);
   if (!building) return null;
   const reason = {
     housing: 'Resident collapsed at home — suspected cardiac arrest at',
@@ -11120,7 +11360,7 @@ function commandSellVehicle(state, id = null) {
 
 function serialize(state) {
   return {
-    version: 9,
+    version: 10,
     seed: state.seed,
     time: state.time,
     clock: state.clock,
@@ -11143,6 +11383,7 @@ function serialize(state) {
       reward: b.reward ?? 0,
       incidentType: b.incidentType ?? null,
       incidentLabel: b.incidentLabel ?? null,
+      neglect: b.neglect ?? 0,
       hazmat: Boolean(b.hazmat),
       big: Boolean(b.big),
     })),
@@ -11233,6 +11474,8 @@ function loadState(data) {
     b.reward = saved.reward ?? 0;
     b.incidentType = saved.incidentType ?? null;
     b.incidentLabel = saved.incidentLabel ?? null;
+    b.neglect = saved.neglect ?? 0;
+    b.tookHold = (saved.neglect ?? 0) >= 0.5;
     b.hazmat = Boolean(saved.hazmat);
     b.big = Boolean(saved.big);
   }
@@ -12965,7 +13208,7 @@ function drawBuilding(ctx, state, b, now, z) {
   // roof so the two surfaces never blur into one another.
   ctx.fillStyle = wallColor(b);
   ctx.fillRect(x, facadeTop, w, e);
-  if (b.type === 'office' && detailed) drawCurtainWall(ctx, b, x, facadeTop, w, e);
+  if ((b.type === 'office' || b.type === 'tower') && detailed) drawCurtainWall(ctx, b, x, facadeTop, w, e);
   if (detailed) {
     const wall = ctx.createLinearGradient(0, facadeTop, 0, facadeTop + e);
     wall.addColorStop(0, 'rgba(255,255,255,0.07)');
@@ -12979,7 +13222,7 @@ function drawBuilding(ctx, state, b, now, z) {
   ctx.fillStyle = 'rgba(255,255,255,0.06)';
   ctx.fillRect(x, facadeTop, w, 2);
 
-  if (detailed && b.type !== 'station' && b.type !== 'office') drawFacadeWindows(ctx, b, x, facadeTop, w, e);
+  if (detailed && b.type !== 'station' && b.type !== 'office' && b.type !== 'tower' && b.type !== 'tankfarm') drawFacadeWindows(ctx, b, x, facadeTop, w, e);
   if (detailed && b.type !== 'station') drawEntrance(ctx, b, x, facadeTop, w, e, z);
   if (detailed && (b.trapped ?? 0) > 0 && b.state !== 'rubble') {
     drawTrapped(ctx, b, x, facadeTop, w, e, now);
@@ -13006,8 +13249,11 @@ function drawBuilding(ctx, state, b, now, z) {
   ctx.lineWidth = 1;
   ctx.strokeRect(x + 2.5, y - e + 2.5, w - 5, h - 5);
 
-  if (detailed && b.type === 'house') drawPitchedRoof(ctx, b, x, y - e, w, h);
-  if (detailed && b.type === 'warehouse') drawCorrugation(ctx, x, y - e, w, h);
+  if (detailed && (b.type === 'house' || b.type === 'villa')) drawPitchedRoof(ctx, b, x, y - e, w, h);
+  if (detailed && (b.type === 'warehouse' || b.type === 'factory')) drawCorrugation(ctx, x, y - e, w, h);
+  if (b.type === 'tankfarm') drawTankFarm(ctx, b, x, y - e, w, h);
+  if (b.type === 'factory') drawStacks(ctx, b, x, y - e, w, h, e);
+  if (b.type === 'tower') drawMast(ctx, b, x, y - e, w, h);
   if (detailed) drawRoofDetails(ctx, b, x, y - e, w, h);
   if (b.type === 'pharmacy') drawPharmacyMark(ctx, x, y - e, w, h);
   if (b.type === 'hospital') drawHospitalMark(ctx, x, y - e, w, h, detailed);
@@ -13038,6 +13284,12 @@ const WALLS = {
   office: ['#5d7384'],
   hotel: ['#cdbd9e', '#c2b08f', '#d3c6aa'],
   warehouse: ['#8e9498', '#9a9f9c', '#80878c'],
+  villa: ['#e6dcc6', '#ddd0b4', '#e8e0d0'],
+  tower: ['#5d7384'],
+  mall: ['#b9b4a8', '#c4bfb2', '#aeb0b0'],
+  factory: ['#8a8f92', '#9b9d98', '#7b8286'],
+  school: ['#a56a4c', '#b57a58', '#9a6248'],
+  tankfarm: ['#9aa0a4'],
   pharmacy: ['#e3e6e2'],
   hospital: ['#e6e8e6'],
   station: ['#a2503f'],
@@ -13229,8 +13481,90 @@ function drawHospitalMark(ctx, x, y, w, h, detailed) {
   }
 }
 
+/** A fuel tank farm: a bunded yard of round tanks seen from above. */
+function drawTankFarm(ctx, b, x, y, w, h) {
+  ctx.fillStyle = '#5a6066';
+  ctx.fillRect(x + 3, y + 3, w - 6, h - 6);
+  const cols = Math.max(2, Math.round(w / 92));
+  const rows = Math.max(1, Math.round(h / 92));
+  const rx = (w - 10) / cols;
+  const ry = (h - 10) / rows;
+  const r = Math.min(rx, ry) / 2 - 4;
+  for (let j = 0; j < rows; j++) {
+    for (let i = 0; i < cols; i++) {
+      const cx = x + 5 + rx * (i + 0.5);
+      const cy = y + 5 + ry * (j + 0.5);
+      ctx.fillStyle = 'rgba(0,0,0,0.25)';
+      ctx.beginPath();
+      ctx.arc(cx + 4, cy + 4, r, 0, Math.PI * 2);
+      ctx.fill();
+      const g = ctx.createRadialGradient(cx - r * 0.3, cy - r * 0.3, r * 0.1, cx, cy, r);
+      g.addColorStop(0, '#e4e8ea');
+      g.addColorStop(1, '#8f979c');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#6b737a';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.fillStyle = '#c0453a';
+      ctx.beginPath();
+      ctx.arc(cx, cy, Math.max(2, r * 0.12), 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+
+/** Chimney stacks on a factory roof. */
+function drawStacks(ctx, b, x, y, w, h, e) {
+  const n = w > 18 * TILE ? 3 : 2;
+  for (let i = 0; i < n; i++) {
+    const sx = x + w * (0.2 + (0.6 * (i + hash(hashString(b.id) + i))) / n);
+    const sy = y + h * (0.25 + 0.3 * hash(hashString(b.id) * 3 + i));
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.beginPath();
+    ctx.arc(sx + 5, sy + 5, 7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#8c8279';
+    ctx.beginPath();
+    ctx.arc(sx, sy - 14, 7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillRect(sx - 7, sy - 14, 14, 14);
+    ctx.fillStyle = '#5d554e';
+    ctx.beginPath();
+    ctx.arc(sx, sy, 7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#2a2724';
+    ctx.beginPath();
+    ctx.arc(sx, sy - 14, 4.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+/** A tower's roof gear: a helipad ring and a mast. */
+function drawMast(ctx, b, x, y, w, h) {
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+  ctx.strokeStyle = 'rgba(235,235,225,0.55)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(cx, cy, Math.min(w, h) * 0.28, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.strokeStyle = '#2d3238';
+  ctx.lineWidth = 2.2;
+  ctx.beginPath();
+  ctx.moveTo(x + w * 0.78, y + h * 0.78);
+  ctx.lineTo(x + w * 0.78, y + h * 0.78 - 26);
+  ctx.stroke();
+  ctx.fillStyle = '#d63a30';
+  ctx.beginPath();
+  ctx.arc(x + w * 0.78, y + h * 0.78 - 26, 2.6, 0, Math.PI * 2);
+  ctx.fill();
+}
+
 function drawRoofDetails(ctx, b, x, y, w, h) {
-  if (b.type === 'pharmacy' || b.type === 'hospital') return;
+  if (b.type === 'pharmacy' || b.type === 'hospital' || b.type === 'tankfarm') return;
   for (const d of b.details) {
     const dx = x + d.u * w;
     const dy = y + d.v * h;
@@ -16059,7 +16393,7 @@ function sellApparatus(id) {
 
 // ------------------------------------------------------------------- save ---
 
-const SAVE_KEY = 'firestation.save.v9';
+const SAVE_KEY = 'firestation.save.v10';
 
 function hasSave() {
   try {

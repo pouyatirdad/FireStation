@@ -1313,7 +1313,7 @@ function drawBuilding(ctx, state, b, now, z) {
   // roof so the two surfaces never blur into one another.
   ctx.fillStyle = wallColor(b);
   ctx.fillRect(x, facadeTop, w, e);
-  if (b.type === 'office' && detailed) drawCurtainWall(ctx, b, x, facadeTop, w, e);
+  if ((b.type === 'office' || b.type === 'tower') && detailed) drawCurtainWall(ctx, b, x, facadeTop, w, e);
   if (detailed) {
     const wall = ctx.createLinearGradient(0, facadeTop, 0, facadeTop + e);
     wall.addColorStop(0, 'rgba(255,255,255,0.07)');
@@ -1327,7 +1327,7 @@ function drawBuilding(ctx, state, b, now, z) {
   ctx.fillStyle = 'rgba(255,255,255,0.06)';
   ctx.fillRect(x, facadeTop, w, 2);
 
-  if (detailed && b.type !== 'station' && b.type !== 'office') drawFacadeWindows(ctx, b, x, facadeTop, w, e);
+  if (detailed && b.type !== 'station' && b.type !== 'office' && b.type !== 'tower' && b.type !== 'tankfarm') drawFacadeWindows(ctx, b, x, facadeTop, w, e);
   if (detailed && b.type !== 'station') drawEntrance(ctx, b, x, facadeTop, w, e, z);
   if (detailed && (b.trapped ?? 0) > 0 && b.state !== 'rubble') {
     drawTrapped(ctx, b, x, facadeTop, w, e, now);
@@ -1354,8 +1354,11 @@ function drawBuilding(ctx, state, b, now, z) {
   ctx.lineWidth = 1;
   ctx.strokeRect(x + 2.5, y - e + 2.5, w - 5, h - 5);
 
-  if (detailed && b.type === 'house') drawPitchedRoof(ctx, b, x, y - e, w, h);
-  if (detailed && b.type === 'warehouse') drawCorrugation(ctx, x, y - e, w, h);
+  if (detailed && (b.type === 'house' || b.type === 'villa')) drawPitchedRoof(ctx, b, x, y - e, w, h);
+  if (detailed && (b.type === 'warehouse' || b.type === 'factory')) drawCorrugation(ctx, x, y - e, w, h);
+  if (b.type === 'tankfarm') drawTankFarm(ctx, b, x, y - e, w, h);
+  if (b.type === 'factory') drawStacks(ctx, b, x, y - e, w, h, e);
+  if (b.type === 'tower') drawMast(ctx, b, x, y - e, w, h);
   if (detailed) drawRoofDetails(ctx, b, x, y - e, w, h);
   if (b.type === 'pharmacy') drawPharmacyMark(ctx, x, y - e, w, h);
   if (b.type === 'hospital') drawHospitalMark(ctx, x, y - e, w, h, detailed);
@@ -1386,6 +1389,12 @@ const WALLS = {
   office: ['#5d7384'],
   hotel: ['#cdbd9e', '#c2b08f', '#d3c6aa'],
   warehouse: ['#8e9498', '#9a9f9c', '#80878c'],
+  villa: ['#e6dcc6', '#ddd0b4', '#e8e0d0'],
+  tower: ['#5d7384'],
+  mall: ['#b9b4a8', '#c4bfb2', '#aeb0b0'],
+  factory: ['#8a8f92', '#9b9d98', '#7b8286'],
+  school: ['#a56a4c', '#b57a58', '#9a6248'],
+  tankfarm: ['#9aa0a4'],
   pharmacy: ['#e3e6e2'],
   hospital: ['#e6e8e6'],
   station: ['#a2503f'],
@@ -1577,8 +1586,90 @@ function drawHospitalMark(ctx, x, y, w, h, detailed) {
   }
 }
 
+/** A fuel tank farm: a bunded yard of round tanks seen from above. */
+function drawTankFarm(ctx, b, x, y, w, h) {
+  ctx.fillStyle = '#5a6066';
+  ctx.fillRect(x + 3, y + 3, w - 6, h - 6);
+  const cols = Math.max(2, Math.round(w / 92));
+  const rows = Math.max(1, Math.round(h / 92));
+  const rx = (w - 10) / cols;
+  const ry = (h - 10) / rows;
+  const r = Math.min(rx, ry) / 2 - 4;
+  for (let j = 0; j < rows; j++) {
+    for (let i = 0; i < cols; i++) {
+      const cx = x + 5 + rx * (i + 0.5);
+      const cy = y + 5 + ry * (j + 0.5);
+      ctx.fillStyle = 'rgba(0,0,0,0.25)';
+      ctx.beginPath();
+      ctx.arc(cx + 4, cy + 4, r, 0, Math.PI * 2);
+      ctx.fill();
+      const g = ctx.createRadialGradient(cx - r * 0.3, cy - r * 0.3, r * 0.1, cx, cy, r);
+      g.addColorStop(0, '#e4e8ea');
+      g.addColorStop(1, '#8f979c');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#6b737a';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.fillStyle = '#c0453a';
+      ctx.beginPath();
+      ctx.arc(cx, cy, Math.max(2, r * 0.12), 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+
+/** Chimney stacks on a factory roof. */
+function drawStacks(ctx, b, x, y, w, h, e) {
+  const n = w > 18 * TILE ? 3 : 2;
+  for (let i = 0; i < n; i++) {
+    const sx = x + w * (0.2 + (0.6 * (i + hash(hashString(b.id) + i))) / n);
+    const sy = y + h * (0.25 + 0.3 * hash(hashString(b.id) * 3 + i));
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.beginPath();
+    ctx.arc(sx + 5, sy + 5, 7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#8c8279';
+    ctx.beginPath();
+    ctx.arc(sx, sy - 14, 7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillRect(sx - 7, sy - 14, 14, 14);
+    ctx.fillStyle = '#5d554e';
+    ctx.beginPath();
+    ctx.arc(sx, sy, 7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#2a2724';
+    ctx.beginPath();
+    ctx.arc(sx, sy - 14, 4.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+/** A tower's roof gear: a helipad ring and a mast. */
+function drawMast(ctx, b, x, y, w, h) {
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+  ctx.strokeStyle = 'rgba(235,235,225,0.55)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(cx, cy, Math.min(w, h) * 0.28, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.strokeStyle = '#2d3238';
+  ctx.lineWidth = 2.2;
+  ctx.beginPath();
+  ctx.moveTo(x + w * 0.78, y + h * 0.78);
+  ctx.lineTo(x + w * 0.78, y + h * 0.78 - 26);
+  ctx.stroke();
+  ctx.fillStyle = '#d63a30';
+  ctx.beginPath();
+  ctx.arc(x + w * 0.78, y + h * 0.78 - 26, 2.6, 0, Math.PI * 2);
+  ctx.fill();
+}
+
 function drawRoofDetails(ctx, b, x, y, w, h) {
-  if (b.type === 'pharmacy' || b.type === 'hospital') return;
+  if (b.type === 'pharmacy' || b.type === 'hospital' || b.type === 'tankfarm') return;
   for (const d of b.details) {
     const dx = x + d.u * w;
     const dy = y + d.v * h;
