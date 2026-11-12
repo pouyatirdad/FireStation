@@ -10,6 +10,8 @@
 import { CONFIG, TILE } from '../core/config.js';
 import { findPath, passable, smoothPath, standTileForRect, tileCenter } from './grid.js';
 import { addEvent } from './events.js';
+import { earn, money } from './economy.js';
+import { injureEvacuees, injureRescued } from './medical.js';
 
 const FLEE_COLORS = ['#3d6fb0', '#b0553d', '#4f7a45', '#8a5a9e', '#b08a3a', '#5e6b78'];
 const MAX_FLEEING = 24;
@@ -36,6 +38,7 @@ export function evacuate(state, building) {
   const escaping = occupants - trapped;
   state.stats.escaped += escaping;
   spawnFleeing(state, building, escaping);
+  injureEvacuees(state, building, escaping);
 
   if (trapped > 0) {
     addEvent(
@@ -125,16 +128,17 @@ export function rescuePerson(state, building) {
   building.trapped -= 1;
   state.stats.rescued += 1;
   state.rating = Math.min(CONFIG.rating.start, state.rating + 3);
-  state.credits += CONFIG.economy.rescued;
+  earn(state, CONFIG.economy.rescued, 'rescue');
   addEvent(state, `Rescued one from ${building.name}`, 'good');
+  injureRescued(state, building);
   if (building.trapped === 0) {
     addEvent(state, `All clear at ${building.name}`, 'good');
     if (building.incidentType === 'rescue' && (building.reward ?? 0) > 0) {
       const reward = building.reward;
       building.reward = 0;
       building.incidentType = 'done';
-      state.credits += reward;
-      addEvent(state, `Rescue complete — $${reward.toLocaleString('en-US')} — ${building.name}`, 'good');
+      earn(state, reward, 'incident');
+      addEvent(state, `Rescue complete — ${money(reward)} — ${building.name}`, 'good');
     }
   }
   return true;

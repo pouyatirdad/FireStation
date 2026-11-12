@@ -1089,8 +1089,8 @@ button { font-family: inherit; }
 /* ------------------------------------------------------------- responsive --- */
 
 @media (max-width: 1280px) {
-  .stats .stat:nth-child(6),
-  .stats .stat:nth-child(7) { display: none; }
+  .stats .stat:nth-child(8),
+  .stats .stat:nth-child(9) { display: none; }
   .hints { display: none; }
 }
 
@@ -1103,8 +1103,9 @@ button { font-family: inherit; }
 @media (max-width: 900px) {
   .panel--log { display: none; }
   .panel--selection { width: 266px; }
-  .stats .stat:nth-child(4),
-  .stats .stat:nth-child(5) { display: none; }
+  .stats .stat:nth-child(5),
+  .stats .stat:nth-child(6),
+  .stats .stat:nth-child(7) { display: none; }
   .roster__actions kbd { display: none; }
   .roster { gap: 8px; }
 }
@@ -1118,3 +1119,38 @@ button { font-family: inherit; }
   .roster { flex-direction: column; align-items: stretch; }
   .roster__actions { padding-left: 0; padding-top: 8px; border-left: 0; border-top: 1px solid var(--line); }
 }
+
+/* ---- budget, medical and sound ------------------------------------------- */
+
+.stat__value--budget { font-size: 13px; }
+.stat__value--budget[data-tone='good'] { color: #8fe0a8; }
+.stat__value--budget[data-tone='bad'] { color: #ff8f84; }
+.stat__value--credits[data-debt='1'] { color: #ff8f84; }
+.stat__value--injured { color: #9fd8ff; }
+
+#btn-sound.is-off { opacity: 0.55; }
+#btn-sound span { pointer-events: none; }
+
+.station__upkeep { font-size: 10px; color: var(--muted); }
+
+.budget {
+  margin: 14px 0 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+}
+.budget .menu__eyebrow { margin: 0 0 8px; }
+.budget__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.budget__row b { font-variant-numeric: tabular-nums; color: var(--text); }
+.budget__row[data-tone='good'] b { color: #8fe0a8; }
+.budget__row[data-tone='bad'] b { color: #ff8f84; }
+.budget__row:last-of-type { margin-top: 4px; padding-top: 6px; border-top: 1px solid var(--line); }
+.budget__total { margin: 8px 0 0; font-size: 11px; color: var(--muted); }

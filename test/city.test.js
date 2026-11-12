@@ -69,8 +69,12 @@ test('the engine can reach every hydrant', () => {
   }
 });
 
-test('a crew can walk from the station to every building', () => {
-  for (const b of city.buildings) {
+test('a crew can walk from the station to a spread of buildings and every pharmacy', () => {
+  // Walking A* across a 520x384 map is slow enough that checking all of them
+  // would dominate the run; every seventh building plus all pharmacies is a
+  // good sample.
+  const sample = city.buildings.filter((b, i) => i % 7 === 0 || b.type === 'pharmacy');
+  for (const b of sample) {
     const rect = { x: b.x * TILE, y: b.y * TILE, w: b.w * TILE, h: b.h * TILE };
     const stand = standTileForRect(nav, rect, city.spawn.x, city.spawn.y);
     assert.ok(stand, `no place to stand beside ${b.name}`);

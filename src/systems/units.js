@@ -14,6 +14,10 @@ import { addEvent } from './events.js';
 import { activeFires, buildingRect } from './fire.js';
 import { streamImpact, spawnRescue } from './effects.js';
 import { rescuePerson } from './civilians.js';
+import { earn, spend } from './economy.js';
+import {
+  findPatient, isMedical, nearestPatient, nearestPharmacy, restockKits, treatPatient,
+} from './medical.js';
 
 const CREW_OFFSETS = [
   { a: 0.85, r: 26 },
@@ -76,6 +80,9 @@ function spawnVehicle(state, type) {
     lowWarned: false,
     status: 'in quarters',
     crewIds: [],
+    kits: spec.kits ?? 0,
+    kitAcc: 0,
+    patientId: null,
   };
   state.engines.push(engine);
   for (let i = 0; i < spec.crew; i++) spawnCrew(state, engine);
@@ -102,6 +109,10 @@ function spawnCrew(state, engine) {
     rescueTimer: 0,
     rescueId: null,
     wildfireId: null,
+    patientId: null,
+    treatTimer: 0,
+    idleFor: 0,
+    medic: Boolean(engine.spec?.medical),
     status: 'aboard',
   };
   engine.crewIds.push(crew.id);
@@ -121,7 +132,7 @@ export function buyVehicle(state, type = 'engine') {
     addEvent(state, `Not enough credits — $${spec.cost.toLocaleString('en-US')} needed`, 'warn');
     return null;
   }
-  state.credits -= spec.cost;
+  spend(state, spec.cost, 'vehicle');
   const engine = spawnVehicle(state, type);
   syncUnits(state);
   state.activeEngineId = engine.id;
@@ -137,7 +148,8 @@ export function sellVehicle(state, engine) {
   const ids = new Set(engine.crewIds);
   state.crew = state.crew.filter((c) => !ids.has(c.id));
   syncUnits(state);
-  state.credits += refund;
+  earn(state, refund, 'vehicle');
+  state.patients?.forEach((p) => { if (p.claimedBy === engine.id) p.claimedBy = null; });
   if (state.selected?.id === engine.id) state.selected = null;
   if (state.activeEngineId === engine.id) state.activeEngineId = state.engines[0]?.id ?? null;
   addEvent(state, `${engine.name} sold — $${refund.toLocaleString('en-US')}`, 'info');
@@ -175,6 +187,9 @@ function vehicleBase(state, type, overrides = {}) {
     lowWarned: false,
     status: 'in quarters',
     crewIds: [],
+    kits: spec.kits ?? 0,
+    kitAcc: 0,
+    patientId: null,
     ...overrides,
   };
 }
@@ -199,6 +214,7 @@ export function restoreFleet(state, saved = {}) {
       water: entry.water ?? CONFIG.vehicles[type].capacity,
       targetId: entry.targetId ?? null,
       supply: entry.supply ?? null,
+      kits: entry.kits ?? CONFIG.vehicles[type].kits ?? 0,
     });
     state.vehicleCount[type] = Math.max(state.vehicleCount[type] ?? 0, engine.number);
     state.engines.push(engine);
@@ -226,6 +242,10 @@ export function restoreFleet(state, saved = {}) {
       rescueTimer: 0,
       rescueId: null,
       wildfireId: entry.wildfireId ?? null,
+      patientId: null,
+      treatTimer: 0,
+      idleFor: 0,
+      medic: Boolean(engine.spec?.medical),
       status: entry.riding !== false ? 'aboard' : 'standing by',
     };
     state.nextCrew = Math.max(state.nextCrew, number + 1);
@@ -412,6 +432,9 @@ export function deployCrew(state, engine, target = null) {
     crew.rescueTimer = 0;
     crew.rescueId = null;
     crew.wildfireId = null;
+    crew.patientId = null;
+    crew.treatTimer = 0;
+    crew.idleFor = 0;
     crew.status = 'deployed';
     n++;
   }
@@ -471,6 +494,59 @@ export function toggleHydrant(state, engine) {
   return true;
 }
 
+/** Send an ambulance to an injured person. */
+export function orderAmbulanceToPatient(state, engine, patient) {
+  if (!engine || !patient || !isMedical(engine) || patient.treated) return false;
+  if ((engine.kits ?? 0) < 1) {
+    addEvent(state, `${engine.name} has no medical kits — restock at a pharmacy`, 'warn');
+    return false;
+  }
+  const ok = orderEngine(state, engine, patient.x, patient.y);
+  if (!ok) return false;
+  engine.patientId = patient.id;
+  patient.claimedBy = engine.id;
+  return true;
+}
+
+/** The ambulance that should take a call: nearest one that is free and stocked. */
+export function pickAmbulanceFor(state, patient) {
+  let best = null;
+  let bestD = Infinity;
+  for (const engine of state.engines) {
+    if (!isMedical(engine) || (engine.kits ?? 0) < 1) continue;
+    const busy = engine.patientId && findPatient(state, engine.patientId);
+    const d = dist(engine.x, engine.y, patient.x, patient.y) + (busy ? 1e6 : 0);
+    if (d < bestD) {
+      bestD = d;
+      best = engine;
+    }
+  }
+  return best;
+}
+
+/** Drive an ambulance to the nearest pharmacy to restock. */
+export function sendToPharmacy(state, engine) {
+  if (!engine || !isMedical(engine)) return false;
+  const pharmacy = nearestPharmacy(state, engine.x, engine.y);
+  if (!pharmacy) {
+    addEvent(state, 'No pharmacy in the city', 'warn');
+    return false;
+  }
+  const ok = orderEngine(
+    state,
+    engine,
+    (pharmacy.x + pharmacy.w / 2) * TILE,
+    (pharmacy.y + pharmacy.h / 2) * TILE,
+    pharmacy.id,
+  );
+  if (ok) {
+    engine.targetId = null;
+    engine.patientId = null;
+    addEvent(state, `${engine.name} heading to ${pharmacy.name} to restock`, 'info');
+  }
+  return ok;
+}
+
 /** The fire that most needs an engine right now. */
 export function urgentFire(state) {
   const fires = activeFires(state);
@@ -496,6 +572,7 @@ function pickEngineFor(state, target) {
   let near = null;
   let nearD = Infinity;
   for (const engine of state.engines) {
+    if (isMedical(engine)) continue;
     const d = dist(engine.x, engine.y, cx, cy);
     if (d < nearD) {
       nearD = d;
@@ -520,7 +597,7 @@ export function dispatchEngine(state, engine = null, buildingId = null) {
     addEvent(state, 'No active fires — the district is quiet', 'info');
     return false;
   }
-  const chosen = engine ?? pickEngineFor(state, target);
+  const chosen = engine && !isMedical(engine) ? engine : pickEngineFor(state, target);
   if (!chosen) return null;
   const ok = orderEngine(
     state,
@@ -569,6 +646,14 @@ function followPath(unit, dt, speed, limit = null) {
 
 function arriveEngine(state, engine) {
   engine.arrived = true;
+  if (isMedical(engine)) {
+    const reach = engine.spec.medRange * TILE * 0.9;
+    if (engine.patientId || nearestPatient(state, engine.x, engine.y, { maxDist: reach })) {
+      deployCrew(state, engine, null);
+    }
+    engine.status = 'on scene';
+    return;
+  }
   const target = buildingOf(state, engine.targetId);
   if (target && target.state === 'burning') {
     const reach = distToRect(engine.x, engine.y, buildingRect(target));
@@ -657,6 +742,11 @@ function updateEngine(state, engine, dt) {
     return;
   }
 
+  if (isMedical(engine)) {
+    updateAmbulance(state, engine, dt);
+    return;
+  }
+
   if (engine.targetId && !engine.arrived) arriveEngine(state, engine);
 
   // A fire that is out is no longer a reason to stay marked on scene.
@@ -706,6 +796,103 @@ function updateEngine(state, engine, dt) {
   else if (nearStation(state, engine)) engine.status = 'in quarters';
   else if (engine.targetId) engine.status = 'on scene';
   else engine.status = 'standing by';
+}
+
+function updateAmbulance(state, engine, dt) {
+  if (engine.patientId) {
+    const patient = findPatient(state, engine.patientId);
+    if (!patient || patient.treated) engine.patientId = null;
+  }
+
+  const tileX = Math.floor(engine.x / TILE);
+  const tileY = Math.floor(engine.y / TILE);
+  const onApron = state.city.apron[tileY * state.city.w + tileX] === 1;
+  const restocking = restockKits(state, engine, dt, onApron);
+  if (restocking && engine.kits >= engine.spec.kits && !engine.fullNotified) {
+    engine.fullNotified = true;
+    addEvent(state, `${engine.name}: kits restocked`, 'good');
+  } else if (engine.kits < engine.spec.kits * 0.75) {
+    engine.fullNotified = false;
+  }
+
+  if (engine.kits < 1 && !engine.emptyWarned) {
+    engine.emptyWarned = true;
+    addEvent(state, `${engine.name} is out of medical kits — find a pharmacy`, 'warn');
+  }
+  if (engine.kits >= 1) engine.emptyWarned = false;
+
+  if (restocking) engine.status = 'restocking';
+  else if (nearStation(state, engine)) engine.status = 'in quarters';
+  else if (engine.arrived) engine.status = 'on scene';
+  else engine.status = 'standing by';
+}
+
+function updateMedic(state, crew, engine, dt) {
+  const range = engine.spec.medRange * TILE;
+  const speed = CONFIG.crew.speed * TILE;
+
+  let patient = crew.patientId ? findPatient(state, crew.patientId) : null;
+  if (patient && patient.treated) patient = null;
+  if (!patient) {
+    crew.patientId = null;
+    crew.treatTimer = 0;
+    let bestD = range;
+    for (const p of state.patients) {
+      if (p.treated || (p.medicId && p.medicId !== crew.id)) continue;
+      const d = dist(engine.x, engine.y, p.x, p.y);
+      if (d < bestD) {
+        bestD = d;
+        patient = p;
+      }
+    }
+    if (patient) {
+      crew.patientId = patient.id;
+      patient.medicId = crew.id;
+    }
+  }
+
+  if (!patient) {
+    crew.status = 'standing by';
+    crew.idleFor += dt;
+    // Nobody left to treat: pack up so the ambulance is free to roll.
+    const out = crewOf(state, engine).filter((c) => !c.riding);
+    if (out.length > 0 && out.every((c) => c.idleFor > 5)) recallCrew(state, engine);
+    return;
+  }
+  crew.idleFor = 0;
+
+  const reach = dist(crew.x, crew.y, patient.x, patient.y);
+  if (reach > 1.4 * TILE) {
+    crew.treatTimer = 0;
+    patient.treatTimer = 0;
+    crew.status = 'moving';
+    crew.think -= dt;
+    if (crew.think <= 0 || crew.path.length === 0) {
+      crew.think = 0.8;
+      const goal = nearestPassable(
+        state.nav, 'walk', Math.floor(patient.x / TILE), Math.floor(patient.y / TILE), 4,
+      );
+      const tiles = goal ? findPath(state.nav, 'walk', tileOf(crew.x, crew.y), goal) : null;
+      if (tiles) crew.path = smoothPath(state.nav, 'walk', { x: crew.x, y: crew.y }, tiles);
+    }
+    followPath(crew, dt, speed, { x: engine.x, y: engine.y, r: range });
+    return;
+  }
+
+  crew.path.length = 0;
+  crew.angle = angleTo(crew.x, crew.y, patient.x, patient.y);
+  if (engine.kits < 1) {
+    crew.status = 'no kits';
+    return;
+  }
+  crew.status = 'treating';
+  crew.treatTimer += dt;
+  patient.treatTimer = crew.treatTimer;
+  if (crew.treatTimer >= engine.spec.treatTime) {
+    crew.treatTimer = 0;
+    treatPatient(state, patient, engine);
+    crew.patientId = null;
+  }
 }
 
 function chooseTarget(state, crew, engine) {
@@ -839,6 +1026,11 @@ function updateCrew(state, crew, dt) {
     }
     followPath(crew, dt, CONFIG.crew.speed * TILE);
     crew.status = 'returning';
+    return;
+  }
+
+  if (isMedical(engine)) {
+    updateMedic(state, crew, engine, dt);
     return;
   }
 

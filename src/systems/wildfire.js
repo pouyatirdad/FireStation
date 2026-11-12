@@ -4,10 +4,27 @@
 
 import { TILE } from '../core/config.js';
 import { addEvent } from './events.js';
+import { earn, money } from './economy.js';
 import { buildingRect, ignite } from './fire.js';
 import { spawnSmoke } from './effects.js';
 
 let seq = 1;
+
+/** The map label nearest a point, for incident text ("NORTH WOODS" → "the North Woods"). */
+function districtNear(state, x, y) {
+  let best = null;
+  let bestD = Infinity;
+  for (const d of state.city.districts ?? []) {
+    const dd = Math.hypot(d.x - x, d.y - y);
+    if (dd < bestD) {
+      bestD = dd;
+      best = d;
+    }
+  }
+  if (!best) return 'the woods';
+  const words = best.name.toLowerCase().split(' ').map((w) => w[0].toUpperCase() + w.slice(1));
+  return `the ${words.join(' ')}`;
+}
 
 export function startWildfire(state, x, y, reward = 2200) {
   const wildfire = {
@@ -25,7 +42,7 @@ export function startWildfire(state, x, y, reward = 2200) {
     big: true,
   };
   state.wildfires.push(wildfire);
-  addEvent(state, 'MAJOR INCIDENT — forest fire in the north woods', 'big');
+  addEvent(state, `MAJOR INCIDENT — forest fire in ${districtNear(state, x, y)}`, 'big');
   return wildfire;
 }
 
@@ -63,8 +80,8 @@ export function updateWildfires(state, dt) {
     wf.radius = Math.min(wf.maxRadius, wf.radius + 0.22 * TILE * dt);
 
     if (wf.intensity <= 0.02) {
-      state.credits += wf.reward;
-      addEvent(state, `Forest fire contained — $${wf.reward}`, 'good');
+      earn(state, wf.reward, 'incident');
+      addEvent(state, `Forest fire contained — ${money(wf.reward)}`, 'good');
       state.wildfires.splice(i, 1);
       continue;
     }

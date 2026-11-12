@@ -1,6 +1,8 @@
-// Harbor City: a 160×120 tile grid of districts between six avenues and six
-// streets, with a forest in the north-east. Generated from a seed, so every
-// shift is the same city and the tests can point at a named building.
+// Harbor City: a 520×384 tile grid (about ten times the area of the original
+// 160×120 town) of districts between 17 avenues and 16 streets, with several
+// forests, parks and a waterfront. Generated from a seed, so every shift is the
+// same city and the tests can point at a named building. The original town sits
+// in the north-west corner with Station 1 where it always was.
 //
 // Layout is data, not logic: this module knows tiles and buildings, and nothing
 // about fire, units or drawing.
@@ -8,26 +10,28 @@
 import { TILE } from '../core/config.js';
 import { Rng, clamp } from '../core/math.js';
 
-export const CITY_W = 160;
-export const CITY_H = 120;
+export const CITY_W = 520;
+export const CITY_H = 384;
 export const CITY_NAME = 'Harbor City';
 
 // Avenues run north–south, streets east–west. Each is two tiles wide.
-export const V_ROADS = [12, 42, 72, 102, 132];
-export const H_ROADS = [12, 36, 60, 84, 108];
+export const V_ROADS = Array.from({ length: 17 }, (_, i) => 12 + i * 30);
+export const H_ROADS = Array.from({ length: 16 }, (_, i) => 12 + i * 24);
 
 // Station 1 sits in the middle of the map and opens south onto 70th Street.
 const STATION = { x: 50, y: 44, w: 8, h: 6 };
 export const APRON = { x0: 48, y0: 50, x1: 61, y1: 59 };
 
-// Where bought vehicles appear: two rows of three bays under the station.
+// Where bought vehicles appear: two rows of four bays under the station.
 const BAYS = [
   { x: 50.2, y: 52.6 },
   { x: 53.2, y: 52.6 },
   { x: 56.2, y: 52.6 },
+  { x: 59.2, y: 52.6 },
   { x: 50.2, y: 56.6 },
   { x: 53.2, y: 56.6 },
   { x: 56.2, y: 56.6 },
+  { x: 59.2, y: 56.6 },
 ];
 
 const SPEC = {
@@ -37,6 +41,7 @@ const SPEC = {
   office: { floors: [4, 7], hp: [100, 140], risk: 0.65 },
   hotel: { floors: [5, 8], hp: [110, 150], risk: 0.6 },
   warehouse: { floors: [1, 2], hp: [85, 120], risk: 1.15 },
+  pharmacy: { floors: [1, 2], hp: [75, 100], risk: 0.85 },
   station: { floors: [2, 2], hp: [180, 180], risk: 0.7 },
 };
 
@@ -47,6 +52,7 @@ const ROOFS = {
   office: ['#6b7683', '#74808e', '#616c78', '#707680'],
   hotel: ['#8a6250', '#96705e', '#7d594a'],
   warehouse: ['#6d747b', '#7a7f76', '#616a70'],
+  pharmacy: ['#d9e3dc', '#cfdcd4', '#e0e6df'],
   station: ['#8c4b3f'],
 };
 
@@ -66,6 +72,7 @@ const OCCUPANTS = {
   office: [8, 24],
   hotel: [12, 36],
   warehouse: [1, 5],
+  pharmacy: [2, 7],
   station: [0, 0],
 };
 
@@ -88,7 +95,7 @@ const NAMES = {
   ],
   shop: [
     'Bell’s Bakery', 'Corner Market', 'Lucky Noodles', 'Second Hand Books',
-    'Harbor Hardware', 'Rose & Sons Tailors', 'The Print Shop', 'City Pharmacy',
+    'Harbor Hardware', 'Rose & Sons Tailors', 'The Print Shop', 'Hartwell Optics',
     'Kettle & Crumb', 'Anchor Outfitters', 'Marlow Meats', 'Paper Moon',
     'Tin Cup Diner', 'Ashgrove Florist', 'Blue Door Deli', 'Copper Kettle',
     'Fenwick Grocers', 'Golden Scissors', 'Hollow Tree Toys', 'Ivy Lane Cafe',
@@ -106,6 +113,11 @@ const NAMES = {
     'Hotel Belvedere', 'The Anchor', 'Grand Union', 'Hotel Meridian',
     'The Seafarer', 'Belmont Arms', 'The Regent', 'Harbor Lights',
     'The Cartographer', 'Westgate Inn',
+  ],
+  pharmacy: [
+    'City Pharmacy', 'Healthwell Pharmacy', 'Green Cross Chemist', 'Corner Rx',
+    'Harbor Apothecary', 'Wellspring Pharmacy', 'Lifeline Drugstore', 'Maple Pharmacy',
+    'Northgate Chemist', 'Riverside Rx', 'Sunrise Pharmacy', 'Unity Medical Supply',
   ],
   warehouse: [
     'Harbor Freight', 'Kessler Storage', 'Atlas Depot', 'Dockside Bonded',
@@ -164,8 +176,22 @@ function makeDetails(rng) {
   return list;
 }
 
+// Where the big commercial centres are, as (column, row) block coordinates.
+// The first is the original downtown around Station 1.
+const DOWNTOWNS = [
+  { col: 2, row: 2, name: 'OLD TOWN' },
+  { col: 7, row: 6, name: 'CIVIC QUARTER' },
+  { col: 13, row: 3, name: 'NORTHGATE' },
+  { col: 3, row: 10, name: 'UNIVERSITY' },
+  { col: 10, row: 11, name: 'MIDTOWN' },
+  { col: 15, row: 8, name: 'EASTSIDE' },
+  { col: 7, row: 14, name: 'SOUTH BANK' },
+];
+
+const FOREST_NAMES = ['NORTH WOODS', 'PINE RIDGE', 'GREEN HOLLOW', 'EASTWOOD', 'BIRCH FOREST', 'OLD GROWTH', 'FERN VALLEY'];
+
 /** The road grid, cut into blocks, with a district kind for each. */
-function buildBlocks() {
+function buildBlocks(seed = 7) {
   const xs = [];
   let start = 0;
   for (const vx of V_ROADS) {
@@ -182,23 +208,51 @@ function buildBlocks() {
   }
   ys.push([start, CITY_H - 1]);
 
-  const forestBlocks = new Set(['4,0', '5,0', '4,1', '5,1']);
+  const lastRow = ys.length - 1;
+  const rng = new Rng(seed * 31 + 5);
+  const forestBlocks = new Map();
+  forestBlocks.set('4,0', 0);
+  forestBlocks.set('5,0', 0);
+  forestBlocks.set('4,1', 0);
+  forestBlocks.set('5,1', 0);
+  // More woods in the outskirts, each two blocks by two, clear of the old town.
+  for (let zone = 1, tries = 0; zone < FOREST_NAMES.length && tries < 200; tries++) {
+    const col = rng.int(0, xs.length - 2);
+    const row = rng.int(0, lastRow - 3);
+    if (col < 6 && row < 6) continue; // the original quarter and its own woods
+    const cells = [[col, row], [col + 1, row], [col, row + 1], [col + 1, row + 1]];
+    if (cells.some(([c, r]) => forestBlocks.has(`${c},${r}`))) continue;
+    if (cells.some(([c, r]) => DOWNTOWNS.some((d) => Math.abs(d.col - c) <= 1 && Math.abs(d.row - r) <= 1))) continue;
+    for (const [c, r] of cells) forestBlocks.set(`${c},${r}`, zone);
+    zone++;
+  }
   const parks = new Set(['1,3', '3,4']);
   const blocks = [];
   for (let row = 0; row < ys.length; row++) {
     for (let col = 0; col < xs.length; col++) {
       const [x0, x1] = xs[col];
       const [y0, y1] = ys[row];
+      const key = `${col},${row}`;
+      const near = DOWNTOWNS.reduce(
+        (best, d) => Math.min(best, Math.max(Math.abs(d.col - col), Math.abs(d.row - row))),
+        99,
+      );
+      const roll = rng.float();
       let kind;
-      if (row === ys.length - 1) kind = 'park'; // the waterfront band
-      else if (forestBlocks.has(`${col},${row}`)) kind = 'forest';
-      else if (parks.has(`${col},${row}`)) kind = 'park';
+      let zone;
+      if (row === lastRow) kind = 'park'; // the waterfront band
+      else if (forestBlocks.has(key)) {
+        kind = 'forest';
+        zone = forestBlocks.get(key);
+      } else if (parks.has(key)) kind = 'park';
       else if (col === 2 && row === 2) kind = 'station';
-      else if (row >= 4) kind = 'industry';
-      else if (row >= 1 && col >= 1 && col <= 3) kind = 'downtown';
-      else if (row >= 1) kind = 'market';
-      else kind = 'houses';
-      blocks.push({ col, row, x0, y0, x1, y1, kind });
+      else if (near === 0 && roll < 0.02) kind = 'park';
+      else if (near <= 1) kind = 'downtown';
+      else if (row >= lastRow - 2 || (row >= 4 && (col * 5 + row * 3) % 7 === 0)) kind = 'industry';
+      else if (roll < 0.07) kind = 'park';
+      else if (row === 0 || near >= 3) kind = (col + row) % 3 === 0 ? 'market' : 'houses';
+      else kind = 'market';
+      blocks.push({ col, row, x0, y0, x1, y1, kind, zone });
     }
   }
   return blocks;
@@ -314,7 +368,7 @@ export function createCity(seed = 7) {
     }
   }
 
-  const blocks = buildBlocks();
+  const blocks = buildBlocks(seed);
 
   function scatterTrees(x0, y0, x1, y1) {
     const count = treeCount(x1 - x0 + 1, y1 - y0 + 1);
@@ -379,6 +433,9 @@ export function createCity(seed = 7) {
     const xs = splitCells(ax0, ax1, cols);
     const ys = splitCells(ay0, ay1, rows);
 
+    // A quarter of the residential and commercial blocks have a pharmacy.
+    let wantsPharmacy = kind !== 'industry' && (block.col * 2 + block.row) % 4 === 0;
+
     for (const [cy0, cy1] of ys) {
       for (const [cx0, cx1] of xs) {
         const bx = cx0;
@@ -388,7 +445,12 @@ export function createCity(seed = 7) {
         if (bwid >= 5 && rng.chance(0.4)) bwid -= 1;
         if (bhei >= 5 && rng.chance(0.4)) bhei -= 1;
         if (bwid < 3 || bhei < 3) continue;
-        addBuilding(bx, by, bwid, bhei, weightedPick(rng, KIND_TYPES[kind]));
+        let type = weightedPick(rng, KIND_TYPES[kind]);
+        if (wantsPharmacy) {
+          type = 'pharmacy';
+          wantsPharmacy = false;
+        }
+        addBuilding(bx, by, bwid, bhei, type);
       }
     }
   }
@@ -472,7 +534,7 @@ export function createCity(seed = 7) {
   const nearCrossAvenue = (x) => V_ROADS.some((vx) => Math.abs(x - vx) < 2);
 
   const tryCar = (tx, ty, x, y, angle) => {
-    if (cars.length >= 130) return;
+    if (cars.length >= 1100) return;
     if (!inb(tx, ty) || blocked[at(tx, ty)] || road[at(tx, ty)] || apron[at(tx, ty)] || park[at(tx, ty)]) return;
     cars.push({ x, y, angle: rng.chance(0.5) ? angle : angle + Math.PI, color: rng.pick(CAR_COLORS) });
   };
@@ -506,6 +568,29 @@ export function createCity(seed = 7) {
     });
   }
 
+  // Map labels: one per commercial centre, forest, and the harbour belts.
+  const blockCentre = (col, row) => {
+    const b = blocks.find((x) => x.col === col && x.row === row);
+    return { x: ((b.x0 + b.x1 + 1) / 2) * TILE, y: ((b.y0 + b.y1 + 1) / 2) * TILE };
+  };
+  const districts = DOWNTOWNS.map((d) => ({ name: d.name, ...blockCentre(d.col, d.row) }));
+  const forestZones = new Map();
+  for (const b of blocks) {
+    if (b.kind !== 'forest') continue;
+    const zone = forestZones.get(b.zone) ?? { name: FOREST_NAMES[b.zone] ?? 'FOREST', xs: [], ys: [] };
+    zone.xs.push((b.x0 + b.x1 + 1) / 2);
+    zone.ys.push((b.y0 + b.y1 + 1) / 2);
+    forestZones.set(b.zone, zone);
+  }
+  for (const zone of forestZones.values()) {
+    const avg = (list) => list.reduce((s, v) => s + v, 0) / list.length;
+    districts.push({ name: zone.name, x: avg(zone.xs) * TILE, y: avg(zone.ys) * TILE });
+  }
+  const lastBlock = blocks[blocks.length - 1];
+  districts.push({ name: 'WATERFRONT', x: (w / 2) * TILE, y: ((lastBlock.y0 + lastBlock.y1 + 1) / 2) * TILE });
+  districts.push({ name: 'HARBOR', x: 60 * TILE, y: (h - 60) * TILE });
+  districts.push({ name: 'DOCKLANDS', x: (w - 90) * TILE, y: (h - 60) * TILE });
+
   return {
     name: CITY_NAME,
     w,
@@ -525,14 +610,8 @@ export function createCity(seed = 7) {
     cars,
     lot: stationLot,
     bays: BAYS.map((b) => ({ x: b.x * TILE, y: b.y * TILE })),
-    districts: [
-      { name: 'OLD TOWN', x: 26 * TILE, y: 24 * TILE },
-      { name: 'NORTHGATE', x: 118 * TILE, y: 24 * TILE },
-      { name: 'FOREST', x: 118 * TILE, y: 44 * TILE },
-      { name: 'MIDTOWN', x: 72 * TILE, y: 52 * TILE },
-      { name: 'HARBOR', x: 30 * TILE, y: 96 * TILE },
-      { name: 'WATERFRONT', x: 80 * TILE, y: 114 * TILE },
-    ],
+    districts,
+    pharmacies: buildings.filter((b) => b.type === 'pharmacy'),
     spawn: { x: BAYS[0].x * TILE, y: BAYS[0].y * TILE, angle: Math.PI / 2 },
     startHour: START_HOUR,
   };

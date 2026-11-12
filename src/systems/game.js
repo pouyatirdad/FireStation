@@ -8,9 +8,14 @@ import { createCity } from '../data/city.js';
 import { buildNav } from './grid.js';
 import {
   activeEngine, buildingOf, buyVehicle, createUnits, deployCrew, dispatchEngine,
-  engineForUnit, orderCrew, orderEngine, orderEngineToWildfire, recallCrew,
-  restoreFleet, sellVehicle, sendEngineHome, toggleHydrant, updateUnits,
+  engineForUnit, orderAmbulanceToPatient, orderCrew, orderEngine, orderEngineToWildfire,
+  pickAmbulanceFor, recallCrew, restoreFleet, sellVehicle, sendEngineHome, sendToPharmacy,
+  toggleHydrant, updateUnits,
 } from './units.js';
+import { createLedger, updateEconomy } from './economy.js';
+import {
+  findPatient, isMedical, nearestPatient, restorePatients, updatePatients,
+} from './medical.js';
 import { activeFires, ignite, updateFire } from './fire.js';
 import { addEvent } from './events.js';
 import { spawnDebris, updateEffects } from './effects.js';
@@ -37,7 +42,9 @@ export function createGame(seed = CONFIG.city.seed) {
     rng: new Rng(seed * 7919 + 13),
     rating: CONFIG.rating.start,
     credits: CONFIG.economy.start,
-    stats: { saved: 0, lost: 0, alarms: 0, rescued: 0, casualties: 0, escaped: 0 },
+    stats: { saved: 0, lost: 0, alarms: 0, rescued: 0, casualties: 0, escaped: 0, treated: 0 },
+    ledger: createLedger(),
+    patients: [],
     events: [],
     eventSeq: 0,
     streams: [],
@@ -78,6 +85,8 @@ export function update(state, dt) {
   state.hoses.length = 0;
 
   updateIncidents(state, dt);
+  updateEconomy(state, dt);
+  updatePatients(state, dt);
   updateUnits(state, dt);
   updateFire(state, dt);
   updateWildfires(state, dt);
@@ -90,6 +99,7 @@ export function update(state, dt) {
 export function getSelected(state) {
   const sel = state.selected;
   if (!sel) return null;
+  if (sel.kind === 'patient') return findPatient(state, sel.id);
   if (sel.kind === 'wildfire') {
     return (state.wildfires ?? []).find((w) => w.id === sel.id) ?? null;
   }
@@ -99,6 +109,10 @@ export function getSelected(state) {
 
 export function selectWildfire(state, id) {
   state.selected = id ? { kind: 'wildfire', id } : null;
+}
+
+export function selectPatient(state, id) {
+  state.selected = id ? { kind: 'patient', id } : null;
 }
 
 export function selectUnit(state, id) {
@@ -136,6 +150,18 @@ export function pickAt(state, wx, wy, pad = 0) {
   }
   if (best) return best;
 
+  // A person on the ground is small; give them a generous target.
+  let patient = null;
+  let patientD = Infinity;
+  for (const p of state.patients ?? []) {
+    const d = Math.hypot(p.x - wx, p.y - wy);
+    if (d <= 16 + pad && d < patientD) {
+      patientD = d;
+      patient = { kind: 'patient', id: p.id };
+    }
+  }
+  if (patient) return patient;
+
   // Roofs lean north of their footprint, so test that silhouette too. If two
   // roofs overlap, the one whose base is further south is the one in front.
   let hit = null;
@@ -167,6 +193,7 @@ export function commandMove(state, wx, wy, buildingId = null) {
     return false;
   }
   if (selected.kind === 'wildfire') return commandDispatchWildfire(state, selected.id);
+  if (selected.kind === 'patient') return commandDispatchPatient(state, selected.id);
   if (selected.kind === 'engine') return orderEngine(state, selected, wx, wy, buildingId);
   if (selected.kind === 'crew') return orderCrew(state, selected, wx, wy, buildingId);
   // A building is selected: send the active engine to it if it is alight.
@@ -180,6 +207,7 @@ function closestIdleEngine(state, x, y) {
   let near = null;
   let nearD = Infinity;
   for (const engine of state.engines) {
+    if (isMedical(engine)) continue;
     const d = Math.hypot(engine.x - x, engine.y - y);
     if (d < nearD) {
       nearD = d;
@@ -206,10 +234,51 @@ export function commandDispatchWildfire(state, id) {
   return orderEngineToWildfire(state, chosen, wildfire);
 }
 
+/** Send an ambulance to an injured person: the selected one, else the nearest stocked one. */
+export function commandDispatchPatient(state, id) {
+  const patient = findPatient(state, id);
+  if (!patient || patient.treated) return false;
+  const selected = getSelected(state);
+  const picked = selected && selected.kind !== 'patient' ? engineForUnit(state, selected) : null;
+  const engine = picked && isMedical(picked) ? picked : pickAmbulanceFor(state, patient);
+  if (!engine) {
+    addEvent(state, 'No ambulance available — buy one at the station', 'warn');
+    return false;
+  }
+  if (!orderAmbulanceToPatient(state, engine, patient)) return false;
+  selectUnit(state, engine.id);
+  return true;
+}
+
+/** Send the selected ambulance to restock at the nearest pharmacy. */
+export function commandPharmacy(state) {
+  const engine = engineForUnit(state, getSelected(state)) ?? activeEngine(state);
+  if (!engine || !isMedical(engine)) {
+    addEvent(state, 'Select an ambulance to send it to a pharmacy', 'warn');
+    return false;
+  }
+  return sendToPharmacy(state, engine);
+}
+
 export function commandDispatch(state, buildingId = null) {
   const selected = getSelected(state);
   if (selected?.kind === 'wildfire') return commandDispatchWildfire(state, selected.id);
+  if (selected?.kind === 'patient') return commandDispatchPatient(state, selected.id);
   const engine = selected ? engineForUnit(state, selected) : null;
+  if (engine && isMedical(engine)) {
+    const patient = nearestPatient(state, engine.x, engine.y, { unclaimed: true })
+      ?? nearestPatient(state, engine.x, engine.y);
+    if (!patient) {
+      addEvent(state, 'Nobody needs an ambulance right now', 'info');
+      return false;
+    }
+    return commandDispatchPatient(state, patient.id);
+  }
+  if (!engine && !buildingId && activeFires(state).length === 0) {
+    const hq = state.city.station;
+    const patient = nearestPatient(state, (hq.x + hq.w / 2) * TILE, (hq.y + hq.h / 2) * TILE, { unclaimed: true });
+    if (patient) return commandDispatchPatient(state, patient.id);
+  }
   const target = buildingOf(state, buildingId)
     ?? (selected?.kind === 'building' && selected.state === 'burning' ? selected : null);
   const chosen = dispatchEngine(state, engine, target?.id ?? null);
@@ -287,7 +356,7 @@ export { orderEngine, orderCrew };
 
 export function serialize(state) {
   return {
-    version: 1,
+    version: 2,
     seed: state.seed,
     time: state.time,
     clock: state.clock,
@@ -323,6 +392,7 @@ export function serialize(state) {
       water: e.water,
       targetId: e.targetId,
       supply: e.supply,
+      kits: e.kits,
     })),
     crews: state.crew.map((c) => ({
       id: c.id,
@@ -336,6 +406,18 @@ export function serialize(state) {
       wildfireId: c.wildfireId,
     })),
     wildfires: (state.wildfires ?? []).map((w) => ({ ...w })),
+    patients: state.patients.map((p) => ({
+      id: p.id,
+      x: p.x,
+      y: p.y,
+      buildingId: p.buildingId,
+      buildingName: p.buildingName,
+      severity: p.severity,
+      life: p.life,
+      maxLife: p.maxLife,
+      treated: p.treated,
+    })),
+    ledger: { ...state.ledger, lastBudget: state.ledger.lastBudget ? { ...state.ledger.lastBudget } : null, by: { ...(state.ledger.by ?? {}) } },
   };
 }
 
@@ -369,6 +451,8 @@ export function loadState(data) {
 
   restoreFleet(state, { engines: data.engines ?? [], crews: data.crews ?? [] });
   restoreWildfires(state, data.wildfires ?? []);
+  restorePatients(state, data.patients ?? []);
+  if (data.ledger) state.ledger = { ...createLedger(), ...data.ledger };
   state.running = true;
   state.paused = false;
   return state;

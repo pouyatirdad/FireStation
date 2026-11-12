@@ -4,6 +4,7 @@
 import { CONFIG } from '../core/config.js';
 import { formatClock } from '../core/math.js';
 import { hydrantInReach } from '../systems/units.js';
+import { hourlyBudget } from '../systems/economy.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -14,6 +15,7 @@ const TYPE_LABEL = {
   office: 'Office',
   hotel: 'Hotel',
   warehouse: 'Warehouse',
+  pharmacy: 'Pharmacy',
   station: 'Fire station',
 };
 
@@ -25,6 +27,9 @@ const STATUS_TONE = {
   moving: 'warn',
   returning: 'warn',
   refilling: 'good',
+  restocking: 'good',
+  treating: 'good',
+  'no kits': 'bad',
   'in quarters': 'good',
   'no water': 'bad',
   'hose too short': 'bad',
@@ -52,13 +57,17 @@ const SHORT_STATUS = {
   'beyond hose reach': 'Too far',
   'out of hose': 'Out of hose',
   'no water': 'No water',
+  restocking: 'Restocking',
+  treating: 'Treating',
+  'no kits': 'No kits',
 };
 
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => (
   { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
 ));
 
-const pct = (v, max) => `${Math.round(Math.max(0, Math.min(1, v / max)) * 100)}%`;
+const pct = (v, max) => `${max > 0 ? Math.round(Math.max(0, Math.min(1, v / max)) * 100) : 0}%`;
+const money = (n) => `${n < 0 ? '−' : ''}$${Math.abs(Math.round(n)).toLocaleString('en-US')}`;
 const title = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 
 let lastSelectionKey = '';
@@ -95,6 +104,7 @@ export function mount(state, callbacks) {
   $('btn-start').addEventListener('click', () => handlers.onStart?.());
   $('btn-continue').addEventListener('click', () => handlers.onContinue?.());
   $('btn-restart').addEventListener('click', () => handlers.onRestart?.());
+  $('btn-sound').addEventListener('click', () => handlers.onSound?.());
 
   toastSeen = state.events[0]?.id ?? 0;
 }
@@ -156,7 +166,14 @@ export function update(state, force = false) {
   const trapped = state.buildings.reduce((sum, b) => sum + (b.trapped ?? 0), 0);
 
   $('stat-clock').textContent = formatClock(state.clock);
-  $('stat-credits').textContent = `$${state.credits.toLocaleString('en-US')}`;
+  $('stat-credits').textContent = money(state.credits);
+  $('stat-credits').dataset.debt = state.credits < 0 ? '1' : '';
+  const budget = hourlyBudget(state);
+  const budgetEl = $('stat-budget');
+  budgetEl.textContent = `${budget.net >= 0 ? '+' : '−'}$${Math.abs(budget.net)}/h`;
+  budgetEl.dataset.tone = budget.net >= 0 ? 'good' : 'bad';
+  budgetEl.title = `Subsidy ${money(budget.subsidy)} − wages ${money(budget.wages)} − upkeep ${money(budget.upkeep)} per game hour`;
+  $('stat-injured').textContent = String(state.patients.filter((q) => !q.treated).length);
   $('stat-fires').textContent = String(fires);
   $('stat-trapped').textContent = String(trapped);
   $('stat-rescued').textContent = String(state.stats.rescued);
@@ -216,13 +233,16 @@ function engineTone(engine) {
 }
 
 function selectionSignature(state, entity) {
+  if (state.selected.kind === 'patient') {
+    return [entity.id, entity.treated, Math.ceil(entity.life / 5), Math.round(entity.treatTimer)].join(':');
+  }
   if (state.selected.kind === 'unit') {
     const supply = entity.kind === 'engine'
       ? (entity.supply ? 'S' : hydrantInReach(state, entity) ? 'R' : 'T')
       : '';
     return [
       entity.id, entity.status, Math.round(entity.water / 80), entity.riding,
-      entity.kind === 'crew' ? entity.targetId : '', supply,
+      entity.kind === 'crew' ? entity.targetId : '', supply, entity.kits ?? '',
     ].join(':');
   }
   return [
@@ -237,6 +257,7 @@ function updateSelection(state) {
   let entity = null;
   if (selected?.kind === 'unit') entity = state.units.find((u) => u.id === selected.id);
   else if (selected?.kind === 'wildfire') entity = (state.wildfires ?? []).find((w) => w.id === selected.id);
+  else if (selected?.kind === 'patient') entity = state.patients.find((q) => q.id === selected.id);
   else entity = state.buildings.find((b) => b.id === selected?.id);
 
   if (!entity) {
@@ -253,7 +274,9 @@ function updateSelection(state) {
   panel.hidden = false;
   panel.innerHTML = selected.kind === 'wildfire'
     ? wildfireCard(state, entity)
-    : selected.kind === 'unit'
+    : selected.kind === 'patient'
+      ? patientCard(state, entity)
+      : selected.kind === 'unit'
       ? (entity.kind === 'engine' ? engineCard(state, entity) : crewCard(state, entity))
       : buildingCard(state, entity);
 }
@@ -274,12 +297,53 @@ function wildfireCard(state, wildfire) {
     </div>`;
 }
 
+function patientCard(state, patient) {
+  const frac = Math.max(0, Math.min(1, patient.life / patient.maxLife));
+  const free = state.engines.filter((e) => e.spec.medical && e.kits > 0).length;
+  return `
+    <div class="sel__kind">Medical emergency</div>
+    <h2 class="sel__name">Injured person</h2>
+    <div class="sel__status" data-tone="${patient.treated ? 'good' : 'bad'}"><i></i>${patient.treated ? 'Stabilised' : 'Needs an ambulance'}</div>
+    ${patient.treated ? '' : `
+      <div class="bar__label"><span>Time left</span><span>${Math.ceil(patient.life)} s</span></div>
+      <div class="bar bar--health"><i style="width:${Math.round(frac * 100)}%"></i></div>`}
+    <p class="sel__meta">Hurt near ${esc(patient.buildingName)}.<br>${
+      free > 0
+        ? 'A paramedic crew walks out from the ambulance and uses one kit.'
+        : 'No ambulance with kits — buy one at the station (B).'
+    }</p>
+    <div class="sel__actions">
+      <button type="button" class="btn" data-action="dispatch">Send ambulance<kbd>D</kbd></button>
+      <button type="button" class="btn" data-action="center">Locate<kbd>C</kbd></button>
+    </div>`;
+}
+
 function statusChip(status) {
   const tone = STATUS_TONE[status] ?? '';
   return `<div class="sel__status" data-tone="${tone}"><i></i>${esc(SHORT_STATUS[status] ?? title(status))}</div>`;
 }
 
+function ambulanceCard(state, engine) {
+  const crew = state.crew.filter((c) => c.engineId === engine.id);
+  const aboard = crew.filter((c) => c.riding).length;
+  const kits = engine.spec.kits;
+  return `
+    <div class="sel__kind">${esc(engine.spec.label)} · paramedics</div>
+    <h2 class="sel__name">${esc(engine.name)}</h2>
+    ${statusChip(engine.status)}
+    <div class="bar__label"><span>Medical kits</span><span>${Math.floor(engine.kits)} / ${kits}</span></div>
+    <div class="bar"><i style="width:${pct(engine.kits, kits)}"></i></div>
+    <p class="sel__meta">${aboard} aboard · ${crew.length - aboard} out<br>Paramedics walk up to ${engine.spec.medRange} tiles from the vehicle. Restock on the station apron (free, slow) or beside a pharmacy ($${CONFIG.economy.kitPrice} a kit, fast).</p>
+    <div class="sel__actions">
+      <button type="button" class="btn" data-action="dispatch">Nearest patient<kbd>D</kbd></button>
+      <button type="button" class="btn" data-action="pharmacy">Pharmacy<kbd>P</kbd></button>
+      <button type="button" class="btn" data-action="recall">Recall<kbd>R</kbd></button>
+      <button type="button" class="btn" data-action="home">Station<kbd>H</kbd></button>
+    </div>`;
+}
+
 function engineCard(state, engine) {
+  if (engine.spec.medical) return ambulanceCard(state, engine);
   const crew = state.crew.filter((c) => c.engineId === engine.id);
   const aboard = crew.filter((c) => c.riding).length;
   const deployed = crew.length - aboard;
@@ -312,12 +376,13 @@ function crewCard(state, crew) {
   const engine = state.engines.find((e) => e.id === crew.engineId);
   const distance = engine ? Math.round(Math.hypot(crew.x - engine.x, crew.y - engine.y) / 32) : 0;
   return `
-    <div class="sel__kind">Firefighter</div>
+    <div class="sel__kind">${crew.medic ? 'Paramedic' : 'Firefighter'}</div>
     <h2 class="sel__name">${esc(crew.name)}</h2>
     ${statusChip(crew.status)}
     <p class="sel__meta">
       ${crew.riding ? `Riding in ${esc(engine?.name ?? 'the engine')}.` : `On foot · ${distance} tiles from ${esc(engine?.name ?? 'the engine')}.`}<br>
-      ${target ? `Working ${esc(target.name)}.` : 'No fire assigned.'}
+      ${crew.medic ? (crew.patientId ? 'Treating a patient.' : 'No patient assigned.')
+        : target ? `Working ${esc(target.name)}.` : 'No fire assigned.'}
     </p>
     <div class="sel__actions">
       <button type="button" class="btn" data-action="recall">Recall</button>
@@ -404,18 +469,24 @@ function updateTooltip(state) {
     ? state.units.find((u) => u.id === hover.id)
     : hover.kind === 'wildfire'
       ? (state.wildfires ?? []).find((w) => w.id === hover.id)
-      : state.buildings.find((b) => b.id === hover.id);
+      : hover.kind === 'patient'
+        ? state.patients.find((q) => q.id === hover.id)
+        : state.buildings.find((b) => b.id === hover.id);
   if (!entity) {
     tip.hidden = true;
     return;
   }
   let detail;
-  if (hover.kind === 'wildfire') {
+  if (hover.kind === 'patient') {
+    detail = entity.treated ? 'Stabilised' : `Needs an ambulance · ${Math.ceil(entity.life)} s`;
+  } else if (hover.kind === 'wildfire') {
     detail = `Forest fire · $${entity.reward ?? 0} · ${Math.round(entity.intensity * 100)}%`;
   } else if (hover.kind === 'unit') {
-    detail = entity.kind === 'engine'
-      ? `${SHORT_STATUS[entity.status] ?? entity.status} · ${Math.round(entity.water / entity.capacity * 100)}% water`
-      : SHORT_STATUS[entity.status] ?? entity.status;
+    detail = entity.kind !== 'engine'
+      ? SHORT_STATUS[entity.status] ?? entity.status
+      : entity.spec.medical
+        ? `${SHORT_STATUS[entity.status] ?? entity.status} · ${Math.floor(entity.kits)} kits`
+        : `${SHORT_STATUS[entity.status] ?? entity.status} · ${Math.round(entity.water / entity.capacity * 100)}% water`;
   } else if (entity.state === 'burning') {
     detail = `Burning · ${Math.round(entity.integrity / entity.maxIntegrity * 100)}% standing`;
     if ((entity.trapped ?? 0) > 0) detail += ` · ${entity.trapped} trapped`;
@@ -436,7 +507,8 @@ function updateGameOver(state) {
     <div><b>${state.stats.saved}</b><span>Saved</span></div>
     <div><b>${state.stats.lost}</b><span>Lost</span></div>
     <div><b>${state.stats.rescued}</b><span>Rescued</span></div>
-    <div><b>${state.stats.casualties}</b><span>Casualties</span></div>`;
+    <div><b>${state.stats.casualties}</b><span>Casualties</span></div>
+    <div><b>${state.stats.treated ?? 0}</b><span>Treated</span></div>`;
   $('screen-over').hidden = false;
 }
 
@@ -454,9 +526,11 @@ export function updateStation(state) {
         <span class="station__num">${index + 1}</span>
         <div class="station__text">
           <b>${esc(engine.name)}</b>
-          <span>${esc(SHORT_STATUS[engine.status] ?? engine.status)} · ${Math.round(
-            (engine.water / engine.capacity) * 100,
-          )}% water · ${aboard}/${crew.length} aboard</span>
+          <span>${esc(SHORT_STATUS[engine.status] ?? engine.status)} · ${
+            engine.spec.medical
+              ? `${Math.floor(engine.kits)}/${engine.spec.kits} kits`
+              : `${Math.round((engine.water / engine.capacity) * 100)}% water`
+          } · ${aboard}/${crew.length} aboard</span>
         </div>
         <button type="button" class="station__sell" data-action="sell-vehicle" data-engine="${engine.id}">Sell $${refund}</button>
       </div>`;
@@ -469,7 +543,10 @@ export function updateStation(state) {
         disabled ? ' disabled' : ''
       }>
         <span class="station__buyhead"><b>${esc(spec.label)}</b><i>$${spec.cost.toLocaleString('en-US')}</i></span>
-        <span>${spec.crew} crew · ${spec.capacity.toLocaleString('en-US')} L · hose ${spec.hoseRange}</span>
+        <span>${spec.medical
+          ? `${spec.crew} paramedics · ${spec.kits} kits · treats on foot`
+          : `${spec.crew} crew · ${spec.capacity.toLocaleString('en-US')} L · hose ${spec.hoseRange}`}</span>
+        <span class="station__upkeep">upkeep $${spec.upkeep}/h</span>
       </button>`;
   }).join('');
 
@@ -477,12 +554,14 @@ export function updateStation(state) {
     <p class="menu__eyebrow">Station 1 · Apparatus</p>
     <div class="station__balance">$${state.credits.toLocaleString('en-US')}<span>credits</span></div>
     <div class="station__list">${engines}</div>
-    ${maxed ? '<p class="station__full">All six bays are full.</p>' : ''}
+    ${maxed ? '<p class="station__full">All eight bays are full.</p>' : ''}
     <div class="station__buys">${buys}</div>
+    ${budgetPanel(state)}
     <p class="station__note">
-      A knockdown pays $${CONFIG.economy.saved}; a rescue $${CONFIG.economy.rescued}. Selling
-      returns ${Math.round(CONFIG.vehicles.engine.refund * 100)}% of the price. Each vehicle brings
-      its own crew and tank.
+      A knockdown pays $${CONFIG.economy.saved} (more for offices and hotels, with a bonus on the
+      incident reward for a fast one); a rescue $${CONFIG.economy.rescued}; a treated patient
+      $${CONFIG.economy.treated}. A lost building costs $${CONFIG.economy.lossPenalty} and a life $${CONFIG.economy.casualtyPenalty}.
+      Selling returns ${Math.round(CONFIG.vehicles.engine.refund * 100)}% of the price.
     </p>
     <div class="station__save">
       <button type="button" class="btn btn--small" data-action="save-game">Save<kbd>Ctrl+S</kbd></button>
@@ -494,7 +573,34 @@ export function updateStation(state) {
       : 'Autosaves every 30 seconds'}</p>
     <p class="station__keys">
       <kbd>B</kbd> apparatus · <kbd>D</kbd> dispatch · <kbd>E</kbd> deploy ·
-      <kbd>R</kbd> pack up · <kbd>G</kbd> hydrant · <kbd>H</kbd> return ·
-      <kbd>F1</kbd> controls
+      <kbd>R</kbd> pack up · <kbd>G</kbd> hydrant · <kbd>P</kbd> pharmacy ·
+      <kbd>Tab</kbd> next incident · <kbd>M</kbd> sound · <kbd>F1</kbd> controls
     </p>`;
+}
+
+function budgetPanel(state) {
+  const b = hourlyBudget(state);
+  const ledger = state.ledger;
+  const last = ledger.lastBudget;
+  const line = (label, value, tone = '') =>
+    `<div class="budget__row"${tone ? ` data-tone="${tone}"` : ''}><span>${label}</span><b>${value}</b></div>`;
+  return `
+    <div class="budget">
+      <p class="menu__eyebrow">Budget · per game hour</p>
+      ${line('City subsidy (scales with rating)', `+${money(b.subsidy)}`, 'good')}
+      ${line(`Wages · ${state.crew.length} crew`, `−${money(b.wages)}`, 'bad')}
+      ${line(`Upkeep · ${state.engines.length} vehicles`, `−${money(b.upkeep)}`, 'bad')}
+      ${line('Net per hour', `${b.net >= 0 ? '+' : ''}${money(b.net)}`, b.net >= 0 ? 'good' : 'bad')}
+      <p class="budget__total">This shift: earned ${money(ledger.earned)} · spent ${money(ledger.spent)}${
+        last ? ` · last payroll ${last.net >= 0 ? '+' : ''}${money(last.net)}` : ''
+      }</p>
+    </div>`;
+}
+
+/** Reflect the sound toggle on its button. */
+export function setSoundState(muted) {
+  const button = $('btn-sound');
+  button.classList.toggle('is-off', muted);
+  button.firstChild.textContent = muted ? 'Sound off' : 'Sound on';
+  button.setAttribute('aria-pressed', String(!muted));
 }

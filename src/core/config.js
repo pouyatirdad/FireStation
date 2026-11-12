@@ -10,7 +10,7 @@ export const CONFIG = {
   speeds: [1, 2, 4],
 
   camera: {
-    minZoom: 0.28,
+    minZoom: 0.07,
     maxZoom: 2.6,
     startZoom: 1.0,
     panSpeed: 950, // px/s while a pan key is held
@@ -19,36 +19,75 @@ export const CONFIG = {
 
   city: { seed: 7, name: 'Harbor City' },
 
-  // Credits pay for new apparatus. Vehicle prices live in `vehicles` above.
+  // The money model. Income is incident rewards, a knockdown fee, treatment fees
+  // and an hourly city subsidy that shrinks as the rating falls. Costs are crew
+  // wages, vehicle upkeep, medical kits and the penalties for losing buildings
+  // or people. Fees and penalties are scaled by the building's `value` factor.
   economy: {
-    start: 2500,
-    saved: 300,
+    start: 3000,
+    saved: 260, // knockdown fee
     rescued: 120,
+    treated: 160, // paid by the city for each patient an ambulance stabilises
+    lossPenalty: 350, // a destroyed building
+    casualtyPenalty: 700, // per person lost
+    speedBonus: { fast: 60, slow: 240, max: 0.5 }, // seconds since ignition; bonus on incident rewards
+    value: {
+      house: 0.8, apartment: 1.2, shop: 1, pharmacy: 1.1, office: 1.6,
+      hotel: 1.8, warehouse: 1.3, station: 2,
+    },
+    budget: {
+      hourEvery: 120, // real seconds per game hour (60 / clockRate)
+      subsidy: 260, // per game hour at full rating
+      subsidyFloor: 0.4, // share of the subsidy paid at rating 0
+      wage: 14, // per firefighter or paramedic, per game hour
+    },
+    kitPrice: 12, // per medical kit bought at a pharmacy
+    donation: { every: [420, 700], min: 300, max: 900, minRating: 60 },
   },
 
   // The fleet: each vehicle is a different tool, not a skin. Buy and sell them
-  // at the station; six bays in total.
+  // at the station; eight bays in total.
   vehicles: {
     engine: {
-      label: 'Engine', cost: 1000, crew: 3, speed: 6.4, capacity: 1800,
+      label: 'Engine', cost: 1000, crew: 3, speed: 8.2, capacity: 1800, upkeep: 24,
       hoseRange: 15, turretRange: 9, turretPower: 0.035, turretWater: 42,
       refillRate: 170, rescueTime: 3.6, refund: 0.6,
     },
     ladder: {
-      label: 'Ladder', cost: 1800, crew: 3, speed: 5.9, capacity: 1200,
+      label: 'Ladder', cost: 1800, crew: 3, speed: 7.6, capacity: 1200, upkeep: 36,
       hoseRange: 14, turretRange: 18, turretPower: 0.055, turretWater: 34,
       refillRate: 150, rescueTime: 3.4, refund: 0.6,
     },
     tanker: {
-      label: 'Tanker', cost: 1500, crew: 2, speed: 5.4, capacity: 6000,
+      label: 'Tanker', cost: 1500, crew: 2, speed: 7.0, capacity: 6000, upkeep: 26,
       hoseRange: 12, turretRange: 7, turretPower: 0.028, turretWater: 55,
       refillRate: 90, rescueTime: 3.8, refund: 0.6,
     },
     rescue: {
-      label: 'Rescue', cost: 1600, crew: 4, speed: 7.2, capacity: 600,
+      label: 'Rescue', cost: 1600, crew: 4, speed: 9.2, capacity: 600, upkeep: 30,
       hoseRange: 16, turretRange: 6, turretPower: 0.02, turretWater: 12,
       refillRate: 160, rescueTime: 2.2, refund: 0.6,
     },
+    // Medical: no water and no deck gun. The paramedics walk out to injured
+    // people and use one kit per patient; kits are restocked at the station or
+    // at a pharmacy.
+    ambulance: {
+      label: 'Ambulance', cost: 1400, crew: 2, speed: 10, capacity: 0, upkeep: 22,
+      hoseRange: 0, turretRange: 0, turretPower: 0, turretWater: 0,
+      refillRate: 0, rescueTime: 3, refund: 0.6,
+      medical: true, kits: 8, treatTime: 4, medRange: 22,
+    },
+  },
+
+  // Injured civilians and medical supplies.
+  medical: {
+    stationRestock: 0.5, // kits per second on the station apron
+    pharmacyRestock: 1.6, // kits per second beside a pharmacy (costs money)
+    pharmacyRange: 3.2, // tiles from the pharmacy footprint
+    injuredChance: 0.1, // per person who gets out of a burning building
+    rescuedInjuredChance: 0.45, // per person carried out by a firefighter
+    maxPerFire: 3,
+    survive: [130, 210], // seconds an untreated patient lasts
   },
 
   refillRange: 2.8, // tiles from a hydrant/station a vehicle can hook up
@@ -84,10 +123,14 @@ export const CONFIG = {
   // back until the shift has been running for a while.
   incidents: {
     firstCall: 20,
-    callEvery: [45, 70],
+    callEvery: [38, 60],
     bigAfter: 240,
     bigEvery: [300, 420],
-    maxActive: 5,
+    maxActive: 6,
+    // The map is huge: calls start near the station and the covered district
+    // grows as the shift goes on, up to the whole city.
+    radius: { start: 90, growPerSecond: 0.18 }, // tiles
+    medicalCall: 0.2, // share of small calls that are a medical emergency
     reward: { structure: 300, block: 600, rescue: 350, industrial: 1500, bigBlock: 1800, forest: 2200 },
   },
 

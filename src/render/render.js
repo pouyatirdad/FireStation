@@ -150,12 +150,36 @@ export function render(ctx, state, cam, view, opts = {}) {
 
   ctx.restore();
 
+  drawNight(ctx, state, W, H);
   drawFloatingBars(ctx, state, cam, view);
   drawHydrantPrompt(ctx, state, cam, view);
   drawSelectedLabel(ctx, state, cam, view);
   drawOffscreenAlarms(ctx, state, cam, view, now);
+  drawOffscreenPatients(ctx, state, cam, view, now);
   drawMinimap(ctx, state, cam, view);
   drawVignette(ctx, W, H);
+}
+
+// ------------------------------------------------------------- daylight ---
+
+/**
+ * 0 in full daylight, 1 at night. Dusk runs 18:00–21:00 and dawn 05:00–07:00,
+ * so a shift that starts at 07:00 begins in full light and reaches night after
+ * about eleven game hours.
+ */
+export function daylight(clockMinutes) {
+  const h = (((clockMinutes / 60) % 24) + 24) % 24;
+  if (h >= 7 && h < 18) return 0;
+  if (h >= 18 && h < 21) return (h - 18) / 3;
+  if (h >= 21 || h < 5) return 1;
+  return 1 - (h - 5) / 2;
+}
+
+function drawNight(ctx, state, W, H) {
+  const dark = daylight(state.clock);
+  if (dark <= 0.01) return;
+  ctx.fillStyle = `rgba(8,16,46,${0.46 * dark})`;
+  ctx.fillRect(0, 0, W, H);
 }
 
 // ---------------------------------------------------------------- ground ---
@@ -170,6 +194,9 @@ function drawGround(ctx, state, b, z) {
   const top = b.y0 * TILE;
   const width = (b.x1 - b.x0 + 1) * TILE;
   const height = (b.y1 - b.y0 + 1) * TILE;
+  // The city has 17 avenues and 16 streets; only paint the ones in view.
+  const vr = V_ROADS.filter((vx) => vx + 2 >= b.x0 && vx <= b.x1 + 1);
+  const hr = H_ROADS.filter((hy) => hy + 2 >= b.y0 && hy <= b.y1 + 1);
 
   ctx.fillStyle = PALETTE.sidewalk;
   ctx.fillRect(left, top, width, height);
@@ -212,8 +239,8 @@ function drawGround(ctx, state, b, z) {
 
   // Streets.
   ctx.fillStyle = PALETTE.road;
-  for (const vx of V_ROADS) ctx.fillRect(vx * TILE, top, 2 * TILE, height);
-  for (const hy of H_ROADS) ctx.fillRect(left, hy * TILE, width, 2 * TILE);
+  for (const vx of vr) ctx.fillRect(vx * TILE, top, 2 * TILE, height);
+  for (const hy of hr) ctx.fillRect(left, hy * TILE, width, 2 * TILE);
 
   // Centre lines, then intersections painted back over them so the dashes stop
   // at the junction like they should.
@@ -222,12 +249,12 @@ function drawGround(ctx, state, b, z) {
     ctx.lineWidth = 2;
     ctx.setLineDash([11, 13]);
     ctx.beginPath();
-    for (const vx of V_ROADS) {
+    for (const vx of vr) {
       const x = (vx + 1) * TILE;
       ctx.moveTo(x, top);
       ctx.lineTo(x, top + height);
     }
-    for (const hy of H_ROADS) {
+    for (const hy of hr) {
       const y = (hy + 1) * TILE;
       ctx.moveTo(left, y);
       ctx.lineTo(left + width, y);
@@ -237,15 +264,15 @@ function drawGround(ctx, state, b, z) {
   }
 
   ctx.fillStyle = PALETTE.road;
-  for (const vx of V_ROADS) {
-    for (const hy of H_ROADS) {
+  for (const vx of vr) {
+    for (const hy of hr) {
       ctx.fillRect(vx * TILE, hy * TILE, 2 * TILE, 2 * TILE);
     }
   }
 
   if (z >= 0.7) {
-    for (const vx of V_ROADS) {
-      for (const hy of H_ROADS) drawCrosswalks(ctx, vx * TILE, hy * TILE);
+    for (const vx of vr) {
+      for (const hy of hr) drawCrosswalks(ctx, vx * TILE, hy * TILE);
     }
   }
 
@@ -289,16 +316,16 @@ function drawGround(ctx, state, b, z) {
   }
 
   // Trees and hydrants sit on the ground, in front of the streets.
-  for (const tree of city.trees) {
+  for (const tree of z < 0.16 ? [] : city.trees) {
     if (tree.x < left - 40 || tree.x > left + width + 40) continue;
     if (tree.y < top - 40 || tree.y > top + height + 40) continue;
     drawTree(ctx, tree, z);
   }
-  for (const h of city.hydrants) {
+  for (const h of z < 0.3 ? [] : city.hydrants) {
     if (!inBounds(b, h.x, h.y)) continue;
     drawHydrant(ctx, (h.x + 0.5) * TILE, (h.y + 0.5) * TILE, z);
   }
-  for (const car of city.cars) {
+  for (const car of z < 0.3 ? [] : city.cars) {
     if (car.x < left - 50 || car.x > left + width + 50) continue;
     if (car.y < top - 50 || car.y > top + height + 50) continue;
     drawCar(ctx, car);
@@ -339,7 +366,7 @@ function drawCrosswalks(ctx, x, y) {
 // annotation, not UI: low contrast so they never fight the streets.
 function drawDistrictLabels(ctx, state, z) {
   if (z > 0.7) return;
-  const size = Math.max(22, Math.min(54, 13 / z));
+  const size = Math.max(22, Math.min(230, 14 / z));
   ctx.font = `800 ${Math.round(size)}px "Segoe UI", system-ui, sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
@@ -432,10 +459,14 @@ function drawEntities(ctx, state, bounds, now, z) {
   for (const person of state.fleeing) {
     list.push({ key: person.y + 8, person });
   }
+  for (const patient of state.patients ?? []) {
+    list.push({ key: patient.y + 6, patient });
+  }
   list.sort((a, b) => a.key - b.key);
   for (const item of list) {
     if (item.building) drawBuilding(ctx, state, item.building, now, z);
     else if (item.unit) drawUnit(ctx, item.unit, now, z);
+    else if (item.patient) drawPatient(ctx, item.patient, now, z);
     else drawCivilian(ctx, item.person, now);
   }
 }
@@ -486,6 +517,7 @@ function drawBuilding(ctx, state, b, now, z) {
   ctx.strokeRect(x + 2.5, y - e + 2.5, w - 5, h - 5);
 
   if (detailed) drawRoofDetails(ctx, b, x, y - e, w, h);
+  if (b.type === 'pharmacy') drawPharmacyMark(ctx, x, y - e, w, h);
   if (detailed && b.type === 'station') drawStationFace(ctx, b, x, facadeTop, w, e, z);
 
   if (b.state === 'burning') {
@@ -557,7 +589,22 @@ function drawTrapped(ctx, b, x, y, w, h, now) {
   }
 }
 
+function drawPharmacyMark(ctx, x, y, w, h) {
+  const size = Math.min(w, h) * 0.56;
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+  ctx.fillStyle = 'rgba(255,255,255,0.92)';
+  ctx.beginPath();
+  ctx.arc(cx, cy, size * 0.62, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#2f9e5a';
+  const arm = size * 0.2;
+  ctx.fillRect(cx - arm, cy - size * 0.46, arm * 2, size * 0.92);
+  ctx.fillRect(cx - size * 0.46, cy - arm, size * 0.92, arm * 2);
+}
+
 function drawRoofDetails(ctx, b, x, y, w, h) {
+  if (b.type === 'pharmacy') return;
   for (const d of b.details) {
     const dx = x + d.u * w;
     const dy = y + d.v * h;
@@ -732,12 +779,38 @@ function drawEngine(ctx, e, now) {
     }
   }
 
-  const body = type === 'tanker' ? '#a9b1b8' : type === 'rescue' ? '#d97a2b' : '#bf2f27';
+  const body = type === 'tanker' ? '#a9b1b8'
+    : type === 'rescue' ? '#d97a2b'
+      : type === 'ambulance' ? '#f1efe8' : '#bf2f27';
   ctx.fillStyle = body;
   rr(ctx, -42, -19, 84, 38, 6);
   ctx.fill();
 
-  if (type === 'rescue') {
+  if (type === 'ambulance') {
+    // White box body, a red stripe and a cross on the side, light bar on the cab.
+    ctx.fillStyle = '#f7f5ee';
+    rr(ctx, -40, -17, 60, 34, 5);
+    ctx.fill();
+    ctx.fillStyle = '#d3382f';
+    ctx.fillRect(-40, 3, 60, 5);
+    ctx.fillRect(-14, -9, 8, 22);
+    ctx.fillRect(-21, -2, 22, 8);
+    ctx.strokeStyle = 'rgba(0,0,0,0.18)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(-28, -16);
+    ctx.lineTo(-28, 16);
+    ctx.stroke();
+    ctx.fillStyle = '#e8e5dc';
+    rr(ctx, 14, -17, 27, 34, 4);
+    ctx.fill();
+    ctx.fillStyle = '#17222d';
+    ctx.fillRect(31, -13, 7, 26);
+    ctx.fillStyle = 'rgba(130,190,230,0.22)';
+    ctx.fillRect(31, -13, 3, 26);
+    ctx.fillStyle = '#d3382f';
+    ctx.fillRect(18, -17, 3, 34);
+  } else if (type === 'rescue') {
     // A boxy rescue van with an orange stripe and equipment lockers.
     ctx.fillStyle = '#ece7db';
     rr(ctx, -40, -17, 60, 34, 5);
@@ -879,30 +952,45 @@ function drawCrew(ctx, c, now) {
 
   ctx.rotate(c.angle + Math.PI / 2);
 
-  // Jacket.
-  ctx.fillStyle = '#e0ae3c';
+  // Jacket: yellow for firefighters, white and green for paramedics.
+  ctx.fillStyle = c.medic ? '#f1f4f0' : '#e0ae3c';
   ctx.beginPath();
   ctx.arc(0, 0, 7.2, 0, Math.PI * 2);
   ctx.fill();
-  ctx.strokeStyle = '#8f6a1e';
+  ctx.strokeStyle = c.medic ? '#3a9d6a' : '#8f6a1e';
   ctx.lineWidth = 1.4;
   ctx.stroke();
 
   // Reflective band.
-  ctx.fillStyle = '#ece8d9';
+  ctx.fillStyle = c.medic ? '#3a9d6a' : '#ece8d9';
   ctx.fillRect(-7.2, -2, 14.4, 2.4);
 
   // Helmet toward the direction of travel.
-  ctx.fillStyle = '#f3d34a';
+  ctx.fillStyle = c.medic ? '#e6f1ea' : '#f3d34a';
   ctx.beginPath();
   ctx.arc(0, -4.8, 3.8, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = '#c33a2c';
+  ctx.fillStyle = c.medic ? '#d64535' : '#c33a2c';
   ctx.beginPath();
   ctx.arc(0, -4.8, 1.6, 0, Math.PI * 2);
   ctx.fill();
 
   ctx.restore();
+
+  // Treatment progress, drawn upright above the paramedic.
+  if (c.medic && c.treatTimer > 0) {
+    const p = Math.min(1, c.treatTimer / CONFIG.vehicles.ambulance.treatTime);
+    ctx.strokeStyle = 'rgba(120,200,255,0.95)';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.arc(c.x, c.y - 17, 7, -Math.PI / 2, -Math.PI / 2 + p * Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(120,200,255,0.22)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(c.x, c.y - 17, 7, 0, Math.PI * 2);
+    ctx.stroke();
+  }
 
   // Rescue progress rings are drawn upright, above the firefighter.
   if (c.rescueTimer > 0) {
@@ -918,6 +1006,60 @@ function drawCrew(ctx, c, now) {
     ctx.arc(c.x, c.y - 17, 7, 0, Math.PI * 2);
     ctx.stroke();
   }
+}
+
+function drawPatient(ctx, p, now, z) {
+  ctx.save();
+  ctx.translate(p.x, p.y);
+
+  ctx.fillStyle = 'rgba(10,14,18,0.26)';
+  ctx.beginPath();
+  ctx.ellipse(1, 3, 13, 5, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // A person lying down, with a blanket once they have been treated.
+  ctx.fillStyle = p.treated ? '#7fc99a' : '#b9a58f';
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 10, 4.6, 0.15, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#efd3b4';
+  ctx.beginPath();
+  ctx.arc(-10, -1, 3.2, 0, Math.PI * 2);
+  ctx.fill();
+
+  if (!p.treated) {
+    // Urgency ring: full and green at first, draining to red as time runs out.
+    const frac = clamp(p.life / p.maxLife, 0, 1);
+    const hue = Math.round(frac * 110);
+    ctx.strokeStyle = `hsla(${hue},85%,55%,0.95)`;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(0, -2, 17, -Math.PI / 2, -Math.PI / 2 + frac * Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(0, -2, 17, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // A bouncing red cross so they can be spotted on a big map.
+    const bob = Math.sin(now * 6 + p.x) * 2.5;
+    const cy = -30 + bob;
+    ctx.fillStyle = 'rgba(255,255,255,0.95)';
+    ctx.fillRect(-7, cy - 7, 14, 14);
+    ctx.fillStyle = '#d3382f';
+    ctx.fillRect(-2, cy - 6, 4, 12);
+    ctx.fillRect(-6, cy - 2, 12, 4);
+  }
+
+  if (p.treatTimer > 0 && !p.treated) {
+    const prog = Math.min(1, p.treatTimer / CONFIG.vehicles.ambulance.treatTime);
+    ctx.fillStyle = 'rgba(8,12,16,0.7)';
+    ctx.fillRect(-14, 12, 28, 4);
+    ctx.fillStyle = '#7cc8ff';
+    ctx.fillRect(-14, 12, 28 * prog, 4);
+  }
+  ctx.restore();
 }
 
 function drawCivilian(ctx, person, now) {
@@ -1142,6 +1284,15 @@ function drawWorldSelection(ctx, state, now, z) {
         ctx.stroke();
         ctx.setLineDash([]);
       }
+    } else if (hover.kind === 'patient') {
+      const patient = (state.patients ?? []).find((q) => q.id === hover.id);
+      if (patient) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(patient.x, patient.y, 24, 0, Math.PI * 2);
+        ctx.stroke();
+      }
     } else if (hover.kind === 'unit') {
       const unit = state.units.find((u) => u.id === hover.id);
       if (unit && !(unit.kind === 'crew' && unit.riding)) {
@@ -1173,12 +1324,19 @@ function drawWorldSelection(ctx, state, now, z) {
   }
 
   if (!selected) return;
-  const entity = selected.kind === 'wildfire'
-    ? (state.wildfires ?? []).find((w) => w.id === selected.id)
-    : selected.kind === 'unit'
-      ? state.units.find((u) => u.id === selected.id)
-      : state.buildings.find((b) => b.id === selected.id);
+  const entity = lookup(state, selected);
   if (!entity) return;
+
+  if (selected.kind === 'patient') {
+    ctx.strokeStyle = PALETTE.select;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([7, 6]);
+    ctx.beginPath();
+    ctx.arc(entity.x, entity.y, 26, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    return;
+  }
 
   if (selected.kind === 'wildfire') {
     ctx.strokeStyle = PALETTE.select;
@@ -1207,7 +1365,7 @@ function drawWorldSelection(ctx, state, now, z) {
       ctx.lineWidth = 1.5;
       ctx.setLineDash([10, 12]);
       ctx.beginPath();
-      ctx.arc(entity.x, entity.y, entity.spec.hoseRange * TILE, 0, Math.PI * 2);
+      ctx.arc(entity.x, entity.y, (entity.spec.medical ? entity.spec.medRange : entity.spec.hoseRange) * TILE, 0, Math.PI * 2);
       ctx.stroke();
       ctx.strokeStyle = 'rgba(255,180,80,0.12)';
       ctx.beginPath();
@@ -1258,6 +1416,14 @@ function drawWorldSelection(ctx, state, now, z) {
 }
 
 // ------------------------------------------------------------- overlays ---
+
+function lookup(state, ref) {
+  if (!ref) return null;
+  if (ref.kind === 'wildfire') return (state.wildfires ?? []).find((w) => w.id === ref.id) ?? null;
+  if (ref.kind === 'patient') return (state.patients ?? []).find((q) => q.id === ref.id) ?? null;
+  if (ref.kind === 'unit') return state.units.find((u) => u.id === ref.id) ?? null;
+  return state.buildings.find((b) => b.id === ref.id) ?? null;
+}
 
 function nearestHydrantInReach(state, engine) {
   if (!engine) return null;
@@ -1401,15 +1567,14 @@ function drawTrappedBadge(ctx, cx, y, count) {
 function drawSelectedLabel(ctx, state, cam, view) {
   const selected = state.selected;
   if (!selected) return;
-  const entity = selected.kind === 'wildfire'
-    ? (state.wildfires ?? []).find((w) => w.id === selected.id)
-    : selected.kind === 'unit'
-      ? state.units.find((u) => u.id === selected.id)
-      : state.buildings.find((b) => b.id === selected.id);
+  const entity = lookup(state, selected);
   if (!entity) return;
 
   const isUnit = selected.kind === 'unit';
-  const p = isUnit
+  const isPatient = selected.kind === 'patient';
+  const p = isPatient
+    ? worldToScreen(cam, entity.x, entity.y - 46, view)
+    : isUnit
     ? worldToScreen(cam, entity.x, entity.y - (entity.kind === 'engine' ? 34 : 18), view)
     : selected.kind === 'wildfire'
       ? worldToScreen(cam, entity.x, entity.y - entity.radius - 18, view)
@@ -1422,12 +1587,16 @@ function drawSelectedLabel(ctx, state, cam, view) {
 
   const title = entity.name;
   let detail;
-  if (selected.kind === 'wildfire') {
+  if (isPatient) {
+    detail = entity.treated ? 'STABILISED' : `NEEDS AMBULANCE · ${Math.ceil(entity.life)}s LEFT`;
+  } else if (selected.kind === 'wildfire') {
     detail = `MAJOR INCIDENT · ${Math.round(entity.intensity * 100)}% · $${entity.reward ?? 0}`;
   } else if (isUnit) {
-    detail = entity.kind === 'engine'
-      ? `${entity.status.toUpperCase()} · ${Math.round((entity.water / entity.capacity) * 100)}% WATER${entity.supply ? ' · HYDRANT' : ''}`
-      : entity.status.toUpperCase();
+    detail = entity.kind !== 'engine'
+      ? entity.status.toUpperCase()
+      : entity.spec.medical
+        ? `${entity.status.toUpperCase()} · ${entity.kits}/${entity.spec.kits} KITS`
+        : `${entity.status.toUpperCase()} · ${Math.round((entity.water / entity.capacity) * 100)}% WATER${entity.supply ? ' · HYDRANT' : ''}`;
   } else if (entity.state === 'burning') {
     detail = `BURNING · ${Math.round(entity.fire * 100)}% · ${Math.round((entity.integrity / entity.maxIntegrity) * 100)}% STANDING`;
   } else if (entity.state === 'rubble') {
@@ -1493,9 +1662,71 @@ function drawOffscreenAlarms(ctx, state, cam, view, now) {
   }
 }
 
+function drawOffscreenPatients(ctx, state, cam, view, now) {
+  const pad = 34;
+  const pulse = 0.6 + 0.4 * Math.sin(now * 6);
+  for (const patient of state.patients ?? []) {
+    if (patient.treated) continue;
+    const p = worldToScreen(cam, patient.x, patient.y, view);
+    if (p.x > -20 && p.x < view.width + 20 && p.y > -20 && p.y < view.height + 20) continue;
+    const cx = clamp(p.x, pad, view.width - pad);
+    const cy = clamp(p.y, pad, view.height - pad);
+    const angle = Math.atan2(p.y - cy, p.x - cx);
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(angle);
+    ctx.fillStyle = `rgba(120,200,255,${0.5 + pulse * 0.4})`;
+    ctx.beginPath();
+    ctx.moveTo(9, 0);
+    ctx.lineTo(-5, -6);
+    ctx.lineTo(-5, 6);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+// The map is 200,000 tiles; the roads and buildings of the minimap change only
+// when something is lost, so they are painted once into an offscreen canvas.
+let miniCache = null;
+function miniStatic(state, mw, mh) {
+  const city = state.city;
+  const rubble = state.buildings.reduce((n, b) => n + (b.state === 'rubble' ? 1 : 0), 0);
+  if (miniCache && miniCache.city === city && miniCache.w === mw && miniCache.h === mh
+    && miniCache.rubble === rubble) {
+    return miniCache.canvas;
+  }
+  const canvas = miniCache?.canvas ?? document.createElement('canvas');
+  canvas.width = mw;
+  canvas.height = mh;
+  const g = canvas.getContext('2d');
+  const sx = mw / (city.w * TILE);
+  const sy = mh / (city.h * TILE);
+
+  g.fillStyle = '#2f353c';
+  g.fillRect(0, 0, mw, mh);
+  g.fillStyle = '#33482a';
+  for (const a of city.forestAreas ?? []) {
+    g.fillRect(a.x0 * TILE * sx, a.y0 * TILE * sy, (a.x1 - a.x0 + 1) * TILE * sx, (a.y1 - a.y0 + 1) * TILE * sy);
+  }
+  g.fillStyle = '#3c4a38';
+  for (const pk of city.parks) {
+    g.fillRect(pk.x0 * TILE * sx, pk.y0 * TILE * sy, (pk.x1 - pk.x0 + 1) * TILE * sx, (pk.y1 - pk.y0 + 1) * TILE * sy);
+  }
+  g.fillStyle = '#5a626b';
+  for (const vx of V_ROADS) g.fillRect(vx * TILE * sx, 0, Math.max(1, 2 * TILE * sx), mh);
+  for (const hy of H_ROADS) g.fillRect(0, hy * TILE * sy, mw, Math.max(1, 2 * TILE * sy));
+  for (const b of state.buildings) {
+    g.fillStyle = b.state === 'rubble' ? '#4d4a44' : b.type === 'pharmacy' ? '#7fcf9c' : '#7d848d';
+    g.fillRect(b.x * TILE * sx, b.y * TILE * sy, Math.max(1.2, b.w * TILE * sx), Math.max(1.2, b.h * TILE * sy));
+  }
+  miniCache = { canvas, city, w: mw, h: mh, rubble };
+  return canvas;
+}
+
 function drawMinimap(ctx, state, cam, view) {
   const city = state.city;
-  const mw = Math.round(Math.min(248, view.width * 0.23));
+  const mw = Math.round(Math.min(280, view.width * 0.25));
   const mh = Math.round((mw * city.h) / city.w);
   const x = view.width - mw - 16;
   const y = view.height - mh - 16;
@@ -1510,31 +1741,12 @@ function drawMinimap(ctx, state, cam, view) {
   ctx.lineWidth = 1;
   ctx.stroke();
 
-  ctx.fillStyle = '#2f353c';
-  ctx.fillRect(x, y, mw, mh);
+  ctx.drawImage(miniStatic(state, mw, mh), x, y);
 
-  ctx.fillStyle = '#3c4a38';
-  for (const p of city.parks) {
-    ctx.fillRect(x + p.x0 * TILE * sx, y + p.y0 * TILE * sy,
-      (p.x1 - p.x0 + 1) * TILE * sx, (p.y1 - p.y0 + 1) * TILE * sy);
-  }
-
-  ctx.fillStyle = '#5a626b';
-  for (const vx of V_ROADS) ctx.fillRect(x + vx * TILE * sx, y, 2 * TILE * sx, mh);
-  for (const hy of H_ROADS) ctx.fillRect(x, y + hy * TILE * sy, mw, 2 * TILE * sy);
-
-  ctx.fillStyle = '#7d848d';
-  for (const b of state.buildings) {
-    if (b.state === 'rubble') ctx.fillStyle = '#4d4a44';
-    else ctx.fillStyle = '#7d848d';
-    ctx.fillRect(x + b.x * TILE * sx, y + b.y * TILE * sy,
-      Math.max(1.5, b.w * TILE * sx), Math.max(1.5, b.h * TILE * sy));
-  }
-
-  ctx.fillStyle = '#63b8e8';
-  for (const h of city.hydrants) {
-    ctx.fillRect(x + (h.x + 0.5) * TILE * sx - 1, y + (h.y + 0.5) * TILE * sy - 1, 2, 2);
-  }
+  // Station 1, so the way home is never lost on a map this size.
+  const st = city.station;
+  ctx.fillStyle = '#ff5b4d';
+  ctx.fillRect(x + (st.x + st.w / 2) * TILE * sx - 3, y + (st.y + st.h / 2) * TILE * sy - 3, 6, 6);
 
   const pulse = 0.6 + 0.4 * Math.sin(state.time * 5);
   for (const b of state.buildings) {
@@ -1552,9 +1764,18 @@ function drawMinimap(ctx, state, cam, view) {
     ctx.fill();
   }
 
+  for (const patient of state.patients ?? []) {
+    if (patient.treated) continue;
+    ctx.fillStyle = `rgba(255,255,255,${0.7 + pulse * 0.3})`;
+    ctx.fillRect(x + patient.x * sx - 2.5, y + patient.y * sy - 2.5, 5, 5);
+    ctx.fillStyle = '#d3382f';
+    ctx.fillRect(x + patient.x * sx - 0.8, y + patient.y * sy - 2.5, 1.6, 5);
+    ctx.fillRect(x + patient.x * sx - 2.5, y + patient.y * sy - 0.8, 5, 1.6);
+  }
+
   for (const u of state.units) {
     if (u.kind === 'engine') {
-      ctx.fillStyle = '#63d6ff';
+      ctx.fillStyle = u.spec?.medical ? '#ffffff' : '#63d6ff';
       ctx.fillRect(x + u.x * sx - 2.5, y + u.y * sy - 2.5, 5, 5);
     } else if (!u.riding) {
       ctx.fillStyle = '#f0c648';

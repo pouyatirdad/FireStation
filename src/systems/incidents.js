@@ -9,16 +9,35 @@ import { rectsTouch } from '../core/math.js';
 import { addEvent } from './events.js';
 import { buildingRect, ignite } from './fire.js';
 import { startWildfire } from './wildfire.js';
+import { spawnPatient } from './medical.js';
 
 const SMALL = () => ['structure', 'structure', 'structure', 'rescue', 'block'];
 const BIG = ['industrial', 'bigBlock', 'forest'];
 
+/**
+ * How far from Station 1 (in tiles) a call can come from. It starts as the
+ * neighbourhood and grows through the shift until the whole city is covered.
+ */
+export function coverageRadius(state) {
+  const { start, growPerSecond } = CONFIG.incidents.radius;
+  return start + state.time * growPerSecond;
+}
+
+const inCoverage = (state, x, y, scale = 1) => {
+  const station = state.city.station;
+  const cx = station.x + station.w / 2;
+  const cy = station.y + station.h / 2;
+  return Math.hypot(x - cx, y - cy) <= coverageRadius(state) * scale;
+};
+
 function candidates(state, types = null) {
-  return state.buildings.filter((b) => (
+  const pool = state.buildings.filter((b) => (
     b.state === 'ok'
     && b.id !== 'station'
     && (!types || types.includes(b.type))
   ));
+  const near = pool.filter((b) => inCoverage(state, b.x + b.w / 2, b.y + b.h / 2));
+  return near.length ? near : pool;
 }
 
 function pick(state, types = null) {
@@ -106,9 +125,10 @@ function bigBlockFire(state) {
 }
 
 function forestFire(state) {
-  const tiles = state.city.forestTiles;
-  if (!tiles || tiles.length === 0) return null;
-  const tile = state.rng.pick(tiles);
+  const all = state.city.forestTiles;
+  if (!all || all.length === 0) return null;
+  const near = all.filter((t) => inCoverage(state, t.x, t.y, 1.4));
+  const tile = state.rng.pick(near.length ? near : all);
   const wildfire = startWildfire(
     state,
     (tile.x + 0.5) * TILE,
@@ -118,7 +138,15 @@ function forestFire(state) {
   return wildfire;
 }
 
+function medicalCall(state) {
+  if (state.patients.filter((p) => !p.treated).length >= 5) return null;
+  const building = pick(state, ['house', 'apartment', 'office', 'hotel', 'shop', 'pharmacy']);
+  if (!building) return null;
+  return spawnPatient(state, building, state.rng.range(0.3, 1));
+}
+
 function spawnSmall(state) {
+  if (state.rng.chance(CONFIG.incidents.medicalCall)) return medicalCall(state);
   const kind = state.rng.pick(SMALL());
   if (kind === 'rescue') return rescueJob(state);
   if (kind === 'block') return blockFire(state, 2);

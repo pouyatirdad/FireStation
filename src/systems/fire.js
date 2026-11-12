@@ -4,6 +4,9 @@ import { CONFIG, TILE } from '../core/config.js';
 import { rectsTouch } from '../core/math.js';
 import { addEvent } from './events.js';
 import { evacuate } from './civilians.js';
+import {
+  earn, money, spend, speedBonus, valueFactor,
+} from './economy.js';
 
 export const buildingRect = (b) => ({
   x: b.x * TILE,
@@ -40,13 +43,15 @@ function extinguish(state, building) {
   building.big = false;
   state.stats.saved += 1;
   state.rating = Math.min(CONFIG.rating.start, state.rating + 2);
-  state.credits += CONFIG.economy.saved;
-  addEvent(state, `Knockdown — ${building.name} saved`, 'good');
+  const fee = earn(state, Math.round(CONFIG.economy.saved * valueFactor(building)), 'knockdown');
+  addEvent(state, `Knockdown — ${building.name} saved (+${money(fee)})`, 'good');
   if (building.reward > 0) {
-    const reward = building.reward;
+    const bonus = speedBonus(state, building);
+    const reward = Math.round(building.reward * (1 + bonus));
     building.reward = 0;
-    state.credits += reward;
-    addEvent(state, `Incident closed — $${reward.toLocaleString('en-US')} — ${building.name}`, 'good');
+    earn(state, reward, 'incident');
+    const extra = bonus >= 0.05 ? ` incl. ${Math.round(bonus * 100)}% speed bonus` : '';
+    addEvent(state, `Incident closed — ${money(reward)}${extra} — ${building.name}`, 'good');
   }
 }
 
@@ -60,11 +65,13 @@ function destroy(state, building) {
   building.reward = 0;
   state.stats.lost += 1;
   state.rating = Math.max(0, state.rating - CONFIG.rating.perLost);
-  addEvent(state, `Building lost — ${building.name}`, 'bad');
+  const penalty = spend(state, Math.round(CONFIG.economy.lossPenalty * valueFactor(building)), 'loss');
+  addEvent(state, `Building lost — ${building.name} (−${money(penalty)})`, 'bad');
 
   if (trapped > 0) {
     state.stats.casualties += trapped;
     state.rating = Math.max(0, state.rating - trapped * 6);
+    spend(state, trapped * CONFIG.economy.casualtyPenalty, 'casualty');
     addEvent(
       state,
       `${trapped} ${trapped === 1 ? 'person' : 'people'} lost in the collapse of ${building.name}`,
