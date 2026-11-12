@@ -4,8 +4,11 @@
 
 import { TILE } from '../core/config.js';
 import { addEvent } from './events.js';
+import { earn, money } from './economy.js';
 import { buildingRect, ignite } from './fire.js';
 import { spawnSmoke } from './effects.js';
+import { placeNear } from './places.js';
+import { alignment } from './wind.js';
 
 let seq = 1;
 
@@ -25,7 +28,7 @@ export function startWildfire(state, x, y, reward = 2200) {
     big: true,
   };
   state.wildfires.push(wildfire);
-  addEvent(state, 'MAJOR INCIDENT — forest fire in the north woods', 'big');
+  addEvent(state, `MAJOR INCIDENT — forest fire in ${placeNear(state, x, y)}`, 'big');
   return wildfire;
 }
 
@@ -58,13 +61,20 @@ export function updateWildfires(state, dt) {
     const wf = state.wildfires[i];
     const water = wet.get(wf.id) ?? 0;
 
+    const wind = state.wind;
+    const gust = wind?.speed ?? 0;
     if (water > 0) wf.intensity -= water * dt * 1.7;
-    else wf.intensity = Math.min(1, wf.intensity + 0.005 * dt);
-    wf.radius = Math.min(wf.maxRadius, wf.radius + 0.22 * TILE * dt);
+    else wf.intensity = Math.min(1, wf.intensity + (0.005 + 0.004 * gust) * dt);
+    wf.radius = Math.min(wf.maxRadius, wf.radius + 0.22 * TILE * (1 + 0.7 * gust) * dt);
+    // The burning area creeps downwind, within the map.
+    if (wind) {
+      wf.x = Math.min(state.city.w * TILE - TILE, Math.max(TILE, wf.x + Math.cos(wind.dir) * gust * 0.45 * TILE * dt));
+      wf.y = Math.min(state.city.h * TILE - TILE, Math.max(TILE, wf.y + Math.sin(wind.dir) * gust * 0.45 * TILE * dt));
+    }
 
     if (wf.intensity <= 0.02) {
-      state.credits += wf.reward;
-      addEvent(state, `Forest fire contained — $${wf.reward}`, 'good');
+      earn(state, wf.reward, 'incident');
+      addEvent(state, `Forest fire contained — ${money(wf.reward)}`, 'good');
       state.wildfires.splice(i, 1);
       continue;
     }
@@ -77,7 +87,9 @@ export function updateWildfires(state, dt) {
         const rect = buildingRect(b);
         const cx = Math.max(rect.x, Math.min(wf.x, rect.x + rect.w));
         const cy = Math.max(rect.y, Math.min(wf.y, rect.y + rect.h));
-        if (Math.hypot(cx - wf.x, cy - wf.y) <= wf.radius + TILE) {
+        // Embers carry further downwind.
+        const lean = state.wind ? Math.max(0, alignment(state.wind, cx - wf.x, cy - wf.y)) * state.wind.speed : 0;
+        if (Math.hypot(cx - wf.x, cy - wf.y) <= wf.radius + TILE + lean * 7 * TILE) {
           ignite(state, b, 'wildfire');
         }
       }

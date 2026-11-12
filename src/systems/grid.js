@@ -1,28 +1,38 @@
 // Navigation over tile grids. The engine is allowed on roads and the station
 // apron; the crew may walk anywhere that is not a building footprint.
 //
-// A* is good enough here: the city is 2,400 tiles, and a path is asked for only
-// when somebody is ordered somewhere.
+// A* is good enough here: even the 520×384 city is open ground and straight
+// avenues, and a path is asked for only when somebody is ordered somewhere.
 
 import { TILE } from '../core/config.js';
 import { distToRect } from '../core/math.js';
 
+// Four ways to move: vehicles `drive` on roads and aprons (bridges included),
+// crews `walk` on anything that is not a building or open water, boats `sail` on
+// water (under bridges too), and divers `swim` anywhere but through a building.
 export function buildNav(city) {
   const { w, h, blocked, road, apron } = city;
+  const water = city.water ?? new Uint8Array(w * h);
   const walk = new Uint8Array(w * h);
   const drive = new Uint8Array(w * h);
+  const sail = new Uint8Array(w * h);
+  const swim = new Uint8Array(w * h);
   for (let i = 0; i < w * h; i++) {
-    walk[i] = blocked[i] ? 0 : 1;
+    walk[i] = blocked[i] || (water[i] && !road[i]) ? 0 : 1;
     drive[i] = road[i] || apron[i] ? 1 : 0;
+    sail[i] = water[i] ? 1 : 0;
+    swim[i] = blocked[i] ? 0 : 1;
   }
-  return { w, h, walk, drive };
+  return { w, h, walk, drive, sail, swim, water };
 }
+
+const gridOf = (nav, mode) => (mode === 'drive' ? nav.drive : mode === 'sail' ? nav.sail : mode === 'swim' ? nav.swim : nav.walk);
 
 export const index = (nav, x, y) => y * nav.w + x;
 
 export function passable(nav, mode, x, y) {
   if (x < 0 || y < 0 || x >= nav.w || y >= nav.h) return false;
-  return (mode === 'drive' ? nav.drive : nav.walk)[y * nav.w + x] === 1;
+  return gridOf(nav, mode)[y * nav.w + x] === 1;
 }
 
 export const walkableAt = (nav, x, y) => passable(nav, 'walk', x, y);
@@ -58,7 +68,7 @@ export function lineClear(nav, mode, ax, ay, bx, by) {
     ? Infinity
     : (stepY > 0 ? (y + 1) * TILE - ay : ay - y * TILE) / Math.abs(dy);
 
-  for (let guard = 0; guard < 512; guard++) {
+  for (let guard = 0; guard < 1024; guard++) {
     let t;
     if (tX < tY) {
       t = tX;
@@ -152,7 +162,7 @@ export function nearestPassable(nav, mode, tx, ty, maxR = 8) {
 
 /** A* on tile coordinates. Returns tiles after the start, or null. */
 export function findPath(nav, mode, from, to) {
-  const grid = mode === 'drive' ? nav.drive : nav.walk;
+  const grid = gridOf(nav, mode);
   const start = passable(nav, mode, from.x, from.y)
     ? { x: from.x, y: from.y }
     : nearestPassable(nav, mode, from.x, from.y, 4);
@@ -165,20 +175,32 @@ export function findPath(nav, mode, from, to) {
   if (!start) return null;
   if (start.x === goal.x && start.y === goal.y) return [];
 
+  // The map is ~200,000 tiles and crews re-path several times a second, so the
+  // search buffers are kept on the nav and reset by a generation stamp instead
+  // of being allocated and filled on every call.
   const size = nav.w * nav.h;
-  const gScore = new Float32Array(size).fill(Infinity);
-  const came = new Int32Array(size).fill(-1);
-  const closed = new Uint8Array(size);
+  const scratch = nav.scratch ?? (nav.scratch = {
+    gen: 0,
+    stamp: new Uint32Array(size),
+    closedStamp: new Uint32Array(size),
+    g: new Float32Array(size),
+    came: new Int32Array(size),
+  });
+  const gen = ++scratch.gen;
+  const { stamp, closedStamp, g: gBuf, came } = scratch;
+  const gAt = (i) => (stamp[i] === gen ? gBuf[i] : Infinity);
   const open = new MinHeap();
   const startIdx = start.y * nav.w + start.x;
-  gScore[startIdx] = 0;
+  stamp[startIdx] = gen;
+  gBuf[startIdx] = 0;
+  came[startIdx] = -1;
   open.push({ x: start.x, y: start.y, f: octile(goal.x - start.x, goal.y - start.y) });
 
   while (open.size > 0) {
     const cur = open.pop();
     const ci = cur.y * nav.w + cur.x;
-    if (closed[ci]) continue;
-    closed[ci] = 1;
+    if (closedStamp[ci] === gen) continue;
+    closedStamp[ci] = gen;
 
     if (cur.x === goal.x && cur.y === goal.y) {
       const path = [];
@@ -200,10 +222,11 @@ export function findPath(nav, mode, from, to) {
         if (!grid[cur.y * nav.w + nx] || !grid[ny * nav.w + cur.x]) continue;
       }
       const ni = ny * nav.w + nx;
-      if (closed[ni]) continue;
-      const ng = gScore[ci] + cost;
-      if (ng < gScore[ni]) {
-        gScore[ni] = ng;
+      if (closedStamp[ni] === gen) continue;
+      const ng = gBuf[ci] + cost;
+      if (ng < gAt(ni)) {
+        stamp[ni] = gen;
+        gBuf[ni] = ng;
         came[ni] = ci;
         open.push({ x: nx, y: ny, f: ng + octile(goal.x - nx, goal.y - ny) });
       }

@@ -8,8 +8,17 @@ import {
   createGame, startShift, update, pickAt, selectUnit, selectBuilding,
   commandMove, commandDispatch, commandDeploy, commandRecall, commandReturnHome,
   commandBuyVehicle, commandSellVehicle, commandHydrant, commandDispatchWildfire,
+  commandDispatchPatient, commandDispatchBlockade, commandPharmacy, commandHospital,
+  selectPatient, selectBlockade, selectVictim, commandDispatchVictim,
+  commandBuyStation, commandLoan, commandRepay, commandInsurance,
+  commandTrain, commandAcceptContract,
   selectWildfire, getSelected, serialize, loadState,
 } from './systems/game.js';
+import { createAudio } from './systems/audio.js';
+import { spawnPatient } from './systems/medical.js';
+import { trafficAccident, pileUp } from './systems/chains.js';
+import { drowningCall } from './systems/water.js';
+import { activeFires } from './systems/fire.js';
 import { addEvent } from './systems/events.js';
 import { engineForUnit } from './systems/units.js';
 import { startWildfire } from './systems/wildfire.js';
@@ -21,6 +30,7 @@ const canvas = document.getElementById('game');
 const stage = document.getElementById('stage');
 const ctx = canvas.getContext('2d', { alpha: false });
 
+const audio = createAudio();
 const view = { width: 1, height: 1, dpr: 1 };
 let state = createGame(CONFIG.city.seed);
 let cam = createCamera(state);
@@ -63,6 +73,7 @@ function frame(dt) {
   panCamera(dt || 0);
   clampCamera(cam, state, view);
   render(ctx, state, cam, view, { now: state.time });
+  audio.update(state, cam, view);
   hud.update(state);
 }
 
@@ -107,6 +118,11 @@ function clearHover() {
 }
 
 canvas.addEventListener('contextmenu', (ev) => ev.preventDefault());
+
+// Browsers only start audio after a gesture; the first click or key does it.
+const unlockAudio = () => audio.unlock();
+window.addEventListener('pointerdown', unlockAudio, { capture: true });
+window.addEventListener('keydown', unlockAudio, { capture: true });
 
 canvas.addEventListener('pointerdown', (ev) => {
   if (!state.running || state.over) return;
@@ -167,11 +183,15 @@ canvas.addEventListener('pointerup', (ev) => {
   const hit = pickAt(state, world.x, world.y, 10 / cam.zoom);
   if (hit) {
     if (hit.kind === 'unit') selectUnit(state, hit.id);
+    else if (hit.kind === 'patient') selectPatient(state, hit.id);
+    else if (hit.kind === 'blockade') selectBlockade(state, hit.id);
+    else if (hit.kind === 'victim') selectVictim(state, hit.id);
     else if (hit.kind === 'wildfire') selectWildfire(state, hit.id);
     else selectBuilding(state, hit.id);
   } else {
     state.selected = null;
   }
+  if (hit) audio.play('select');
   updateHover(ev);
 });
 
@@ -196,12 +216,25 @@ function orderAt(mx, my) {
   const world = toWorld(mx, my);
   const hit = pickAt(state, world.x, world.y, 12 / cam.zoom);
   if (hit?.kind === 'wildfire') {
-    commandDispatchWildfire(state, hit.id);
+    if (commandDispatchWildfire(state, hit.id)) audio.play('radio');
+    return;
+  }
+  if (hit?.kind === 'patient') {
+    if (commandDispatchPatient(state, hit.id)) audio.play('radio');
+    return;
+  }
+  if (hit?.kind === 'blockade') {
+    if (commandDispatchBlockade(state, hit.id)) audio.play('radio');
+    return;
+  }
+  if (hit?.kind === 'victim') {
+    if (commandDispatchVictim(state, hit.id)) audio.play('radio');
     return;
   }
   const buildingId = hit?.kind === 'building' ? hit.id : null;
   if (commandMove(state, world.x, world.y, buildingId)) {
     state.ui.orderMark = { x: world.x, y: world.y, t: state.time };
+    audio.play('radio');
   }
 }
 
@@ -226,7 +259,7 @@ function selectedEntity() {
 function centerOnSelected() {
   const entity = selectedEntity();
   if (!entity) return;
-  if (entity.kind === 'wildfire') {
+  if (entity.kind === 'wildfire' || entity.kind === 'patient' || entity.kind === 'blockade' || entity.kind === 'victim') {
     cam.x = entity.x;
     cam.y = entity.y;
   } else if (entity.kind === 'engine' || entity.kind === 'crew') {
@@ -239,8 +272,113 @@ function centerOnSelected() {
   clampCamera(cam, state, view);
 }
 
+/** Everything that needs a response, in a stable order, for the Tab key. */
+function incidents() {
+  const list = [];
+  for (const b of activeFires(state)) {
+    list.push({ kind: 'building', id: b.id, x: (b.x + b.w / 2) * TILE, y: (b.y + b.h / 2) * TILE });
+  }
+  for (const w of state.wildfires ?? []) list.push({ kind: 'wildfire', id: w.id, x: w.x, y: w.y });
+  for (const q of state.patients) {
+    if (!q.treated) list.push({ kind: 'patient', id: q.id, x: q.x, y: q.y });
+  }
+  for (const w of state.blockades) list.push({ kind: 'blockade', id: w.id, x: w.x, y: w.y });
+  for (const v of state.victims) list.push({ kind: 'victim', id: v.id, x: v.x, y: v.y });
+  for (const b of state.buildings) {
+    if ((b.trapped ?? 0) > 0 && b.state !== 'burning' && b.state !== 'rubble') {
+      list.push({ kind: 'building', id: b.id, x: (b.x + b.w / 2) * TILE, y: (b.y + b.h / 2) * TILE });
+    }
+  }
+  return list;
+}
+
+let incidentCursor = -1;
+function jumpToNextIncident() {
+  const list = incidents();
+  if (list.length === 0) {
+    addEvent(state, 'No active incidents', 'info');
+    return;
+  }
+  incidentCursor = (incidentCursor + 1) % list.length;
+  const target = list[incidentCursor];
+  cam.x = target.x;
+  cam.y = target.y;
+  if (cam.zoom < 0.7) cam.zoom = 0.9;
+  if (target.kind === 'patient') selectPatient(state, target.id);
+  else if (target.kind === 'blockade') selectBlockade(state, target.id);
+  else if (target.kind === 'victim') selectVictim(state, target.id);
+  else if (target.kind === 'wildfire') selectWildfire(state, target.id);
+  else selectBuilding(state, target.id);
+  clampCamera(cam, state, view);
+}
+
+function centerOnStation() {
+  const station = state.city.station;
+  cam.x = (station.x + station.w / 2) * TILE;
+  cam.y = (station.y + station.h / 2) * TILE;
+  clampCamera(cam, state, view);
+}
+
+/** Jump to something from the incident list: select it and bring it on screen. */
+function showIncident(kind, id) {
+  let x;
+  let y;
+  if (kind === 'building') {
+    const b = state.buildings.find((q) => q.id === id);
+    if (!b) return;
+    x = (b.x + b.w / 2) * TILE;
+    y = (b.y + b.h / 2) * TILE;
+    selectBuilding(state, id);
+  } else if (kind === 'wildfire') {
+    const w = (state.wildfires ?? []).find((q) => q.id === id);
+    if (!w) return;
+    x = w.x;
+    y = w.y;
+    selectWildfire(state, id);
+  } else if (kind === 'patient') {
+    const q = state.patients.find((e) => e.id === id);
+    if (!q) return;
+    x = q.x;
+    y = q.y;
+    selectPatient(state, id);
+  } else if (kind === 'blockade') {
+    const w = state.blockades.find((e) => e.id === id);
+    if (!w) return;
+    x = w.x;
+    y = w.y;
+    selectBlockade(state, id);
+  } else if (kind === 'victim') {
+    const v = state.victims.find((e) => e.id === id);
+    if (!v) return;
+    x = v.x;
+    y = v.y;
+    selectVictim(state, id);
+  } else return;
+  cam.x = x;
+  cam.y = y;
+  if (cam.zoom < 0.7) cam.zoom = 0.9;
+  clampCamera(cam, state, view);
+}
+
+function centerOnUnit(id) {
+  const unit = state.units.find((u) => u.id === id);
+  if (!unit) return;
+  selectUnit(state, id);
+  cam.x = unit.x;
+  cam.y = unit.y;
+  if (cam.zoom < 0.5) cam.zoom = 0.8;
+  clampCamera(cam, state, view);
+}
+
+function toggleSound() {
+  audio.unlock();
+  hud.setSoundState(audio.toggleMute());
+}
+
 function onAction(action, data = {}) {
   switch (action) {
+    case 'pharmacy': commandPharmacy(state); break;
+    case 'hospital': commandHospital(state); break;
     case 'dispatch': commandDispatch(state); break;
     case 'deploy': commandDeploy(state); break;
     case 'recall': commandRecall(state); break;
@@ -256,11 +394,24 @@ function onAction(action, data = {}) {
     case 'open-station': toggleStation(); break;
     case 'close-station': hideOverlay(stationScreen); break;
     case 'buy-vehicle': buyApparatus(data.type ?? 'engine'); break;
+    case 'station-tab': hud.setStationTab(data.tab ?? 'fleet'); break;
+    case 'deliver-to': hud.setBuyStation(Number(data.station ?? 0)); break;
+    case 'buy-station': commandBuyStation(state, 1); break;
+    case 'buy-dock': commandBuyStation(state, 2); break;
+    case 'take-loan': commandLoan(state); break;
+    case 'repay-loan': commandRepay(state); break;
+    case 'toggle-insurance': commandInsurance(state); break;
+    case 'train': commandTrain(state, data.kind); break;
+    case 'accept-contract': commandAcceptContract(state, data.id); break;
     case 'sell-vehicle': sellApparatus(data.engine); break;
     case 'save-game': saveGame(); break;
     case 'load-game': loadGame(); break;
     case 'new-shift': restart(); break;
     default: break;
+  }
+  if (!stationScreen.hidden) {
+    hud.updateStation(state);
+    hud.update(state, true);
   }
 }
 
@@ -305,7 +456,7 @@ function toggleStation() {
 }
 
 function buyApparatus(type) {
-  const vehicle = commandBuyVehicle(state, type);
+  const vehicle = commandBuyVehicle(state, type, hud.getBuyStation());
   if (vehicle) {
     hud.updateStation(state);
     hud.update(state, true);
@@ -320,7 +471,7 @@ function sellApparatus(id) {
 
 // ------------------------------------------------------------------- save ---
 
-const SAVE_KEY = 'firestation.save.v1';
+const SAVE_KEY = 'firestation.save.v5';
 
 function hasSave() {
   try {
@@ -420,6 +571,11 @@ window.addEventListener('keydown', (ev) => {
 
   const overlayOpen = !helpScreen.hidden || !stationScreen.hidden;
 
+  if (key === 'm' && !ev.repeat) {
+    toggleSound();
+    return;
+  }
+
   // B is the one gameplay key that also works inside a panel, so it can close it.
   if (key === 'b' && !ev.repeat) {
     ev.preventDefault();
@@ -440,6 +596,17 @@ window.addEventListener('keydown', (ev) => {
     return;
   }
 
+  if (key === 'tab') {
+    ev.preventDefault();
+    jumpToNextIncident();
+    return;
+  }
+  if (key === 'home') {
+    ev.preventDefault();
+    centerOnStation();
+    return;
+  }
+
   if (key >= '1' && key <= '9') {
     const engine = state.engines[Number(key) - 1];
     if (engine) selectUnit(state, engine.id);
@@ -452,6 +619,8 @@ window.addEventListener('keydown', (ev) => {
     case 'r': commandRecall(state); break;
     case 'h': commandReturnHome(state); break;
     case 'g': commandHydrant(state); break;
+    case 'p': commandPharmacy(state); break;
+    case 'k': commandHospital(state); break;
     case 'c': centerOnSelected(); break;
     case '+':
     case '=':
@@ -491,7 +660,11 @@ hud.mount(state, {
   onStart: startGame,
   onContinue: loadGame,
   onRestart: restart,
+  onSound: toggleSound,
+  onIncident: showIncident,
+  onUnitCenter: centerOnUnit,
 });
+hud.setSoundState(audio.isMuted());
 
 if (hasSave()) document.getElementById('btn-continue').hidden = false;
 
@@ -607,6 +780,58 @@ if (params.has('wildfire')) {
     cam.zoom = 0.8;
     clampCamera(cam, state, view);
   }
+}
+if (params.has('crash')) {
+  startGame();
+  const wreck = trafficAccident(state, () => true);
+  if (wreck) {
+    cam.x = wreck.x;
+    cam.y = wreck.y;
+    cam.zoom = 0.9;
+    clampCamera(cam, state, view);
+  }
+}
+if (params.has('pileup')) {
+  startGame();
+  pileUp(state, () => true);
+  if (state.blockades[0]) {
+    cam.x = state.blockades[0].x;
+    cam.y = state.blockades[0].y;
+    cam.zoom = 0.6;
+    clampCamera(cam, state, view);
+  }
+}
+if (params.has('water')) {
+  startGame();
+  commandBuyStation(state, 2);
+  for (const t of ['fireboat', 'rescueboat', 'divetruck', 'airtanker', 'medcar', 'ambubus']) commandBuyVehicle(state, t);
+}
+if (params.has('drown')) {
+  startGame();
+  drowningCall(state, () => true);
+  const v = state.victims[0];
+  if (v) {
+    cam.x = v.x;
+    cam.y = v.y;
+    cam.zoom = 0.9;
+    clampCamera(cam, state, view);
+  }
+}
+if (params.has('heli')) {
+  startGame();
+  commandBuyVehicle(state, 'helicopter');
+  commandBuyVehicle(state, 'command');
+}
+if (params.has('injured')) {
+  // Two hurt people near the station, for looking at ambulances.
+  startGame();
+  const near = state.buildings.filter((b) => b.type !== 'station')
+    .sort((a, b) => Math.hypot(a.x - 54, a.y - 47) - Math.hypot(b.x - 54, b.y - 47));
+  for (const b of near.slice(0, 2)) spawnPatient(state, b, 0.6);
+  cam.x = (near[0].x + near[0].w / 2) * TILE;
+  cam.y = (near[0].y + near[0].h / 2) * TILE;
+  cam.zoom = 1.1;
+  clampCamera(cam, state, view);
 }
 if (params.has('station')) {
   startGame();

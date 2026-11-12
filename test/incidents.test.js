@@ -71,7 +71,12 @@ test('a fire with an incident reward pays when it is knocked down', () => {
 
   assert.equal(building.state, 'out');
   assert.equal(building.reward, 0);
-  assert.equal(state.credits, credits + 750 + CONFIG.economy.saved);
+  // The reward carries a speed bonus (it was put out quickly) and the knockdown
+  // fee is scaled by what the building is worth.
+  const fee = Math.round(CONFIG.economy.saved * CONFIG.economy.value[building.type]);
+  const gained = state.credits - credits;
+  assert.ok(gained >= 750 + fee, `only gained ${gained}`);
+  assert.ok(gained <= Math.round(750 * (1 + CONFIG.economy.speedBonus.max)) + fee, `gained too much: ${gained}`);
 });
 
 test('a crew can be sent to a forest fire and put it out', () => {

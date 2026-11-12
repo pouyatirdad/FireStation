@@ -6,7 +6,8 @@
 // and crew — and the selection tells the orders where to go.
 
 import { CONFIG, TILE } from '../core/config.js';
-import { angleTo, approachAngle, dist, distToRect } from '../core/math.js';
+import { SEA_Y } from '../data/city.js';
+import { angleTo, approachAngle, clamp, closestOnRect, dist, distToRect } from '../core/math.js';
 import {
   findPath, nearestPassable, passable, smoothPath, standTileForRect, tileOf,
 } from './grid.js';
@@ -14,6 +15,13 @@ import { addEvent } from './events.js';
 import { activeFires, buildingRect } from './fire.js';
 import { streamImpact, spawnRescue } from './effects.js';
 import { rescuePerson } from './civilians.js';
+import { earn, spend } from './economy.js';
+import {
+  findPatient, hospitalInReach, isMedical, nearestHospital, nearestPatient, nearestPharmacy,
+  restockKits, treatPatient, unloadCargo,
+} from './medical.js';
+import { workOnBlockade } from './blockades.js';
+import { findVictim, rescueVictim } from './water.js';
 
 const CREW_OFFSETS = [
   { a: 0.85, r: 26 },
@@ -31,7 +39,7 @@ export function createUnits(state) {
   state.vehicleCount = {};
   state.nextCrew = 1;
 
-  const first = spawnVehicle(state, 'engine');
+  const first = spawnVehicle(state, 'engine', 0);
   state.activeEngineId = first.id;
   syncUnits(state);
 }
@@ -43,18 +51,44 @@ function syncUnits(state) {
 export const vehicleSpec = (type) => CONFIG.vehicles[type] ?? null;
 export const vehicleCost = (type) => CONFIG.vehicles[type]?.cost ?? 0;
 
-function spawnVehicle(state, type) {
-  const spec = CONFIG.vehicles[type];
-  if (!spec) return null;
+export const isFirefighter = (engine) => !engine?.spec?.medical && !engine?.spec?.command && !engine?.spec?.diver;
+
+/** The stations the player owns (Station 1 always; Station 2 once bought). */
+export const ownsStation = (state, index) => Boolean(state.ownedStations?.[index] ?? index === 0);
+
+/** A free bay at an owned station, preferring `station` if given. -1 if none. */
+export function freeBay(state, station = null, sea = false) {
+  const taken = new Set(state.engines.map((e) => e.bayIndex));
+  const order = station != null ? [station] : state.city.stations.map((_, i) => i);
+  for (const st of order) {
+    if (!ownsStation(state, st)) continue;
+    // Boats berth at the dock, everything else parks on an apron.
+    if (Boolean(state.city.stations[st]?.sea) !== sea) continue;
+    for (let i = 0; i < state.city.bays.length; i++) {
+      if (state.city.bays[i].station === st && !taken.has(i)) return i;
+    }
+  }
+  return -1;
+}
+
+export const totalBays = (state) => state.city.bays.filter((b) => !b.sea && ownsStation(state, b.station)).length;
+export const totalBerths = (state) => state.city.bays.filter((b) => b.sea && ownsStation(state, b.station)).length;
+
+function spawnVehicle(state, type, station = null) {
+  const base = CONFIG.vehicles[type];
+  if (!base) return null;
+  const bayIndex = freeBay(state, base.boat ? 2 : station === 2 ? null : station, Boolean(base.boat));
+  if (bayIndex < 0) return null;
+  const spec = { ...base };
   state.vehicleCount[type] = (state.vehicleCount[type] ?? 0) + 1;
   const number = state.vehicleCount[type];
-  const bayIndex = state.engines.length % state.city.bays.length;
   const bay = state.city.bays[bayIndex];
   const engine = {
     id: `${type}${number}`,
     kind: 'engine',
     type,
     spec,
+    base,
     number,
     bayIndex,
     name: `${spec.label} ${number}`,
@@ -76,6 +110,15 @@ function spawnVehicle(state, type) {
     lowWarned: false,
     status: 'in quarters',
     crewIds: [],
+    kits: spec.kits ?? 0,
+    kitAcc: 0,
+    patientId: null,
+    cargo: [],
+    goal: null,
+    blockadeId: null,
+    victimId: null,
+    mission: null,
+    worked: false,
   };
   state.engines.push(engine);
   for (let i = 0; i < spec.crew; i++) spawnCrew(state, engine);
@@ -102,6 +145,12 @@ function spawnCrew(state, engine) {
     rescueTimer: 0,
     rescueId: null,
     wildfireId: null,
+    patientId: null,
+    treatTimer: 0,
+    idleFor: 0,
+    victimId: null,
+    diver: Boolean(engine.spec?.diver),
+    medic: Boolean(engine.spec?.medical),
     status: 'aboard',
   };
   engine.crewIds.push(crew.id);
@@ -109,23 +158,42 @@ function spawnCrew(state, engine) {
   return crew;
 }
 
-/** Buy a vehicle of any type at the station, if a bay is free and it is affordable. */
-export function buyVehicle(state, type = 'engine') {
+/** Buy a vehicle of any type, if a bay is free at the chosen station and it is affordable. */
+export function buyVehicle(state, type = 'engine', station = null) {
   const spec = CONFIG.vehicles[type];
   if (!spec) return null;
-  if (state.engines.length >= state.city.bays.length) {
-    addEvent(state, 'All apparatus bays are full', 'warn');
+  if (spec.boat) {
+    station = 2;
+    if (!ownsStation(state, 2)) {
+      addEvent(state, 'Open the Harbour Dock first — boats berth there', 'warn');
+      return null;
+    }
+  } else if (station === 2) {
+    station = null;
+  }
+  if (station != null && !ownsStation(state, station)) {
+    addEvent(state, `${state.city.stations[station]?.name ?? 'That station'} has not been bought yet`, 'warn');
+    return null;
+  }
+  if (freeBay(state, station, Boolean(spec.boat)) < 0) {
+    addEvent(
+      state,
+      spec.boat ? 'Every berth at the dock is taken'
+        : station != null ? `${state.city.stations[station].name} has no free bay` : 'All apparatus bays are full',
+      'warn',
+    );
     return null;
   }
   if (state.credits < spec.cost) {
     addEvent(state, `Not enough credits — $${spec.cost.toLocaleString('en-US')} needed`, 'warn');
     return null;
   }
-  state.credits -= spec.cost;
-  const engine = spawnVehicle(state, type);
+  spend(state, spec.cost, 'vehicle');
+  const engine = spawnVehicle(state, type, station);
   syncUnits(state);
   state.activeEngineId = engine.id;
-  addEvent(state, `${engine.name} in service`, 'good');
+  const home = state.city.stations[state.city.bays[engine.bayIndex].station]?.name ?? 'the station';
+  addEvent(state, `${engine.name} in service at ${home}`, 'good');
   return engine;
 }
 
@@ -137,7 +205,8 @@ export function sellVehicle(state, engine) {
   const ids = new Set(engine.crewIds);
   state.crew = state.crew.filter((c) => !ids.has(c.id));
   syncUnits(state);
-  state.credits += refund;
+  earn(state, refund, 'vehicle');
+  state.patients?.forEach((p) => { if (p.claimedBy === engine.id) p.claimedBy = null; });
   if (state.selected?.id === engine.id) state.selected = null;
   if (state.activeEngineId === engine.id) state.activeEngineId = state.engines[0]?.id ?? null;
   addEvent(state, `${engine.name} sold — $${refund.toLocaleString('en-US')}`, 'info');
@@ -149,11 +218,13 @@ export function buyEngine(state) {
 }
 
 function vehicleBase(state, type, overrides = {}) {
-  const spec = CONFIG.vehicles[type] ?? CONFIG.vehicles.engine;
+  const base = CONFIG.vehicles[type] ?? CONFIG.vehicles.engine;
+  const spec = { ...base };
   return {
     kind: 'engine',
     type,
     spec,
+    base,
     number: 1,
     bayIndex: 0,
     name: spec.label,
@@ -175,6 +246,15 @@ function vehicleBase(state, type, overrides = {}) {
     lowWarned: false,
     status: 'in quarters',
     crewIds: [],
+    kits: spec.kits ?? 0,
+    kitAcc: 0,
+    patientId: null,
+    cargo: [],
+    goal: null,
+    blockadeId: null,
+    victimId: null,
+    mission: null,
+    worked: false,
     ...overrides,
   };
 }
@@ -199,6 +279,8 @@ export function restoreFleet(state, saved = {}) {
       water: entry.water ?? CONFIG.vehicles[type].capacity,
       targetId: entry.targetId ?? null,
       supply: entry.supply ?? null,
+      kits: entry.kits ?? CONFIG.vehicles[type].kits ?? 0,
+      cargo: (entry.cargo ?? []).map((c) => ({ ...c })),
     });
     state.vehicleCount[type] = Math.max(state.vehicleCount[type] ?? 0, engine.number);
     state.engines.push(engine);
@@ -226,6 +308,12 @@ export function restoreFleet(state, saved = {}) {
       rescueTimer: 0,
       rescueId: null,
       wildfireId: entry.wildfireId ?? null,
+      patientId: null,
+      treatTimer: 0,
+      idleFor: 0,
+      victimId: null,
+      diver: Boolean(engine.spec?.diver),
+      medic: Boolean(engine.spec?.medical),
       status: entry.riding !== false ? 'aboard' : 'standing by',
     };
     state.nextCrew = Math.max(state.nextCrew, number + 1);
@@ -271,10 +359,24 @@ export function activeEngine(state) {
 // -------------------------------------------------------------- helpers ---
 
 function nearStation(state, engine) {
-  const station = state.city.station;
-  const cx = (station.x + station.w / 2) * TILE;
-  const cy = (station.y + station.h / 2) * TILE;
-  return dist(engine.x, engine.y, cx, cy) < 8 * TILE;
+  return state.city.stations.some((st, i) => {
+    if (!ownsStation(state, i)) return false;
+    const b = st.building;
+    return dist(engine.x, engine.y, (b.x + b.w / 2) * TILE, (b.y + b.h / 2) * TILE) < 8 * TILE;
+  });
+}
+
+/** Extra spray power for crews near a parked command car, plus fire training. */
+export function firePower(state, x, y) {
+  let boost = 1 + CONFIG.economy.training.fire * (state.training?.fire ?? 0);
+  for (const e of state.engines) {
+    if (e.spec.command && e.path.length === 0
+      && dist(e.x, e.y, x, y) <= CONFIG.command.range * TILE) {
+      boost *= 1 + CONFIG.command.aura;
+      break;
+    }
+  }
+  return boost;
 }
 
 function hydrantInReach(state, engine) {
@@ -307,8 +409,150 @@ export function nearestHydrant(state, engine) {
 
 // ---------------------------------------------------------------- orders ---
 
+/** The nearest water tile to a world point within `maxTiles`, or null. */
+export function nearestWater(state, x, y, maxTiles) {
+  const city = state.city;
+  const cx = Math.floor(x / TILE);
+  const cy = Math.floor(y / TILE);
+  let best = null;
+  let bestD = Infinity;
+  for (let ty = Math.max(0, cy - maxTiles); ty <= Math.min(city.h - 1, cy + maxTiles); ty++) {
+    for (let tx = Math.max(0, cx - maxTiles); tx <= Math.min(city.w - 1, cx + maxTiles); tx++) {
+      if (!city.water[ty * city.w + tx]) continue;
+      const d = (tx - cx) ** 2 + (ty - cy) ** 2;
+      if (d < bestD) {
+        bestD = d;
+        best = { x: tx, y: ty };
+      }
+    }
+  }
+  return best;
+}
+
+/** Can a fireboat put water on something at (x, y) from the water? */
+export function boatCanReach(state, engine, x, y, extraTiles = 0) {
+  const reach = engine.spec.turretRange + extraTiles;
+  const tile = nearestWater(state, x, y, Math.ceil(reach));
+  if (!tile) return false;
+  return Math.hypot((tile.x + 0.5) * TILE - x, (tile.y + 0.5) * TILE - y) <= reach * TILE;
+}
+
+/** A boat sails to the water tile nearest the target, within its reach. */
+function orderBoat(state, engine, wx, wy, buildingId, wildfireId) {
+  const building = buildingOf(state, buildingId);
+  const wf = wildfireId ? (state.wildfires ?? []).find((w) => w.id === wildfireId) : null;
+  let goal = null;
+  if ((building || wf) && engine.spec.turretRange > 0) {
+    let px;
+    let py;
+    let slack = 0;
+    if (building) {
+      px = (building.x + building.w / 2) * TILE;
+      py = (building.y + building.h / 2) * TILE;
+      slack = Math.max(building.w, building.h) / 2;
+    } else {
+      px = wf.x;
+      py = wf.y;
+      slack = wf.radius / TILE;
+    }
+    if (!boatCanReach(state, engine, px, py, slack)) {
+      addEvent(state, `${engine.name}: no water within reach of ${building?.name ?? 'that fire'}`, 'warn');
+      return false;
+    }
+    goal = nearestWater(state, px, py, Math.ceil(engine.spec.turretRange + slack));
+  } else {
+    goal = nearestPassable(state.nav, 'sail', Math.floor(wx / TILE), Math.floor(wy / TILE), 30);
+    if (!goal) {
+      addEvent(state, `${engine.name}: that is not on the water`, 'warn');
+      return false;
+    }
+  }
+  const tiles = findPath(state.nav, 'sail', tileOf(engine.x, engine.y), goal);
+  if (!tiles) {
+    addEvent(state, `${engine.name}: no route by water`, 'warn');
+    return false;
+  }
+  engine.path = smoothPath(state.nav, 'sail', { x: engine.x, y: engine.y }, tiles);
+  engine.supply = null;
+  engine.targetId = building?.id ?? null;
+  engine.wildfireId = wildfireId;
+  engine.blockadeId = null;
+  engine.goal = null; // boats are not re-routed round road blockages
+  engine.arrived = false;
+  engine.packTimer = 0;
+  engine.status = 'responding';
+  return true;
+}
+
+/** An air tanker is given a target to circle; with none it flies home. */
+function orderPlane(state, engine, wx, wy, buildingId, wildfireId) {
+  const building = buildingOf(state, buildingId);
+  const wf = wildfireId ? (state.wildfires ?? []).find((w) => w.id === wildfireId) : null;
+  engine.path = [];
+  engine.supply = null;
+  engine.goal = null;
+  engine.blockadeId = null;
+  engine.packTimer = 0;
+  if (!building && !wf) {
+    engine.mission = null;
+    engine.targetId = null;
+    engine.wildfireId = null;
+    engine.status = 'returning';
+    return true;
+  }
+  engine.mission = {
+    x: building ? (building.x + building.w / 2) * TILE : wf.x,
+    y: building ? (building.y + building.h / 2) * TILE : wf.y,
+    tid: building?.id ?? null,
+    wid: wf?.id ?? null,
+    mode: engine.water < engine.capacity * 0.3 ? 'refill' : 'attack',
+  };
+  engine.targetId = building?.id ?? null;
+  engine.wildfireId = wf?.id ?? null;
+  engine.arrived = false;
+  engine.status = 'responding';
+  return true;
+}
+
+/** A helicopter flies straight there and hovers within reach of the target. */
+function orderFlight(state, engine, wx, wy, buildingId, wildfireId) {
+  const building = buildingOf(state, buildingId);
+  let target = { x: wx, y: wy };
+  if (building) {
+    const rect = buildingRect(building);
+    const near = closestOnRect(engine.x, engine.y, rect);
+    const dx = engine.x - near.x;
+    const dy = engine.y - near.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const hover = Math.min(len, engine.spec.turretRange * 0.55 * TILE);
+    target = { x: near.x + (dx / len) * hover, y: near.y + (dy / len) * hover };
+  } else if (wildfireId) {
+    const wf = (state.wildfires ?? []).find((w) => w.id === wildfireId);
+    if (wf) {
+      const dx = engine.x - wf.x;
+      const dy = engine.y - wf.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const inside = Math.min(wf.radius * 0.5, len);
+      target = { x: wf.x + (dx / len) * inside, y: wf.y + (dy / len) * inside };
+    }
+  }
+  engine.path = dist(engine.x, engine.y, target.x, target.y) < 12 ? [] : [target];
+  engine.supply = null;
+  engine.targetId = building?.id ?? null;
+  engine.wildfireId = wildfireId;
+  engine.blockadeId = null;
+  engine.goal = null;
+  engine.arrived = engine.path.length === 0;
+  engine.packTimer = 0;
+  engine.status = 'responding';
+  return true;
+}
+
 export function orderEngine(state, engine, wx, wy, buildingId = null, wildfireId = null) {
   if (!engine) return false;
+  if (engine.spec.plane) return orderPlane(state, engine, wx, wy, buildingId, wildfireId);
+  if (engine.spec.flying) return orderFlight(state, engine, wx, wy, buildingId, wildfireId);
+  if (engine.spec.boat) return orderBoat(state, engine, wx, wy, buildingId, wildfireId);
   const building = buildingOf(state, buildingId);
   let goal = null;
   if (building) {
@@ -342,6 +586,9 @@ export function orderEngine(state, engine, wx, wy, buildingId = null, wildfireId
   engine.path = smoothPath(state.nav, 'drive', { x: engine.x, y: engine.y }, tiles);
   engine.targetId = building?.id ?? null;
   engine.wildfireId = wildfireId;
+  engine.blockadeId = null;
+  engine.victimId = null;
+  engine.goal = goal;
   engine.arrived = false;
   engine.packTimer = crewOut ? 1.4 : 0;
   engine.status = 'responding';
@@ -351,6 +598,7 @@ export function orderEngine(state, engine, wx, wy, buildingId = null, wildfireId
 /** Drive to the nearest street to a wildfire and deploy the crew there. */
 export function orderEngineToWildfire(state, engine, wildfire) {
   if (!engine || !wildfire) return false;
+  if (engine.spec.flying) return orderEngine(state, engine, wildfire.x, wildfire.y, null, wildfire.id);
   const goal = nearestPassable(
     state.nav,
     'drive',
@@ -412,6 +660,10 @@ export function deployCrew(state, engine, target = null) {
     crew.rescueTimer = 0;
     crew.rescueId = null;
     crew.wildfireId = null;
+    crew.patientId = null;
+    crew.victimId = null;
+    crew.treatTimer = 0;
+    crew.idleFor = 0;
     crew.status = 'deployed';
     n++;
   }
@@ -471,6 +723,159 @@ export function toggleHydrant(state, engine) {
   return true;
 }
 
+/** Re-plan every moving vehicle's route; called when a road is blocked or reopened. */
+export function repathEngines(state) {
+  for (const engine of state.engines) {
+    if (engine.path.length === 0 || !engine.goal) continue;
+    const tiles = findPath(state.nav, 'drive', tileOf(engine.x, engine.y), engine.goal);
+    if (!tiles) {
+      engine.path = [];
+      engine.goal = null;
+      engine.targetId = null;
+      engine.wildfireId = null;
+      engine.patientId = null;
+      engine.blockadeId = null;
+      engine.status = 'blocked';
+      addEvent(state, `${engine.name}: every route is blocked — stopped`, 'warn');
+      continue;
+    }
+    engine.path = smoothPath(state.nav, 'drive', { x: engine.x, y: engine.y }, tiles);
+  }
+}
+
+/** Drive to a wreck and put the crew to work on it. */
+export function orderEngineToBlockade(state, engine, blockade) {
+  if (!engine || !blockade || !isFirefighter(engine) || engine.spec.flying || engine.spec.boat) return false;
+  const ok = orderEngine(state, engine, blockade.x, blockade.y);
+  if (!ok) return false;
+  engine.blockadeId = blockade.id;
+  return true;
+}
+
+/** Closest free fire vehicle for a wreck; a rescue unit counts as nearer (it has the cutters). */
+export function pickEngineForBlockade(state, blockade) {
+  let best = null;
+  let bestScore = Infinity;
+  for (const engine of state.engines) {
+    if (!isFirefighter(engine) || engine.spec.flying || engine.spec.boat) continue;
+    const free = !engine.targetId && !engine.wildfireId && !engine.blockadeId
+      && engine.path.length === 0 && engine.packTimer === 0;
+    const d = dist(engine.x, engine.y, blockade.x, blockade.y) * (engine.type === 'rescue' ? 0.6 : 1) + (free ? 0 : 1e6);
+    if (d < bestScore) {
+      bestScore = d;
+      best = engine;
+    }
+  }
+  return best;
+}
+
+/** Send divers to a person in the water: a boat sails, a dive truck drives to the bank. */
+export function orderEngineToVictim(state, engine, victim) {
+  if (!engine?.spec?.diver || !victim) return false;
+  const ok = engine.spec.boat
+    ? orderBoat(state, engine, victim.x, victim.y, null, null)
+    : orderEngine(state, engine, victim.x, victim.y);
+  if (!ok) return false;
+  engine.victimId = victim.id;
+  return true;
+}
+
+/** Diver vehicles, nearest first (boats count as nearer: they are right on the water). */
+export function diveVehiclesFor(state, victim) {
+  return state.engines
+    .filter((e) => e.spec.diver)
+    .map((e) => {
+      const free = !e.victimId && e.path.length === 0 && e.packTimer === 0;
+      return { e, score: Math.hypot(e.x - victim.x, e.y - victim.y) * (e.spec.boat ? 0.7 : 1) + (free ? 0 : 1e6) };
+    })
+    .sort((a, b) => a.score - b.score)
+    .map((x) => x.e);
+}
+
+/** Take the stretcher cases to the nearest hospital. */
+export function sendToHospital(state, engine) {
+  if (!engine || !isMedical(engine)) return false;
+  const hospital = nearestHospital(state, engine.x, engine.y);
+  if (!hospital) {
+    addEvent(state, 'No hospital in the city', 'warn');
+    return false;
+  }
+  if (hospitalInReach(state, engine) && (engine.cargo?.length ?? 0) > 0) {
+    unloadCargo(state, engine, hospital);
+    return true;
+  }
+  recallCrew(state, engine);
+  const ok = orderEngine(
+    state,
+    engine,
+    (hospital.x + hospital.w / 2) * TILE,
+    (hospital.y + hospital.h / 2) * TILE,
+    hospital.id,
+  );
+  if (ok) {
+    engine.targetId = null;
+    engine.patientId = null;
+    if ((engine.cargo?.length ?? 0) > 0) {
+      addEvent(state, `${engine.name} taking ${engine.cargo.length} patient${engine.cargo.length === 1 ? '' : 's'} to ${hospital.name}`, 'info');
+    }
+  }
+  return ok;
+}
+
+/** Send an ambulance to an injured person. */
+export function orderAmbulanceToPatient(state, engine, patient) {
+  if (!engine || !patient || !isMedical(engine) || patient.treated) return false;
+  if ((engine.kits ?? 0) < 1) {
+    addEvent(state, `${engine.name} has no medical kits — restock at a pharmacy`, 'warn');
+    return false;
+  }
+  const ok = orderEngine(state, engine, patient.x, patient.y);
+  if (!ok) return false;
+  engine.patientId = patient.id;
+  engine.worked = true;
+  patient.claimedBy = engine.id;
+  return true;
+}
+
+/** The ambulance that should take a call: nearest one that is free and stocked. */
+export function pickAmbulanceFor(state, patient) {
+  let best = null;
+  let bestD = Infinity;
+  for (const engine of state.engines) {
+    if (!isMedical(engine) || (engine.kits ?? 0) < 1) continue;
+    const busy = engine.patientId && findPatient(state, engine.patientId);
+    const d = dist(engine.x, engine.y, patient.x, patient.y) + (busy ? 1e6 : 0);
+    if (d < bestD) {
+      bestD = d;
+      best = engine;
+    }
+  }
+  return best;
+}
+
+/** Drive an ambulance to the nearest pharmacy to restock. */
+export function sendToPharmacy(state, engine) {
+  if (!engine || !isMedical(engine)) return false;
+  const pharmacy = nearestPharmacy(state, engine.x, engine.y);
+  if (!pharmacy) {
+    addEvent(state, 'No pharmacy in the city', 'warn');
+    return false;
+  }
+  const ok = orderEngine(
+    state,
+    engine,
+    (pharmacy.x + pharmacy.w / 2) * TILE,
+    (pharmacy.y + pharmacy.h / 2) * TILE,
+    pharmacy.id,
+  );
+  if (ok) {
+    engine.targetId = null;
+    engine.patientId = null;
+    addEvent(state, `${engine.name} heading to ${pharmacy.name} to restock`, 'info');
+  }
+  return ok;
+}
+
 /** The fire that most needs an engine right now. */
 export function urgentFire(state) {
   const fires = activeFires(state);
@@ -496,6 +901,9 @@ function pickEngineFor(state, target) {
   let near = null;
   let nearD = Infinity;
   for (const engine of state.engines) {
+    if (!isFirefighter(engine)) continue;
+    // A fireboat can only help where there is water in reach.
+    if (engine.spec.boat && !boatCanReach(state, engine, cx, cy, Math.max(target.w, target.h) / 2)) continue;
     const d = dist(engine.x, engine.y, cx, cy);
     if (d < nearD) {
       nearD = d;
@@ -520,7 +928,7 @@ export function dispatchEngine(state, engine = null, buildingId = null) {
     addEvent(state, 'No active fires — the district is quiet', 'info');
     return false;
   }
-  const chosen = engine ?? pickEngineFor(state, target);
+  const chosen = engine && isFirefighter(engine) ? engine : pickEngineFor(state, target);
   if (!chosen) return null;
   const ok = orderEngine(
     state,
@@ -569,6 +977,20 @@ function followPath(unit, dt, speed, limit = null) {
 
 function arriveEngine(state, engine) {
   engine.arrived = true;
+  if (engine.spec.flying || (engine.spec.boat && !engine.spec.diver)) {
+    engine.goal = null;
+    engine.status = 'on scene';
+    return;
+  }
+  if (isMedical(engine)) {
+    const reach = engine.spec.medRange * TILE * 0.9;
+    if (engine.patientId || nearestPatient(state, engine.x, engine.y, { maxDist: reach })) {
+      deployCrew(state, engine, null);
+    }
+    engine.goal = null;
+    engine.status = 'on scene';
+    return;
+  }
   const target = buildingOf(state, engine.targetId);
   if (target && target.state === 'burning') {
     const reach = distToRect(engine.x, engine.y, buildingRect(target));
@@ -581,7 +1003,14 @@ function arriveEngine(state, engine) {
     const wildfire = (state.wildfires ?? []).find((w) => w.id === engine.wildfireId);
     if (wildfire) deployCrew(state, engine, null);
     engine.wildfireId = null;
+  } else if (engine.blockadeId) {
+    if (state.blockades.some((b) => b.id === engine.blockadeId)) deployCrew(state, engine, null);
+    engine.blockadeId = null;
+  } else if (engine.victimId) {
+    if (findVictim(state, engine.victimId)) deployCrew(state, engine, null);
+    engine.victimId = null;
   }
+  engine.goal = null;
   engine.status = 'on scene';
 }
 
@@ -611,7 +1040,10 @@ function refillEngine(state, engine, dt) {
   const tileX = Math.floor(engine.x / TILE);
   const tileY = Math.floor(engine.y / TILE);
   const onApron = state.city.apron[tileY * state.city.w + tileX] === 1;
-  if (!onApron && !engine.supply) {
+  // Aircraft dip into the sea or the river; boats are always on it.
+  const overWater = Boolean(engine.spec.flying || engine.spec.boat)
+    && state.city.water[tileY * state.city.w + tileX] === 1;
+  if (!onApron && !engine.supply && !overWater) {
     engine.refilling = false;
     return;
   }
@@ -626,6 +1058,148 @@ function refillEngine(state, engine, dt) {
     engine.fullNotified = false;
   }
   if (engine.water > engine.capacity * 0.15) engine.emptyWarned = false;
+}
+
+/** The deck gun (or an aircraft's bucket): automatic on whatever burns within reach. */
+function runTurret(state, engine, dt) {
+  // Deck gun: automatic once the engine is parked within reach of a fire.
+  engine.pumping = false;
+  const target = turretTarget(state, engine);
+  if (target && engine.water > 0) {
+    engine.pumping = true;
+    const impact = streamImpact(target, engine.x, engine.y);
+    engine.angle = approachAngle(
+      engine.angle,
+      angleTo(engine.x, engine.y, impact.x, impact.y),
+      5 * dt,
+    );
+    state.streams.push({
+      kind: 'turret',
+      sx: engine.x + Math.cos(engine.angle) * 6,
+      sy: engine.y - 10 + Math.sin(engine.angle) * 6,
+      tx: impact.x,
+      ty: impact.y,
+      power: engine.spec.turretPower * firePower(state, engine.x, engine.y),
+      targetId: target.id,
+      engineId: engine.id,
+    });
+    engine.water = Math.max(0, engine.water - engine.spec.turretWater * dt);
+    if (engine.water <= 0 && !engine.emptyWarned) {
+      engine.emptyWarned = true;
+      addEvent(state, `${engine.name} is out of water — find a hydrant`, 'warn');
+    }
+  } else if (engine.spec.turretRange > 0 && engine.water > 0) {
+    // No building to hit: the deck gun (or a helicopter's bucket) works a forest fire in reach.
+    const reach = engine.spec.turretRange * TILE;
+    let wf = null;
+    let wfD = Infinity;
+    for (const w of state.wildfires ?? []) {
+      const edge = Math.hypot(w.x - engine.x, w.y - engine.y) - w.radius;
+      if (edge <= reach && edge < wfD) {
+        wfD = edge;
+        wf = w;
+      }
+    }
+    if (wf) {
+      engine.pumping = true;
+      const d = Math.hypot(wf.x - engine.x, wf.y - engine.y) || 1;
+      const inward = Math.max(0, Math.min(wf.radius * 0.6, d));
+      const tx = engine.x + ((wf.x - engine.x) / d) * Math.max(0, d - wf.radius + inward);
+      const ty = engine.y + ((wf.y - engine.y) / d) * Math.max(0, d - wf.radius + inward);
+      engine.angle = approachAngle(engine.angle, angleTo(engine.x, engine.y, tx, ty), 5 * dt);
+      state.streams.push({
+        kind: 'turret',
+        sx: engine.x + Math.cos(engine.angle) * 6,
+        sy: engine.y - 10 + Math.sin(engine.angle) * 6,
+        tx,
+        ty,
+        power: engine.spec.turretPower * firePower(state, engine.x, engine.y),
+        wildfireId: wf.id,
+        engineId: engine.id,
+      });
+      engine.water = Math.max(0, engine.water - engine.spec.turretWater * dt);
+      if (engine.water <= 0 && !engine.emptyWarned) {
+        engine.emptyWarned = true;
+        addEvent(state, `${engine.name} is out of water — ${engine.spec.flying ? 'dip in the harbour or land at a station' : 'find a hydrant'}`, 'warn');
+      }
+    }
+  }
+
+}
+
+/** Wind an air tanker's orbit: the point on a circle round (cx, cy) to steer for. */
+function orbitAim(engine, cx, cy, r) {
+  const a = Math.atan2(engine.y - cy, engine.x - cx) + 0.55;
+  return { x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r };
+}
+
+function updatePlane(state, engine, dt) {
+  const city = state.city;
+  const cruise = engine.spec.speed * TILE;
+  let m = engine.mission;
+
+  if (m) {
+    const b = m.tid ? buildingOf(state, m.tid) : null;
+    const wf = m.wid ? (state.wildfires ?? []).find((w) => w.id === m.wid) : null;
+    if ((m.tid && (!b || b.state !== 'burning')) || (m.wid && !wf)) {
+      engine.mission = null;
+      m = null;
+      engine.targetId = null;
+      engine.wildfireId = null;
+      addEvent(state, `${engine.name}: target is out — returning to base`, 'info');
+    } else if (wf) {
+      m.x = wf.x;
+      m.y = wf.y;
+    }
+  }
+
+  let aim;
+  let centre;
+  if (m) {
+    if (m.mode === 'attack' && engine.water < engine.capacity * 0.12) m.mode = 'refill';
+    else if (m.mode === 'refill' && engine.water >= engine.capacity * 0.97) m.mode = 'attack';
+    if (m.mode === 'refill') {
+      // Skim the sea: circle a point out in the harbour until the tank is full.
+      centre = {
+        x: Math.min(Math.max(engine.x, 20 * TILE), (city.w - 20) * TILE),
+        y: (SEA_Y + 16) * TILE,
+      };
+    } else {
+      centre = { x: m.x, y: m.y };
+    }
+    aim = orbitAim(engine, centre.x, centre.y, 5 * TILE);
+  } else {
+    const bay = city.bays[engine.bayIndex] ?? city.bays[0];
+    aim = { x: bay.x, y: bay.y };
+    centre = aim;
+  }
+
+  const toAim = dist(engine.x, engine.y, aim.x, aim.y);
+  const landed = !m && toAim < 24;
+  if (landed) {
+    engine.x = aim.x;
+    engine.y = aim.y;
+    engine.angle = approachAngle(engine.angle, city.spawn.angle, 3 * dt);
+  } else {
+    // Slow into the orbit, cruise in between; turn at a fixed rate.
+    const slow = m && dist(engine.x, engine.y, centre.x, centre.y) < 14 * TILE;
+    const speed = slow ? cruise * 0.4 : cruise;
+    engine.angle = approachAngle(engine.angle, angleTo(engine.x, engine.y, aim.x, aim.y), 3.2 * dt);
+    engine.x += Math.cos(engine.angle) * speed * dt;
+    engine.y += Math.sin(engine.angle) * speed * dt;
+  }
+
+  engine.pumping = false;
+  engine.refilling = false;
+  if (m && m.mode === 'attack') runTurret(state, engine, dt);
+  refillEngine(state, engine, dt);
+
+  engine.status = landed
+    ? (engine.refilling ? 'refilling' : 'in quarters')
+    : m
+      ? (m.mode === 'refill' ? 'refilling' : engine.pumping ? 'pumping' : 'responding')
+      : 'returning';
+  if (m && m.mode === 'refill' && !engine.refilling) engine.status = 'responding';
 }
 
 function updateEngine(state, engine, dt) {
@@ -648,12 +1222,22 @@ function updateEngine(state, engine, dt) {
     return;
   }
 
+  if (engine.spec.plane) {
+    updatePlane(state, engine, dt);
+    return;
+  }
+
   if (engine.path.length > 0) {
-    followPath(engine, dt, engine.spec.speed * TILE);
+    followPath(engine, dt, engine.spec.speed * TILE * (engine.spec.flying || engine.spec.boat ? 1 : state.trafficFactor ?? 1));
     engine.pumping = false;
     engine.refilling = false;
     if (engine.path.length === 0) arriveEngine(state, engine);
-    engine.status = 'responding';
+    engine.status = (engine.cargo?.length ?? 0) > 0 ? 'transporting' : 'responding';
+    return;
+  }
+
+  if (isMedical(engine)) {
+    updateAmbulance(state, engine, dt);
     return;
   }
 
@@ -665,33 +1249,7 @@ function updateEngine(state, engine, dt) {
     if (!current || current.state !== 'burning') engine.targetId = null;
   }
 
-  // Deck gun: automatic once the engine is parked within reach of a fire.
-  engine.pumping = false;
-  const target = turretTarget(state, engine);
-  if (target && engine.water > 0) {
-    engine.pumping = true;
-    const impact = streamImpact(target, engine.x, engine.y);
-    engine.angle = approachAngle(
-      engine.angle,
-      angleTo(engine.x, engine.y, impact.x, impact.y),
-      5 * dt,
-    );
-    state.streams.push({
-      kind: 'turret',
-      sx: engine.x + Math.cos(engine.angle) * 6,
-      sy: engine.y - 10 + Math.sin(engine.angle) * 6,
-      tx: impact.x,
-      ty: impact.y,
-      power: engine.spec.turretPower,
-      targetId: target.id,
-      engineId: engine.id,
-    });
-    engine.water = Math.max(0, engine.water - engine.spec.turretWater * dt);
-    if (engine.water <= 0 && !engine.emptyWarned) {
-      engine.emptyWarned = true;
-      addEvent(state, `${engine.name} is out of water — find a hydrant`, 'warn');
-    }
-  }
+  runTurret(state, engine, dt);
 
   refillEngine(state, engine, dt);
 
@@ -706,6 +1264,226 @@ function updateEngine(state, engine, dt) {
   else if (nearStation(state, engine)) engine.status = 'in quarters';
   else if (engine.targetId) engine.status = 'on scene';
   else engine.status = 'standing by';
+}
+
+function updateAmbulance(state, engine, dt) {
+  if (engine.patientId) {
+    const patient = findPatient(state, engine.patientId);
+    if (!patient || patient.treated) engine.patientId = null;
+  }
+
+  // Stretcher cases: deliver if at a hospital, otherwise set off once the crew are back aboard.
+  if ((engine.cargo?.length ?? 0) > 0) {
+    const hospital = hospitalInReach(state, engine);
+    if (hospital) {
+      unloadCargo(state, engine, hospital);
+    } else if (state.time >= (engine.hospitalRetry ?? 0)) {
+      const out = crewOf(state, engine).filter((c) => !c.riding);
+      if (out.length > 0 && engine.cargo.length >= engine.spec.carry) recallCrew(state, engine);
+      else if (out.length === 0) {
+        engine.hospitalRetry = state.time + 5;
+        sendToHospital(state, engine);
+      }
+    }
+  }
+
+  const tileX = Math.floor(engine.x / TILE);
+  const tileY = Math.floor(engine.y / TILE);
+  const onApron = state.city.apron[tileY * state.city.w + tileX] === 1;
+  const restocking = restockKits(state, engine, dt, onApron);
+  if (restocking && engine.kits >= engine.spec.kits && !engine.fullNotified) {
+    engine.fullNotified = true;
+    addEvent(state, `${engine.name}: kits restocked`, 'good');
+  } else if (engine.kits < engine.spec.kits * 0.75) {
+    engine.fullNotified = false;
+  }
+
+  if (engine.kits < 1 && !engine.emptyWarned) {
+    engine.emptyWarned = true;
+    addEvent(state, `${engine.name} is out of medical kits — find a pharmacy`, 'warn');
+  }
+  if (engine.kits >= 1) engine.emptyWarned = false;
+
+  // The work is done and there is nothing on board: back to the base hospital.
+  const crewOut = crewOf(state, engine).some((c) => !c.riding);
+  if (nearStation(state, engine)) engine.worked = false;
+  if (engine.worked && !restocking && !crewOut && !engine.patientId
+    && (engine.cargo?.length ?? 0) === 0 && !nearStation(state, engine)) {
+    engine.returnIn = (engine.returnIn ?? 2.5) - dt;
+    if (engine.returnIn <= 0) {
+      engine.returnIn = 2.5;
+      engine.worked = false;
+      if (sendEngineHome(state, engine)) addEvent(state, `${engine.name} returning to the base hospital`, 'info');
+    }
+  } else {
+    engine.returnIn = 2.5;
+  }
+
+  if (restocking) engine.status = 'restocking';
+  else if (nearStation(state, engine)) engine.status = 'in quarters';
+  else if (engine.arrived) engine.status = 'on scene';
+  else engine.status = 'standing by';
+}
+
+function updateDiver(state, crew, engine, dt) {
+  const range = engine.spec.diveRange * TILE;
+  let victim = crew.victimId ? findVictim(state, crew.victimId) : null;
+  if (!victim) {
+    crew.victimId = null;
+    crew.rescueTimer = 0;
+    let bestD = range;
+    for (const v of state.victims) {
+      if (v.diverId && v.diverId !== crew.id) continue;
+      const d = dist(engine.x, engine.y, v.x, v.y);
+      if (d < bestD) {
+        bestD = d;
+        victim = v;
+      }
+    }
+    if (victim) {
+      crew.victimId = victim.id;
+      victim.diverId = crew.id;
+    }
+  }
+
+  if (!victim) {
+    crew.status = 'standing by';
+    crew.idleFor += dt;
+    const out = crewOf(state, engine).filter((c) => !c.riding);
+    if (out.length > 0 && out.every((c) => c.idleFor > 6)) recallCrew(state, engine);
+    return;
+  }
+  crew.idleFor = 0;
+
+  if (dist(crew.x, crew.y, victim.x, victim.y) > 1.5 * TILE) {
+    crew.rescueTimer = 0;
+    victim.rescueTimer = 0;
+    crew.status = 'swimming';
+    crew.think -= dt;
+    if (crew.think <= 0 || crew.path.length === 0) {
+      crew.think = 0.8;
+      const tiles = findPath(state.nav, 'swim', tileOf(crew.x, crew.y), tileOf(victim.x, victim.y));
+      if (tiles) crew.path = smoothPath(state.nav, 'swim', { x: crew.x, y: crew.y }, tiles);
+    }
+    followPath(crew, dt, 3.2 * TILE, { x: engine.x, y: engine.y, r: range });
+    return;
+  }
+
+  crew.path.length = 0;
+  crew.angle = angleTo(crew.x, crew.y, victim.x, victim.y);
+  crew.status = 'rescuing';
+  crew.rescueTimer += dt;
+  victim.rescueTimer = crew.rescueTimer;
+  const need = engine.spec.rescueTime * (1 - CONFIG.economy.training.rescue * (state.training?.rescue ?? 0));
+  if (crew.rescueTimer >= need) {
+    crew.rescueTimer = 0;
+    rescueVictim(state, victim);
+    crew.victimId = null;
+  }
+}
+
+function updateMedic(state, crew, engine, dt) {
+  const range = engine.spec.medRange * TILE;
+  const speed = CONFIG.crew.speed * TILE;
+
+  let patient = crew.patientId ? findPatient(state, crew.patientId) : null;
+  if (patient && patient.treated) patient = null;
+  if (!patient) {
+    crew.patientId = null;
+    crew.treatTimer = 0;
+    let bestD = range;
+    for (const p of state.patients) {
+      if (p.treated || (p.medicId && p.medicId !== crew.id)) continue;
+      const d = dist(engine.x, engine.y, p.x, p.y);
+      if (d < bestD) {
+        bestD = d;
+        patient = p;
+      }
+    }
+    if (patient) {
+      crew.patientId = patient.id;
+      patient.medicId = crew.id;
+    }
+  }
+
+  if (!patient) {
+    crew.status = 'standing by';
+    crew.idleFor += dt;
+    // Nobody left to treat: pack up so the ambulance is free to roll.
+    const out = crewOf(state, engine).filter((c) => !c.riding);
+    if (out.length > 0 && out.every((c) => c.idleFor > 5)) recallCrew(state, engine);
+    return;
+  }
+  crew.idleFor = 0;
+
+  const reach = dist(crew.x, crew.y, patient.x, patient.y);
+  if (reach > 1.4 * TILE) {
+    crew.treatTimer = 0;
+    patient.treatTimer = 0;
+    crew.status = 'moving';
+    crew.think -= dt;
+    if (crew.think <= 0 || crew.path.length === 0) {
+      crew.think = 0.8;
+      const goal = nearestPassable(
+        state.nav, 'walk', Math.floor(patient.x / TILE), Math.floor(patient.y / TILE), 4,
+      );
+      const tiles = goal ? findPath(state.nav, 'walk', tileOf(crew.x, crew.y), goal) : null;
+      if (tiles) crew.path = smoothPath(state.nav, 'walk', { x: crew.x, y: crew.y }, tiles);
+    }
+    followPath(crew, dt, speed, { x: engine.x, y: engine.y, r: range });
+    return;
+  }
+
+  crew.path.length = 0;
+  crew.angle = angleTo(crew.x, crew.y, patient.x, patient.y);
+  if (engine.kits < 1) {
+    crew.status = 'no kits';
+    return;
+  }
+  crew.status = 'treating';
+  crew.treatTimer += dt;
+  patient.treatTimer = crew.treatTimer;
+  if (crew.treatTimer >= engine.spec.treatTime * (1 - CONFIG.economy.training.medic * (state.training?.medic ?? 0))) {
+    crew.treatTimer = 0;
+    treatPatient(state, patient, engine);
+    crew.patientId = null;
+  }
+}
+
+/** With no fire to fight, a crew within reach of a wreck clears it. Returns true if busy. */
+function updateCrewBlockade(state, crew, engine, dt) {
+  const hoseRange = engine.spec.hoseRange * TILE;
+  let best = null;
+  let bestRect = null;
+  let bestD = Infinity;
+  for (const b of state.blockades) {
+    const rect = { x: b.x - b.w / 2, y: b.y - b.h / 2, w: b.w, h: b.h };
+    const d = distToRect(engine.x, engine.y, rect);
+    if (d > hoseRange - 2.5 * TILE || d >= bestD) continue;
+    bestD = d;
+    best = b;
+    bestRect = rect;
+  }
+  if (!best) return false;
+
+  crew.spraying = false;
+  if (distToRect(crew.x, crew.y, bestRect) <= 2.2 * TILE) {
+    crew.path.length = 0;
+    crew.status = 'clearing';
+    workOnBlockade(state, best, dt * (engine.type === 'rescue' ? CONFIG.blockade.rescueBonus : 1));
+    return true;
+  }
+
+  crew.status = 'moving';
+  crew.think -= dt;
+  if (crew.think <= 0 || crew.path.length === 0) {
+    crew.think = 0.8;
+    const goal = standTileForRect(state.nav, bestRect, crew.x, crew.y, 3);
+    const tiles = goal ? findPath(state.nav, 'walk', tileOf(crew.x, crew.y), goal) : null;
+    if (tiles) crew.path = smoothPath(state.nav, 'walk', { x: crew.x, y: crew.y }, tiles);
+  }
+  followPath(crew, dt, CONFIG.crew.speed * TILE, { x: engine.x, y: engine.y, r: hoseRange });
+  return true;
 }
 
 function chooseTarget(state, crew, engine) {
@@ -775,7 +1553,7 @@ function updateCrewWildfire(state, crew, engine, wildfire, dt) {
       sy: crew.y + Math.sin(crew.angle) * 10 - 4,
       tx,
       ty,
-      power: CONFIG.crew.sprayPower,
+      power: CONFIG.crew.sprayPower * firePower(state, crew.x, crew.y),
       wildfireId: wildfire.id,
       crewId: crew.id,
       engineId: engine.id,
@@ -842,6 +1620,15 @@ function updateCrew(state, crew, dt) {
     return;
   }
 
+  if (isMedical(engine)) {
+    updateMedic(state, crew, engine, dt);
+    return;
+  }
+  if (engine.spec.diver) {
+    updateDiver(state, crew, engine, dt);
+    return;
+  }
+
   let target = buildingOf(state, crew.targetId);
   if (target && target.state !== 'burning' && (target.trapped ?? 0) <= 0) {
     target = null;
@@ -873,6 +1660,7 @@ function updateCrew(state, crew, dt) {
     target = chooseTarget(state, crew, engine);
     if (target) crew.targetId = target.id;
   }
+  if (!target && updateCrewBlockade(state, crew, engine, dt)) return;
   if (!target) {
     crew.spraying = false;
     crew.rescueTimer = 0;
@@ -912,7 +1700,9 @@ function updateCrew(state, crew, dt) {
       crew.rescueTimer = 0;
     }
     crew.rescueTimer += dt;
-    if (crew.rescueTimer >= (engine.spec.rescueTime ?? CONFIG.crew.rescueTime)) {
+    const rescueTime = (engine.spec.rescueTime ?? CONFIG.crew.rescueTime)
+      * (1 - CONFIG.economy.training.rescue * (state.training?.rescue ?? 0));
+    if (crew.rescueTimer >= rescueTime) {
       crew.rescueTimer = 0;
       if (rescuePerson(state, target)) spawnRescue(state, crew.x, crew.y);
     }
@@ -937,7 +1727,7 @@ function updateCrew(state, crew, dt) {
       sy: crew.y + Math.sin(crew.angle) * 10 - 4,
       tx: impact.x,
       ty: impact.y,
-      power: CONFIG.crew.sprayPower,
+      power: CONFIG.crew.sprayPower * firePower(state, crew.x, crew.y),
       targetId: target.id,
       crewId: crew.id,
       engineId: engine.id,

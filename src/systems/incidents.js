@@ -9,16 +9,39 @@ import { rectsTouch } from '../core/math.js';
 import { addEvent } from './events.js';
 import { buildingRect, ignite } from './fire.js';
 import { startWildfire } from './wildfire.js';
+import { spawnPatient } from './medical.js';
+import { pileUp, trafficAccident } from './chains.js';
+import { drowningCall } from './water.js';
 
 const SMALL = () => ['structure', 'structure', 'structure', 'rescue', 'block'];
-const BIG = ['industrial', 'bigBlock', 'forest'];
+const BIG = ['industrial', 'bigBlock', 'forest', 'pileup'];
+
+/**
+ * How far from Station 1 (in tiles) a call can come from. It starts as the
+ * neighbourhood and grows through the shift until the whole city is covered.
+ */
+export function coverageRadius(state) {
+  const { start, growPerSecond } = CONFIG.incidents.radius;
+  return start + state.time * growPerSecond;
+}
+
+// A call can come from anywhere within reach of any station you own, so
+// opening Station 2 brings a second district into the rota.
+const inCoverage = (state, x, y, scale = 1) => state.city.stations.some((st, i) => {
+  if (!(state.ownedStations?.[i] ?? i === 0)) return false;
+  const b = st.building;
+  return Math.hypot(x - (b.x + b.w / 2), y - (b.y + b.h / 2)) <= coverageRadius(state) * scale;
+});
 
 function candidates(state, types = null) {
-  return state.buildings.filter((b) => (
+  const pool = state.buildings.filter((b) => (
     b.state === 'ok'
-    && b.id !== 'station'
+    && b.type !== 'station'
+    && b.type !== 'hospital'
     && (!types || types.includes(b.type))
   ));
+  const near = pool.filter((b) => inCoverage(state, b.x + b.w / 2, b.y + b.h / 2));
+  return near.length ? near : pool;
 }
 
 function pick(state, types = null) {
@@ -47,7 +70,7 @@ function blockFire(state, count) {
   const neighbours = state.buildings.filter((b) => (
     b !== first
     && b.state === 'ok'
-    && b.id !== 'station'
+    && b.type !== 'station'
     && rectsTouch(rect, buildingRect(b), 4 * TILE)
   ));
   const picks = [first, ...state.rng.shuffle(neighbours).slice(0, count - 1)];
@@ -90,7 +113,7 @@ function bigBlockFire(state) {
   const neighbours = state.buildings.filter((b) => (
     b !== first
     && b.state === 'ok'
-    && b.id !== 'station'
+    && b.type !== 'station'
     && rectsTouch(rect, buildingRect(b), 5 * TILE)
   ));
   const picks = [first, ...state.rng.shuffle(neighbours).slice(0, 3)];
@@ -106,9 +129,10 @@ function bigBlockFire(state) {
 }
 
 function forestFire(state) {
-  const tiles = state.city.forestTiles;
-  if (!tiles || tiles.length === 0) return null;
-  const tile = state.rng.pick(tiles);
+  const all = state.city.forestTiles;
+  if (!all || all.length === 0) return null;
+  const near = all.filter((t) => inCoverage(state, t.x, t.y, 1.4));
+  const tile = state.rng.pick(near.length ? near : all);
   const wildfire = startWildfire(
     state,
     (tile.x + 0.5) * TILE,
@@ -118,7 +142,24 @@ function forestFire(state) {
   return wildfire;
 }
 
+function medicalCall(state) {
+  if (state.patients.filter((p) => !p.treated).length >= 5) return null;
+  const building = pick(state, ['house', 'apartment', 'office', 'hotel', 'shop', 'pharmacy']);
+  if (!building) return null;
+  return spawnPatient(state, building, state.rng.range(0.3, 1));
+}
+
+const roadAllowed = (state) => (x, y) => inCoverage(state, x, y);
+
 function spawnSmall(state) {
+  if (state.rng.chance(CONFIG.incidents.drownCall)) {
+    const made = drowningCall(state, (x, y) => inCoverage(state, x, y));
+    if (made) return made;
+  }
+  if (state.rng.chance(CONFIG.incidents.crashCall)) {
+    return trafficAccident(state, roadAllowed(state));
+  }
+  if (state.rng.chance(CONFIG.incidents.medicalCall)) return medicalCall(state);
   const kind = state.rng.pick(SMALL());
   if (kind === 'rescue') return rescueJob(state);
   if (kind === 'block') return blockFire(state, 2);
@@ -129,11 +170,13 @@ function spawnBig(state) {
   const kind = state.rng.pick(BIG);
   if (kind === 'industrial') return industrialFire(state);
   if (kind === 'forest') return forestFire(state);
+  if (kind === 'pileup') return pileUp(state, (x, y) => inCoverage(state, x, y, 1.2));
   return bigBlockFire(state);
 }
 
 export function bigIncidentActive(state) {
   if (state.wildfires.some((w) => w.intensity > 0)) return true;
+  if (state.blockades.some((b) => b.big)) return true;
   return state.buildings.some((b) => b.big && (b.state === 'burning' || b.state === 'out'));
 }
 
