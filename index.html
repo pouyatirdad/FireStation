@@ -15256,6 +15256,12 @@ function drawMinimap(ctx, state, cam, view) {
     ? Math.round(Math.min(280, Math.max(96, view.width * 0.28), view.height * 0.3 * (city.w / city.h)))
     : Math.round(Math.min(280, view.width * 0.25));
   const mh = Math.round((mw * city.h) / city.w);
+  // A window squeezed down to a sliver (DevTools docked, a tiny browser window)
+  // leaves no room for it: a zero-size canvas cannot be drawn.
+  if (mw < 24 || mh < 16 || view.height < mh + 80) {
+    state.ui.minimap = null;
+    return;
+  }
   const x = view.width - mw - (compact ? 10 : 16);
   const y = view.height - mh - (compact ? 58 : 16);
   state.ui.minimap = { x, y, w: mw, h: mh };
@@ -15498,12 +15504,26 @@ function pointerPos(ev) {
 
 // ------------------------------------------------------------------ loop ---
 
+// One bad frame (a drawing error on an odd window size, say) must not freeze the
+// whole game: each part is guarded, and the first error of a kind is logged.
+const reported = new Set();
+function guarded(name, fn) {
+  try {
+    fn();
+  } catch (err) {
+    if (!reported.has(name)) {
+      reported.add(name);
+      console.error(`[${name}]`, err);
+    }
+  }
+}
+
 function frame(dt) {
   panCamera(dt || 0);
   clampCamera(cam, state, view);
-  render(ctx, state, cam, view, { now: state.time });
-  audio.update(state, cam, view);
-  hud.update(state);
+  guarded('render', () => render(ctx, state, cam, view, { now: state.time }));
+  guarded('audio', () => audio.update(state, cam, view));
+  guarded('hud', () => hud.update(state));
 }
 
 function beginLoop() {

@@ -73,12 +73,26 @@ function pointerPos(ev) {
 
 // ------------------------------------------------------------------ loop ---
 
+// One bad frame (a drawing error on an odd window size, say) must not freeze the
+// whole game: each part is guarded, and the first error of a kind is logged.
+const reported = new Set();
+function guarded(name, fn) {
+  try {
+    fn();
+  } catch (err) {
+    if (!reported.has(name)) {
+      reported.add(name);
+      console.error(`[${name}]`, err);
+    }
+  }
+}
+
 function frame(dt) {
   panCamera(dt || 0);
   clampCamera(cam, state, view);
-  render(ctx, state, cam, view, { now: state.time });
-  audio.update(state, cam, view);
-  hud.update(state);
+  guarded('render', () => render(ctx, state, cam, view, { now: state.time }));
+  guarded('audio', () => audio.update(state, cam, view));
+  guarded('hud', () => hud.update(state));
 }
 
 function beginLoop() {

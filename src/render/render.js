@@ -3604,6 +3604,12 @@ function drawMinimap(ctx, state, cam, view) {
     ? Math.round(Math.min(280, Math.max(96, view.width * 0.28), view.height * 0.3 * (city.w / city.h)))
     : Math.round(Math.min(280, view.width * 0.25));
   const mh = Math.round((mw * city.h) / city.w);
+  // A window squeezed down to a sliver (DevTools docked, a tiny browser window)
+  // leaves no room for it: a zero-size canvas cannot be drawn.
+  if (mw < 24 || mh < 16 || view.height < mh + 80) {
+    state.ui.minimap = null;
+    return;
+  }
   const x = view.width - mw - (compact ? 10 : 16);
   const y = view.height - mh - (compact ? 58 : 16);
   state.ui.minimap = { x, y, w: mw, h: mh };
