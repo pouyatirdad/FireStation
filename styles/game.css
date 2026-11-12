@@ -10,7 +10,7 @@
   --good: #5fae85;
   --warn: #d9a441;
   --bad: #d4504c;
-  --font: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", sans-serif;
+  --font: "Inter", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", sans-serif;
 }
 
 * { box-sizing: border-box; }
@@ -77,8 +77,8 @@ button { font-family: inherit; }
 
 .brand__text strong {
   font-size: 15px;
-  letter-spacing: 0.16em;
-  font-weight: 800;
+  letter-spacing: 0.08em;
+  font-weight: 600;
 }
 
 .brand__text small {
@@ -104,7 +104,7 @@ button { font-family: inherit; }
 .stat__label {
   font-size: 9px;
   font-weight: 700;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--muted);
 }
@@ -261,7 +261,7 @@ button { font-family: inherit; }
 .panel {
   position: absolute;
   background: var(--panel);
-  backdrop-filter: blur(16px) saturate(1.15);
+  backdrop-filter: blur(14px);
   border: 1px solid var(--line);
   border-radius: 4px;
   box-shadow: 0 20px 55px rgba(0, 0, 0, 0.45);
@@ -271,8 +271,8 @@ button { font-family: inherit; }
 .panel__title {
   margin: 0 0 8px;
   font-size: 9.5px;
-  font-weight: 800;
-  letter-spacing: 0.17em;
+  font-weight: 600;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--muted);
 }
@@ -332,8 +332,8 @@ button { font-family: inherit; }
 
 .sel__kind {
   font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 0.18em;
+  font-weight: 600;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--fire);
 }
@@ -551,7 +551,7 @@ button { font-family: inherit; }
   background: rgba(255, 255, 255, 0.08);
   color: var(--muted);
   font-size: 9.5px;
-  font-weight: 800;
+  font-weight: 600;
   flex: none;
 }
 
@@ -615,7 +615,7 @@ button { font-family: inherit; }
 .hints kbd {
   font-family: var(--font);
   font-size: 9px;
-  font-weight: 800;
+  font-weight: 600;
   color: #d5e0ea;
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid var(--line);
@@ -640,8 +640,8 @@ button { font-family: inherit; }
   box-shadow: 0 10px 30px rgba(224, 73, 29, 0.35);
   color: #fff3e8;
   font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.14em;
+  font-weight: 600;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   z-index: 7;
   animation: banner-pulse 1.6s ease-in-out infinite;
@@ -753,8 +753,8 @@ button { font-family: inherit; }
 .menu__eyebrow {
   margin: 0 0 10px;
   font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.28em;
+  font-weight: 600;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--fire);
 }
@@ -763,7 +763,7 @@ button { font-family: inherit; }
   margin: 0 0 16px;
   font-size: clamp(44px, 8vw, 80px);
   line-height: 0.9;
-  font-weight: 800;
+  font-weight: 600;
   letter-spacing: -0.035em;
   color: #f6f8fb;
 }
@@ -858,7 +858,7 @@ button { font-family: inherit; }
 
 .over-stats span {
   font-size: 9.5px;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--muted);
 }
@@ -909,7 +909,7 @@ button { font-family: inherit; }
 .station__balance {
   margin: 0 0 14px;
   font-size: 34px;
-  font-weight: 800;
+  font-weight: 600;
   letter-spacing: -0.02em;
   color: #f0c96a;
   font-variant-numeric: tabular-nums;
@@ -919,7 +919,7 @@ button { font-family: inherit; }
   margin-left: 8px;
   font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--muted);
 }
@@ -950,7 +950,7 @@ button { font-family: inherit; }
   background: rgba(255, 255, 255, 0.08);
   color: #cfd9e3;
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 600;
   flex: none;
 }
 
@@ -1006,7 +1006,7 @@ button { font-family: inherit; }
 
 .station__buyhead i {
   font-style: normal;
-  font-weight: 800;
+  font-weight: 600;
   font-size: 11.5px;
   color: #f0c96a;
 }
@@ -1078,7 +1078,7 @@ button { font-family: inherit; }
 .station__keys kbd {
   font-family: var(--font);
   font-size: 9px;
-  font-weight: 800;
+  font-weight: 600;
   color: #d5e0ea;
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid var(--line);
@@ -1239,7 +1239,7 @@ button { font-family: inherit; }
 }
 .contract.is-active { border-color: rgba(240, 201, 106, 0.45); }
 .contract header { display: flex; justify-content: space-between; font-size: 13px; }
-.contract header span { color: #f0c96a; font-weight: 800; }
+.contract header span { color: #f0c96a; font-weight: 600; }
 .contract p { margin: 4px 0 8px; font-size: 12.5px; }
 .contract__meta { display: block; margin-bottom: 8px; font-size: 10.5px; color: var(--muted); }
 .contract .btn { margin-top: 2px; }
@@ -1371,7 +1371,7 @@ button { font-family: inherit; }
   text-transform: uppercase;
   cursor: pointer;
 }
-.ugroup__head b { font-weight: 800; }
+.ugroup__head b { font-weight: 600; }
 .ugroup__head:hover { color: var(--text); }
 .ugroup__chev { width: 10px; }
 .ugroup__count { margin-left: auto; font-variant-numeric: tabular-nums; }
@@ -1464,7 +1464,7 @@ button { font-family: inherit; }
   background: rgba(255, 107, 99, 0.18);
   color: #ffaaa5;
   font-size: 9.5px;
-  font-weight: 800;
+  font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }

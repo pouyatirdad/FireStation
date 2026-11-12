@@ -156,6 +156,7 @@ export function render(ctx, state, cam, view, opts = {}) {
 
   const z = cam.zoom;
   const bounds = visibleTiles(cam, view);
+  currentDark = daylight(state.clock);
 
   ctx.save();
   ctx.setTransform(dpr * z, 0, 0, dpr * z, dpr * (W / 2 - cam.x * z), dpr * (H / 2 - cam.y * z));
@@ -171,6 +172,11 @@ export function render(ctx, state, cam, view, opts = {}) {
   drawHoses(ctx, state, now);
   drawEntities(ctx, state, bounds, now, z);
   drawWildfires(ctx, state, now, z);
+  if (currentDark > 0.15) {
+    ctx.globalCompositeOperation = 'lighter';
+    drawStreetLights(ctx, bounds, z, true);
+    ctx.globalCompositeOperation = 'source-over';
+  }
   drawDistrictLabels(ctx, state, z);
   drawStreams(ctx, state, now);
   drawParticles(ctx, state);
@@ -178,7 +184,7 @@ export function render(ctx, state, cam, view, opts = {}) {
 
   ctx.restore();
 
-  drawNight(ctx, state, W, H);
+  drawNight(ctx, state, W, H, z);
   drawFloatingBars(ctx, state, cam, view);
   drawHydrantPrompt(ctx, state, cam, view);
   drawSelectedLabel(ctx, state, cam, view);
@@ -205,11 +211,64 @@ export function daylight(clockMinutes) {
   return 1 - (h - 5) / 2;
 }
 
-function drawNight(ctx, state, W, H) {
-  const dark = daylight(state.clock);
+// Dark amount of the frame being drawn, shared with the helpers below.
+let currentDark = 0;
+
+// Colour grade: warm low sun at either end of the day, a cool haze when the
+// whole city is in view, and a deep blue at night.
+function drawNight(ctx, state, W, H, z) {
+  const dark = currentDark;
+  const hour = (((state.clock / 60) % 24) + 24) % 24;
+  const golden = Math.max(0, 1 - Math.abs(hour - 7.5) / 2.2, 1 - Math.abs(hour - 17.2) / 2.2);
+  if (golden > 0.01 && dark < 0.6) {
+    ctx.fillStyle = `rgba(255,164,84,${0.13 * golden})`;
+    ctx.fillRect(0, 0, W, H);
+  }
+  if (z < 0.35) {
+    ctx.fillStyle = `rgba(176,194,212,${0.1 * (1 - z / 0.35) * (1 - dark)})`;
+    ctx.fillRect(0, 0, W, H);
+  }
   if (dark <= 0.01) return;
-  ctx.fillStyle = `rgba(8,16,46,${0.46 * dark})`;
+  ctx.fillStyle = `rgba(6,14,44,${0.52 * dark})`;
   ctx.fillRect(0, 0, W, H);
+}
+
+// Street lights: a post on each junction corner and a pool of warm light
+// under it after dark.
+function drawStreetLights(ctx, b, z, glowPass) {
+  if (z < 0.4) return;
+  const vr = V_ROADS.filter((vx) => vx + 2 >= b.x0 - 1 && vx <= b.x1 + 1);
+  const hr = H_ROADS.filter((hy) => hy + 2 >= b.y0 - 1 && hy <= b.y1 + 1);
+  for (const vx of vr) {
+    for (const hy of hr) {
+      if (hy >= SEA_Y - 1) continue;
+      for (const [cx, cy] of [[vx - 0.35, hy - 0.35], [vx + 2.35, hy + 2.35]]) {
+        const px = cx * TILE;
+        const py = cy * TILE;
+        if (glowPass) {
+          const r = 70;
+          const g = ctx.createRadialGradient(px, py, 0, px, py, r);
+          g.addColorStop(0, `rgba(255,214,140,${0.5 * currentDark})`);
+          g.addColorStop(1, 'rgba(255,190,110,0)');
+          ctx.fillStyle = g;
+          ctx.fillRect(px - r, py - r, r * 2, r * 2);
+        } else {
+          ctx.fillStyle = 'rgba(10,12,14,0.3)';
+          ctx.beginPath();
+          ctx.ellipse(px + 3, py + 3, 3.5, 2.2, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#2b2f33';
+          ctx.beginPath();
+          ctx.arc(px, py, 2.6, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = currentDark > 0.3 ? '#ffe6a8' : '#9aa0a6';
+          ctx.beginPath();
+          ctx.arc(px, py, 1.4, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+  }
 }
 
 // ---------------------------------------------------------------- ground ---
@@ -364,6 +423,9 @@ function drawGround(ctx, state, b, z) {
     ctx.stroke();
   }
 
+  if (z >= 0.7) drawRoadWear(ctx, vr, hr, b);
+  drawStreetLights(ctx, b, z, false);
+
   // Trees and hydrants sit on the ground, in front of the streets.
   for (const tree of z < 0.16 ? [] : city.trees) {
     if (tree.x < left - 40 || tree.x > left + width + 40) continue;
@@ -492,6 +554,45 @@ function drawWater(ctx, state, b, z) {
   }
 }
 
+// Patches, cracks, oil stains and manhole covers, scattered deterministically
+// along each street so the asphalt looks used.
+function drawRoadWear(ctx, vr, hr, b) {
+  const mark = (px, py, along, id) => {
+    const r = hash(id);
+    if (r > 0.42) return;
+    const kind = Math.floor(r * 10) % 4;
+    if (kind === 0) { // manhole
+      ctx.fillStyle = 'rgba(18,19,21,0.55)';
+      ctx.beginPath(); ctx.arc(px, py, 6.5, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = 'rgba(120,124,128,0.45)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(px, py, 5.2, 0, Math.PI * 2); ctx.stroke();
+    } else if (kind === 1) { // patch
+      ctx.fillStyle = 'rgba(14,15,17,0.28)';
+      ctx.fillRect(px - (along ? 4 : 14), py - (along ? 14 : 4), along ? 8 : 28, along ? 28 : 8);
+    } else if (kind === 2) { // oil stain
+      ctx.fillStyle = 'rgba(10,10,12,0.26)';
+      ctx.beginPath(); ctx.ellipse(px, py, 9, 5, r * 6, 0, Math.PI * 2); ctx.fill();
+    } else { // crack
+      ctx.strokeStyle = 'rgba(10,10,12,0.4)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(px, py);
+      ctx.lineTo(px + (along ? 5 : 12), py + (along ? 12 : 5));
+      ctx.lineTo(px + (along ? -2 : 20), py + (along ? 22 : 2)); ctx.stroke();
+    }
+  };
+  for (const vx of vr) {
+    for (let ty = b.y0; ty <= b.y1; ty += 2) {
+      if (H_ROADS.some((hy) => ty >= hy - 1 && ty <= hy + 2)) continue;
+      mark((vx + 0.35 + hash(vx * 7 + ty) * 1.3) * TILE, ty * TILE, true, vx * 977 + ty * 31);
+    }
+  }
+  for (const hy of hr) {
+    for (let tx = b.x0; tx <= b.x1; tx += 2) {
+      if (V_ROADS.some((vx) => tx >= vx - 1 && tx <= vx + 2)) continue;
+      mark(tx * TILE, (hy + 0.35 + hash(hy * 5 + tx) * 1.3) * TILE, false, hy * 853 + tx * 17 + 5);
+    }
+  }
+}
+
 function drawCar(ctx, car) {
   ctx.save();
   ctx.translate(car.x, car.y);
@@ -521,6 +622,18 @@ function drawCar(ctx, car) {
   ctx.fill();
   ctx.fillStyle = 'rgba(255,255,255,0.16)';
   ctx.fillRect(11, -6, 7, 3);
+  if (currentDark > 0.25) { // headlight beams
+    ctx.globalCompositeOperation = 'lighter';
+    const beam = ctx.createLinearGradient(19, 0, 52, 0);
+    beam.addColorStop(0, `rgba(255,236,190,${0.4 * currentDark})`);
+    beam.addColorStop(1, 'rgba(255,236,190,0)');
+    ctx.fillStyle = beam;
+    ctx.beginPath();
+    ctx.moveTo(19, -6); ctx.lineTo(54, -16); ctx.lineTo(54, 16); ctx.lineTo(19, 6);
+    ctx.closePath();
+    ctx.fill();
+    ctx.globalCompositeOperation = 'source-over';
+  }
   ctx.restore();
 }
 
@@ -614,12 +727,36 @@ function buildingVisible(b, bounds) {
   );
 }
 
+// Where the sun is: shadows swing from west in the morning to east in the
+// evening and are longest at the ends of the day. Returned as a unit-ish
+// vector scaled by building height.
+function sunShadow(clock) {
+  const h = (((clock / 60) % 24) + 24) % 24;
+  const t = clamp((h - 6) / 13, 0, 1);
+  const side = 2 * t - 1;
+  const len = 0.45 + 0.9 * side * side;
+  return { dx: side * len * 1.1, dy: 0.35 + 0.25 * len };
+}
+
 function drawBuildingShadows(ctx, state, bounds) {
+  const sun = sunShadow(state.clock);
+  const fade = 1 - currentDark * 0.9;
+  if (fade <= 0.05) return;
+  // Shadow of a block = its footprint swept along the shadow vector. Rects in
+  // one path share a winding, so overlaps never double-darken.
+  ctx.fillStyle = `rgba(12,17,22,${0.3 * fade})`;
+  ctx.beginPath();
   for (const b of state.buildings) {
     if (b.state === 'rubble' || !buildingVisible(b, bounds)) continue;
-    ctx.fillStyle = 'rgba(12,17,22,0.26)';
-    ctx.fillRect(b.x * TILE + 12, b.y * TILE + 16, b.w * TILE, b.h * TILE);
+    const sx = sun.dx * b.elevation;
+    const sy = sun.dy * b.elevation + 4;
+    const steps = Math.min(14, Math.max(2, Math.ceil(Math.hypot(sx, sy) / 5)));
+    for (let i = 0; i <= steps; i++) {
+      const k = i / steps;
+      ctx.rect(b.x * TILE + sx * k, b.y * TILE + sy * k, b.w * TILE, b.h * TILE);
+    }
   }
+  ctx.fill();
 }
 
 function drawEntities(ctx, state, bounds, now, z) {
@@ -673,8 +810,9 @@ function drawBuilding(ctx, state, b, now, z) {
 
   // South wall: masonry, darker toward the pavement, with a cornice under the
   // roof so the two surfaces never blur into one another.
-  ctx.fillStyle = shade(b.roofColor, -0.42);
+  ctx.fillStyle = wallColor(b);
   ctx.fillRect(x, facadeTop, w, e);
+  if (b.type === 'office' && detailed) drawCurtainWall(ctx, b, x, facadeTop, w, e);
   if (detailed) {
     const wall = ctx.createLinearGradient(0, facadeTop, 0, facadeTop + e);
     wall.addColorStop(0, 'rgba(255,255,255,0.07)');
@@ -688,7 +826,8 @@ function drawBuilding(ctx, state, b, now, z) {
   ctx.fillStyle = 'rgba(255,255,255,0.06)';
   ctx.fillRect(x, facadeTop, w, 2);
 
-  if (detailed && b.type !== 'station') drawFacadeWindows(ctx, b, x, facadeTop, w, e);
+  if (detailed && b.type !== 'station' && b.type !== 'office') drawFacadeWindows(ctx, b, x, facadeTop, w, e);
+  if (detailed && b.type !== 'station') drawEntrance(ctx, b, x, facadeTop, w, e, z);
   if (detailed && (b.trapped ?? 0) > 0 && b.state !== 'rubble') {
     drawTrapped(ctx, b, x, facadeTop, w, e, now);
   }
@@ -714,6 +853,8 @@ function drawBuilding(ctx, state, b, now, z) {
   ctx.lineWidth = 1;
   ctx.strokeRect(x + 2.5, y - e + 2.5, w - 5, h - 5);
 
+  if (detailed && b.type === 'house') drawPitchedRoof(ctx, b, x, y - e, w, h);
+  if (detailed && b.type === 'warehouse') drawCorrugation(ctx, x, y - e, w, h);
   if (detailed) drawRoofDetails(ctx, b, x, y - e, w, h);
   if (b.type === 'pharmacy') drawPharmacyMark(ctx, x, y - e, w, h);
   if (b.type === 'hospital') drawHospitalMark(ctx, x, y - e, w, h, detailed);
@@ -737,6 +878,113 @@ function drawBuilding(ctx, state, b, now, z) {
   }
 }
 
+const WALLS = {
+  house: ['#d9cfba', '#cbbfa8', '#bfc5b8', '#d2c3ab'],
+  apartment: ['#9a5d4b', '#a66a52', '#8d5a49'],
+  shop: ['#a8785a', '#b59a7c', '#9a7b62'],
+  office: ['#5d7384'],
+  hotel: ['#cdbd9e', '#c2b08f', '#d3c6aa'],
+  warehouse: ['#8e9498', '#9a9f9c', '#80878c'],
+  pharmacy: ['#e3e6e2'],
+  hospital: ['#e6e8e6'],
+  station: ['#a2503f'],
+};
+
+function wallColor(b) {
+  const list = WALLS[b.type] ?? WALLS.house;
+  return list[Math.floor(hashString(b.id) * 7) % list.length];
+}
+
+// Glass curtain wall: pale sky reflection fading down, with mullions.
+function drawCurtainWall(ctx, b, x, y, w, h) {
+  const g = ctx.createLinearGradient(x, y, x + w, y + h);
+  g.addColorStop(0, '#7fa0b4');
+  g.addColorStop(0.5, '#4d6a7e');
+  g.addColorStop(1, '#34495a');
+  ctx.fillStyle = g;
+  ctx.fillRect(x, y, w, h);
+  const seed = hashString(b.id);
+  ctx.strokeStyle = 'rgba(20,30,40,0.55)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  const cols = Math.max(3, Math.round(w / 14));
+  for (let c = 1; c < cols; c++) { ctx.moveTo(x + (w * c) / cols, y); ctx.lineTo(x + (w * c) / cols, y + h); }
+  for (let r = 1; r < Math.max(1, b.floors); r++) { ctx.moveTo(x, y + (h * r) / b.floors); ctx.lineTo(x + w, y + (h * r) / b.floors); }
+  ctx.stroke();
+  // Lit offices after dark.
+  if (currentDark > 0.2) {
+    for (let r = 0; r < b.floors; r++) {
+      for (let c = 0; c < cols; c++) {
+        if (hash(seed + r * 61 + c * 29) > 0.55 * currentDark) continue;
+        ctx.fillStyle = 'rgba(255,226,150,0.65)';
+        ctx.fillRect(x + (w * c) / cols + 1, y + (h * r) / b.floors + 1, w / cols - 2, h / b.floors - 2);
+      }
+    }
+  }
+}
+
+// A front door; shops get a striped awning and a name board.
+function drawEntrance(ctx, b, x, y, w, h, z) {
+  const seed = hashString(b.id);
+  const dw = Math.min(14, w * 0.2);
+  const dh = Math.min(h * 0.5, 13);
+  const dx = x + w * (0.3 + hash(seed) * 0.4) - dw / 2;
+  ctx.fillStyle = '#2a2623';
+  ctx.fillRect(dx, y + h - dh, dw, dh);
+  ctx.fillStyle = 'rgba(210,190,140,0.5)';
+  ctx.fillRect(dx, y + h - dh, dw, 1.5);
+  if (b.type !== 'shop' && b.type !== 'pharmacy') return;
+  const colors = [['#b8372c', '#efe8da'], ['#2f6a8f', '#efe8da'], ['#2f7a52', '#efe8da'], ['#c08a2e', '#efe8da']][Math.floor(seed * 3) % 4];
+  const ah = Math.min(9, h * 0.22);
+  const ay = y + h - h * 0.62;
+  const n = Math.max(4, Math.round(w / 8));
+  for (let i = 0; i < n; i++) {
+    ctx.fillStyle = colors[i % 2];
+    ctx.fillRect(x + (w * i) / n, ay, w / n + 0.5, ah);
+  }
+  ctx.fillStyle = 'rgba(0,0,0,0.28)';
+  ctx.fillRect(x, ay + ah, w, 2);
+  if (z >= 0.9 && w >= 60) {
+    ctx.fillStyle = '#1f2326';
+    ctx.fillRect(x + w * 0.1, y + 2, w * 0.8, Math.max(6, h * 0.17));
+    ctx.fillStyle = '#e9e3d2';
+    ctx.font = `600 ${Math.max(5, h * 0.12)}px "Segoe UI", system-ui, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText((b.name ?? '').toUpperCase().slice(0, 16), x + w / 2, y + 2 + Math.max(6, h * 0.17) / 2 + 0.5);
+  }
+}
+
+// A gabled roof: ridge along the long axis, the sun-facing (south) slope lit
+// and the north slope in shade, with shingle courses.
+function drawPitchedRoof(ctx, b, x, y, w, h) {
+  const alongX = w >= h;
+  ctx.fillStyle = 'rgba(255,240,215,0.14)';
+  if (alongX) ctx.fillRect(x, y + h / 2, w, h / 2); else ctx.fillRect(x + w / 2, y, w / 2, h);
+  ctx.fillStyle = 'rgba(0,0,0,0.2)';
+  if (alongX) ctx.fillRect(x, y, w, h / 2); else ctx.fillRect(x, y, w / 2, h);
+  ctx.strokeStyle = 'rgba(0,0,0,0.16)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  const step = 5;
+  if (alongX) for (let yy = y + step; yy < y + h; yy += step) { ctx.moveTo(x, yy); ctx.lineTo(x + w, yy); }
+  else for (let xx = x + step; xx < x + w; xx += step) { ctx.moveTo(xx, y); ctx.lineTo(xx, y + h); }
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,255,255,0.28)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  if (alongX) { ctx.moveTo(x, y + h / 2); ctx.lineTo(x + w, y + h / 2); } else { ctx.moveTo(x + w / 2, y); ctx.lineTo(x + w / 2, y + h); }
+  ctx.stroke();
+}
+
+function drawCorrugation(ctx, x, y, w, h) {
+  ctx.strokeStyle = 'rgba(0,0,0,0.13)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let xx = x + 4; xx < x + w; xx += 4) { ctx.moveTo(xx, y); ctx.lineTo(xx, y + h); }
+  ctx.stroke();
+}
+
 function drawFacadeWindows(ctx, b, x, y, w, h) {  const seed = hashString(b.id);
   const rows = Math.max(1, b.floors);
   const cols = Math.max(2, Math.round(w / 24));
@@ -752,8 +1000,8 @@ function drawFacadeWindows(ctx, b, x, y, w, h) {  const seed = hashString(b.id);
       ctx.fillStyle = 'rgba(10,14,18,0.55)';
       ctx.fillRect(wx - 1, wy - 1, ww + 2, wh + 2);
 
-      const lit = hash(seed + r * 71 + c * 37) < 0.16;
-      let color = lit ? '#f1d18d' : '#28313b';
+      const lit = hash(seed + r * 71 + c * 37) < 0.08 + 0.6 * currentDark;
+      let color = lit ? (currentDark > 0.2 ? '#ffd98a' : '#e8cf98') : '#303a44';
       if (b.state === 'burning' && hash(seed + r * 19 + c * 53) < b.fire) color = '#ffb24a';
       ctx.fillStyle = color;
       ctx.fillRect(wx, wy, ww, wh);
@@ -918,13 +1166,17 @@ function drawFire(ctx, b, now, z) {
   const cx = x + w / 2;
   const cy = y + h / 2;
 
-  const glowR = Math.max(w, h) * (0.6 + f * 0.5);
+  // Heat glow, additive so it lights the street at night instead of greying it.
+  const glowR = Math.max(w, h) * (0.7 + f * 0.7) * (1 + currentDark * 0.8);
+  const boost = 1 + currentDark * 0.9;
   const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, glowR);
-  glow.addColorStop(0, `rgba(255,160,60,${0.42 * f})`);
-  glow.addColorStop(0.5, `rgba(255,90,15,${0.2 * f})`);
+  glow.addColorStop(0, `rgba(255,150,50,${0.4 * f * boost})`);
+  glow.addColorStop(0.45, `rgba(255,86,14,${0.18 * f * boost})`);
   glow.addColorStop(1, 'rgba(255,60,0,0)');
   ctx.fillStyle = glow;
+  ctx.globalCompositeOperation = 'lighter';
   ctx.fillRect(cx - glowR, cy - glowR, glowR * 2, glowR * 2);
+  ctx.globalCompositeOperation = 'source-over';
 
   const count = 2 + Math.round(f * 5);
   for (let i = 0; i < count; i++) {
@@ -936,10 +1188,10 @@ function drawFire(ctx, b, now, z) {
 
     // Flame tongue: a teardrop leaning up and to the wind.
     const tongue = ctx.createLinearGradient(px, py, px + 4, py - height);
-    tongue.addColorStop(0, 'rgba(255,120,20,0.85)');
-    tongue.addColorStop(0.45, 'rgba(255,186,60,0.8)');
-    tongue.addColorStop(0.8, 'rgba(255,226,130,0.55)');
-    tongue.addColorStop(1, 'rgba(255,180,60,0)');
+    tongue.addColorStop(0, 'rgba(210,60,12,0.8)');
+    tongue.addColorStop(0.35, 'rgba(255,120,24,0.78)');
+    tongue.addColorStop(0.7, 'rgba(255,190,70,0.55)');
+    tongue.addColorStop(1, 'rgba(255,200,90,0)');
     ctx.fillStyle = tongue;
     ctx.beginPath();
     ctx.moveTo(px - width, py);
@@ -1831,6 +2083,7 @@ function drawStreams(ctx, state, now) {
 // Soft puffs are drawn from a pre-rendered sprite: hundreds of radial gradients
 // per frame would be far too slow, one 64px image is free.
 let smokeSprite = null;
+let darkSmokeSprite = null;
 let steamSprite = null;
 
 function puff(rgb) {
@@ -1851,13 +2104,20 @@ function drawParticles(ctx, state) {
   if (!smokeSprite) {
     smokeSprite = puff('108,114,122');
     steamSprite = puff('228,238,246');
+    darkSmokeSprite = puff('34,32,31');
   }
 
   for (const p of state.fx) {
     const life = p.life / p.maxLife;
     if (p.kind === 'smoke') {
-      const size = p.size * 2.8;
-      ctx.globalAlpha = life * 0.5 * (0.65 + p.tone * 0.35);
+      // Young smoke is dark and dense; it greys, spreads and thins with age.
+      const age = 1 - life;
+      const size = p.size * (2.4 + age * 1.6);
+      if (age < 0.55 && p.tone > 0.35) {
+        ctx.globalAlpha = life * 0.55 * (1 - age / 0.55 * 0.5);
+        ctx.drawImage(darkSmokeSprite, p.x - size / 2, p.y - size / 2, size, size);
+      }
+      ctx.globalAlpha = life * 0.42 * (0.65 + p.tone * 0.35);
       ctx.drawImage(smokeSprite, p.x - size / 2, p.y - size / 2, size, size);
     } else if (p.kind === 'steam') {
       const size = p.size * 3;
