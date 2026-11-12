@@ -153,8 +153,8 @@ export function mount(state, callbacks) {
     if (unit) handlers.onUnitCenter?.(unit.dataset.unit);
   });
 
-  // Small screens start with the unit list tucked away.
-  if (window.matchMedia?.('(max-width: 760px)').matches) setUnitsCollapsed(true);
+  // The unit list starts tucked away so the whole map is visible.
+  setUnitsCollapsed(true);
 
   $('btn-pause').addEventListener('click', () => handlers.onPause?.());
   $('btn-help').addEventListener('click', () => handlers.onHelp?.());
@@ -184,7 +184,7 @@ function buildSpeeds(state) {
 
 let currentState = null;
 let unitFilter = 'all';
-let unitsCollapsed = false;
+let unitsCollapsed = true; // the unit list starts hidden; the Units button (or U) opens it
 const collapsedGroups = new Set();
 let rosterKey = '';
 
@@ -230,8 +230,15 @@ function localAction(button) {
 function setUnitsCollapsed(collapsed) {
   unitsCollapsed = collapsed;
   $('dock-left').hidden = collapsed;
-  $('units-open').hidden = !collapsed;
+  const tab = $('units-open');
+  tab.classList.toggle('is-open', !collapsed);
+  tab.setAttribute('aria-expanded', String(!collapsed));
   $('stage').classList.toggle('units-collapsed', collapsed);
+}
+
+/** Show or hide the unit list. */
+export function toggleUnits() {
+  setUnitsCollapsed(!unitsCollapsed);
 }
 
 const unitKey = (index) => (index < 9 ? String(index + 1) : '');

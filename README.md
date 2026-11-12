@@ -33,8 +33,9 @@ Node 18+ is only needed for the build and the tests; playing needs nothing but a
 You command **Station 1** in Harbor City: about 1,800 buildings, 570 hydrants, 48 pharmacies, eight
 forests, and **$3,000** to start. One engine and three firefighters are in quarters. Calls come in;
 you send what fits, lay hose, pull people out, treat the injured, and spend what you earn on more
-apparatus. The first calls come from near the station; the area the calls cover grows through the
-shift until it reaches the whole map.
+apparatus. The first calls come from near the station; the area the calls cover grows through a
+15-minute cycle, with calls coming closer together and more of them open at once. Then it all resets
+to a quiet start and builds up again, so the shift never snowballs.
 
 There is **no lose state**. The city rating is a score that falls when buildings are lost and
 recovers when you save them; at zero the shift still goes on. Only the clock and your wallet limit
@@ -57,7 +58,7 @@ the night.
 | **Hose** | Water only flows within the vehicle's hose range — the dashed circle around it. |
 | **Hydrant** | Park within reach of a hydrant and press <kbd>G</kbd>. A supply line runs to the pump and the tank stays fed while the crew works. Drive off and it detaches. |
 | **Water** | Tanks run from 600 L (rescue) to 6,000 L (tanker). The station apron refills; anywhere else you need the hydrant line. |
-| **Calls** | Small jobs start arriving after 20 seconds, roughly every 38–60, about one in five a medical emergency. **Major incidents start after four minutes** and pay far more. |
+| **Calls** | Small jobs start arriving after 20 seconds, roughly every 38–60, about one in five a medical emergency. No new call comes while too many are open: two at the start of a cycle, five at its peak. **Major incidents start four minutes into a cycle**, only when the district is nearly clear, and pay far more. After 15 minutes the cycle resets to a short quiet spell. |
 | **Night** | The shift starts at 07:00. Dusk comes at 18:00 and it is dark from 21:00 to 05:00. |
 | **Save** | The shift autosaves every 30 seconds. <kbd>Ctrl</kbd>+<kbd>S</kbd> saves by hand; Headquarters has Save, Load and New shift. A saved shift appears as **Continue** on the start screen. |
 
@@ -146,9 +147,9 @@ There is a real budget, shown in the top bar and in Headquarters.
 
 ### Major incidents and the forest
 
-After the first four minutes the city can throw a **major incident**: an industrial fire, a
+Four minutes into each cycle the city can throw a **major incident**: an industrial fire, a
 multi-building block fire, or a forest fire in one of the woods. Only one major incident is live at a
-time, and the small calls keep coming in the background.
+time, it waits until the district is nearly clear, and the small calls keep coming in the background.
 
 The biggest woodland is the **Southeast Forest**: a pine forest of twenty-five blocks east of the river,
 from the Eastside district down to the quay. No road runs through any forest, only round it, so a fire
@@ -185,7 +186,8 @@ lists the pointer controls. <kbd>F1</kbd> opens the full list.
 | Drag / arrow keys | Pan the map |
 | Scroll | Zoom around the pointer |
 | <kbd>1</kbd>–<kbd>8</kbd> | Select a vehicle |
-| <kbd>D</kbd> | Dispatch the selected vehicle (or the nearest idle one); an ambulance goes to the nearest patient |
+| <kbd>D</kbd> | Dispatch the selected vehicle or firefighter (or the nearest idle one) to the selected building, else the fire that most needs it; with nothing alight, to a forest fire or a building with people trapped. An ambulance goes to the nearest patient |
+| <kbd>U</kbd> | Show or hide the unit list (hidden by default) |
 | <kbd>P</kbd> | Send the selected ambulance to the nearest pharmacy |
 | <kbd>K</kbd> | Send the selected ambulance to the nearest hospital with its patients |
 | <kbd>Tab</kbd> / <kbd>Home</kbd> | Next incident / back to Station 1 |
@@ -225,9 +227,10 @@ simulation knows about the DOM, and nothing in the renderer changes the simulati
 - **The fleet** (`src/systems/units.js`) drives the roads, parks, deploys, walks to the nearest job
   it can reach with hose, sprays it, drains its tank, hooks up to hydrants and packs up. Each type
   has its own crew, tank, hose and deck-gun ranges.
-- **Incidents** (`src/systems/incidents.js`) generate small calls near the station (the covered radius
-  grows over the shift) and gate the major incidents to the part of the shift where they belong, with
-  rewards attached to each job.
+- **Incidents** (`src/systems/incidents.js`) generate small calls near the station. Difficulty runs in
+  cycles (`CONFIG.incidents.cycle`): the covered radius, call rate and the cap on open incidents grow
+  through a cycle and reset at its end. Major incidents are gated to the later part of each cycle and
+  to a nearly clear district, with rewards attached to each job.
 - **Blockades and traffic** (`src/systems/blockades.js`) seal and reopen road tiles in the nav layer and run
   the traffic cars; **chains** (`src/systems/chains.js`) decides when a crash, a fuel fire, a pile-up or an
   explosion turns into the next incident; **wind** (`src/systems/wind.js`) is the shared direction and

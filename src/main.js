@@ -549,14 +549,28 @@ function restart() {
 
 // --------------------------------------------------------------- keyboard ---
 
+/**
+ * The pressed key as a lower-case Latin letter or digit, whatever layout is
+ * active: with a Persian (or other non-Latin) layout `ev.key` is a character
+ * like "ی", so the physical key (`ev.code`) decides instead.
+ */
+function keyOf(ev) {
+  const key = ev.key.toLowerCase();
+  if (key.length !== 1 || key < '\u0080') return key;
+  const code = ev.code ?? '';
+  if (/^Key[A-Z]$/.test(code)) return code.slice(3).toLowerCase();
+  if (/^Digit[0-9]$/.test(code)) return code.slice(5);
+  return key;
+}
+
 window.addEventListener('keydown', (ev) => {
-  if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 's') {
+  if ((ev.ctrlKey || ev.metaKey) && keyOf(ev) === 's') {
     ev.preventDefault();
     saveGame();
     return;
   }
   if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
-  const key = ev.key.toLowerCase();
+  const key = keyOf(ev);
 
   if (key === 'f1' || ev.key === '?') {
     ev.preventDefault();
@@ -623,6 +637,7 @@ window.addEventListener('keydown', (ev) => {
     case 'p': commandPharmacy(state); break;
     case 'k': commandHospital(state); break;
     case 'c': centerOnSelected(); break;
+    case 'u': hud.toggleUnits(); break;
     // Equipment: hose, chainsaw, diving gear, rescue cutter.
     case 'f': commandEquip(state, 'hose'); break;
     case 'x': commandEquip(state, 'chainsaw'); break;
@@ -643,7 +658,7 @@ window.addEventListener('keydown', (ev) => {
 });
 
 window.addEventListener('keyup', (ev) => {
-  keys.delete(ev.key.toLowerCase());
+  keys.delete(keyOf(ev));
 });
 
 window.addEventListener('blur', () => {

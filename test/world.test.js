@@ -48,7 +48,7 @@ test('early calls come from near the station and the covered area grows', () => 
   const state = createGame(7);
   startShift(state);
   const start = coverageRadius(state);
-  state.time = 1200;
+  state.time = CONFIG.incidents.cycle - 100;
   assert.ok(coverageRadius(state) > start + 100);
 
   state.time = 0;

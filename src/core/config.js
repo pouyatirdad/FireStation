@@ -15,6 +15,7 @@ export const CONFIG = {
     startZoom: 1.0,
     panSpeed: 950, // px/s while a pan key is held
     margin: 2, // tiles of slack around the city edge
+    edgePad: 240, // screen pixels of slack at the edge, so a panel never hides the map's rim
   },
 
   city: { seed: 7, name: 'Harbor City' },
@@ -236,15 +237,22 @@ export const CONFIG = {
   rating: { start: 100, perLost: 12 },
 
   // Calls for service. Small jobs start immediately; major incidents are held
-  // back until the shift has been running for a while.
+  // back until a while into each cycle. The build-up is a cycle, not a ramp
+  // that never ends: calls get closer together, reach further and more of them
+  // may be open at once as the cycle goes on, and after `cycle` seconds it all
+  // drops back to the quiet start (after a short breather).
   incidents: {
     firstCall: 20,
     callEvery: [38, 60],
-    bigAfter: 240,
+    callScale: 0.75, // call gaps shrink to this share by the end of a cycle
+    bigAfter: 240, // seconds into a cycle before a major incident can start
+    bigFirst: [40, 160], // after a reset, seconds of that window before the first one
     bigEvery: [300, 420],
-    maxActive: 6,
+    cycle: 900, // seconds of build-up before the reset
+    breather: 50, // seconds without a new call right after a reset
+    maxOpen: [2, 5], // incidents open at once: at the start of a cycle, at its end
     // The map is huge: calls start near the station and the covered district
-    // grows as the shift goes on, up to the whole city.
+    // grows through the cycle (and shrinks back at the reset).
     radius: { start: 90, growPerSecond: 0.18 }, // tiles
     medicalCall: 0.2, // share of small calls that are a medical emergency
     reward: {

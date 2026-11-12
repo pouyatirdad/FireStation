@@ -145,7 +145,9 @@ export function clampCamera(cam, state, view) {
   const worldH = state.city.h * TILE;
   const halfW = view.width / (2 * cam.zoom);
   const halfH = view.height / (2 * cam.zoom);
-  const margin = CONFIG.camera.margin * TILE;
+  // Slack past the city edge: a few tiles, or at least `edgePad` screen pixels,
+  // so anything at the very left or right can be panned out from under a panel.
+  const margin = Math.max(CONFIG.camera.margin * TILE, CONFIG.camera.edgePad / cam.zoom);
 
   if (worldW + margin * 2 < halfW * 2) cam.x = worldW / 2;
   else cam.x = clamp(cam.x, halfW - margin, worldW - halfW + margin);

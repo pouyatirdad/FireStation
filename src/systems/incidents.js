@@ -17,12 +17,45 @@ const SMALL = () => ['structure', 'structure', 'structure', 'rescue', 'block'];
 const BIG = ['industrial', 'bigBlock', 'forest', 'pileup'];
 
 /**
+ * Where the shift is in its build-up. Difficulty climbs through a cycle and
+ * then starts over, so it never grows without end: `t` is seconds into the
+ * cycle and `level` runs from 0 (quiet start) up towards 1 (the peak).
+ */
+export function cyclePhase(state) {
+  const { cycle } = CONFIG.incidents;
+  const index = Math.floor(state.time / cycle);
+  const t = state.time - index * cycle;
+  return { index, t, level: t / cycle };
+}
+
+/**
  * How far from Station 1 (in tiles) a call can come from. It starts as the
- * neighbourhood and grows through the shift until the whole city is covered.
+ * neighbourhood, grows through the cycle, and shrinks back at the reset.
  */
 export function coverageRadius(state) {
   const { start, growPerSecond } = CONFIG.incidents.radius;
-  return start + state.time * growPerSecond;
+  return start + cyclePhase(state).t * growPerSecond;
+}
+
+/** How many incidents may be open at once at this point in the cycle. */
+export function openLimit(state) {
+  const [lo, hi] = CONFIG.incidents.maxOpen;
+  return Math.round(lo + (hi - lo) * cyclePhase(state).level);
+}
+
+/**
+ * Everything on the incident list that still needs someone. A wreck only
+ * closes a road, so however many there are they count as one.
+ */
+export function openIncidents(state) {
+  let open = Math.min(state.blockades.length, 1);
+  open += state.wildfires.length;
+  open += state.patients.filter((p) => !p.treated).length;
+  open += state.victims?.length ?? 0;
+  for (const b of state.buildings) {
+    if (b.state === 'burning' || ((b.trapped ?? 0) > 0 && b.state !== 'rubble')) open++;
+  }
+  return open;
 }
 
 // A call can come from anywhere within reach of any station you own, so
@@ -182,24 +215,39 @@ export function bigIncidentActive(state) {
 
 export function updateIncidents(state, dt) {
   if (state.incidentsEnabled === false) return;
-  const active = state.buildings.filter((b) => b.state === 'burning').length;
+  const cfg = CONFIG.incidents;
+  const phase = cyclePhase(state);
+
+  // The cycle turned over: back to the quiet start. Whatever is still burning
+  // stays, but nothing new comes for a breather and the build-up starts again.
+  if (state.cycleIndex === undefined) state.cycleIndex = phase.index;
+  if (phase.index !== state.cycleIndex) {
+    state.cycleIndex = phase.index;
+    state.nextCallAt = cfg.breather;
+    state.nextBigAt = state.rng.range(cfg.bigFirst[0], cfg.bigFirst[1]);
+    addEvent(state, 'Quiet spell — the district settles after a busy stretch', 'info');
+  }
+
+  const open = openIncidents(state);
 
   state.nextCallAt -= dt;
   if (state.nextCallAt <= 0) {
-    const [lo, hi] = CONFIG.incidents.callEvery;
-    state.nextCallAt = state.rng.range(lo, hi) * (bigIncidentActive(state) ? 1.35 : 1);
-    if (active < CONFIG.incidents.maxActive) spawnSmall(state);
+    const [lo, hi] = cfg.callEvery;
+    const pace = 1 + (cfg.callScale - 1) * phase.level; // calls come faster as the cycle builds
+    state.nextCallAt = state.rng.range(lo, hi) * pace * (bigIncidentActive(state) ? 1.35 : 1);
+    if (open < openLimit(state)) spawnSmall(state);
   }
 
-  if (state.time < CONFIG.incidents.bigAfter) return;
+  if (phase.t < cfg.bigAfter) return;
 
   state.nextBigAt -= dt;
   if (state.nextBigAt > 0) return;
-  if (active >= 4 || bigIncidentActive(state)) {
+  // A major incident only starts when the district is nearly clear.
+  if (open > 1 || bigIncidentActive(state)) {
     state.nextBigAt = 15;
     return;
   }
-  const [lo, hi] = CONFIG.incidents.bigEvery;
+  const [lo, hi] = cfg.bigEvery;
   state.nextBigAt = state.rng.range(lo, hi);
   spawnBig(state);
 }

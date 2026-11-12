@@ -1222,12 +1222,13 @@ function arriveEngine(state, engine) {
     return;
   }
   const target = buildingOf(state, engine.targetId);
-  if (target && target.state === 'burning') {
+  // A burning building, or one with people still trapped inside, gets the crew out.
+  if (target && (target.state === 'burning' || (target.trapped ?? 0) > 0)) {
     const reach = distToRect(engine.x, engine.y, buildingRect(target));
     if (reach <= engine.spec.hoseRange * TILE) {
       deployCrew(state, engine, target);
     } else {
-      addEvent(state, `${engine.name} is too far from ${target.name} to lay hose`, 'warn');
+      addEvent(state, `${engine.name} is too far from ${target.name} to reach it`, 'warn');
     }
   } else if (engine.wildfireId) {
     const wildfire = (state.wildfires ?? []).find((w) => w.id === engine.wildfireId);

@@ -381,6 +381,31 @@ export function commandPharmacy(state) {
   return sendToPharmacy(state, engine);
 }
 
+/**
+ * Fire-service work that is not a burning building: the nearest forest fire, or
+ * the nearest building with someone trapped inside that has not caught fire.
+ */
+function nearestFireJob(state, x, y) {
+  let best = null;
+  let bestD = Infinity;
+  for (const b of state.buildings) {
+    if ((b.trapped ?? 0) <= 0 || b.state === 'burning' || b.state === 'rubble') continue;
+    const d = Math.hypot((b.x + b.w / 2) * TILE - x, (b.y + b.h / 2) * TILE - y);
+    if (d < bestD) {
+      bestD = d;
+      best = { kind: 'building', id: b.id };
+    }
+  }
+  for (const w of state.wildfires ?? []) {
+    const d = Math.hypot(w.x - x, w.y - y);
+    if (d < bestD) {
+      bestD = d;
+      best = { kind: 'wildfire', id: w.id };
+    }
+  }
+  return best;
+}
+
 export function commandDispatch(state, buildingId = null) {
   const selected = getSelected(state);
   if (selected?.kind === 'wildfire') return commandDispatchWildfire(state, selected.id);
@@ -406,17 +431,34 @@ export function commandDispatch(state, buildingId = null) {
     }
     return commandDispatchPatient(state, patient.id);
   }
-  if (!engine && !buildingId && activeFires(state).length === 0) {
-    const hq = state.city.station;
-    const swimmer = nearestVictim(state, (hq.x + hq.w / 2) * TILE, (hq.y + hq.h / 2) * TILE, { unclaimed: true });
+  // A building picked on the map (buildings carry no `kind`; the selection does).
+  const pickedBuilding = state.selected?.kind === 'building' ? selected : null;
+  const quiet = activeFires(state).length === 0;
+  const hq = state.city.station;
+  const origin = engine ?? { x: (hq.x + hq.w / 2) * TILE, y: (hq.y + hq.h / 2) * TILE };
+
+  if (!engine && !buildingId && !pickedBuilding && quiet) {
+    const swimmer = nearestVictim(state, origin.x, origin.y, { unclaimed: true });
     if (swimmer) return commandDispatchVictim(state, swimmer.id);
-    const patient = nearestPatient(state, (hq.x + hq.w / 2) * TILE, (hq.y + hq.h / 2) * TILE, { unclaimed: true });
+    const patient = nearestPatient(state, origin.x, origin.y, { unclaimed: true });
     if (patient) return commandDispatchPatient(state, patient.id);
+  }
+
+  let target = buildingOf(state, buildingId)
+    ?? (pickedBuilding && (pickedBuilding.state === 'burning' || (pickedBuilding.trapped ?? 0) > 0) ? pickedBuilding : null);
+
+  // Nothing is alight: the fire service still has work — a forest fire, or
+  // someone trapped in a building that has not caught yet.
+  if (!target && quiet) {
+    const job = nearestFireJob(state, origin.x, origin.y);
+    if (job?.kind === 'wildfire') return commandDispatchWildfire(state, job.id);
+    if (job) target = buildingOf(state, job.id);
+  }
+
+  if (!engine && !target && quiet) {
     const wreck = state.blockades[0];
     if (wreck) return commandDispatchBlockade(state, wreck.id);
   }
-  const target = buildingOf(state, buildingId)
-    ?? (selected?.kind === 'building' && selected.state === 'burning' ? selected : null);
   const chosen = dispatchEngine(state, engine, target?.id ?? null);
   if (chosen) {
     selectUnit(state, chosen.id);
