@@ -349,7 +349,7 @@ export function update(state, force = false) {
   const budgetEl = $('stat-budget');
   budgetEl.textContent = `${budget.net >= 0 ? '+' : '−'}$${Math.abs(budget.net)}/h`;
   budgetEl.dataset.tone = budget.net >= 0 ? 'good' : 'bad';
-  budgetEl.title = `Subsidy ${money(budget.subsidy)} − upkeep ${money(budget.upkeep)} per game hour`;
+  budgetEl.title = `Subsidy ${money(budget.subsidy)} − upkeep ${money(budget.upkeep)} per budget hour (every 2 minutes)`;
   $('stat-injured').textContent = String(state.patients.filter((q) => !q.treated).length);
   $('stat-wind').textContent = windLabel(state.wind);
   $('wind-arrow').style.transform = `rotate(${state.wind.dir}rad)`;
@@ -1038,7 +1038,7 @@ function financeTab(state) {
     : '<p class="budget__total">Nothing yet this shift.</p>';
 
   return '<div class="station__balance">$' + state.credits.toLocaleString('en-US') + '<span>credits' + (owed ? ' · owe ' + money(owed) : '') + '</span></div>' +
-    '<div class="budget"><p class="menu__eyebrow">Budget · per game hour</p>' +
+    '<div class="budget"><p class="menu__eyebrow">Budget · per budget hour (every 2 minutes)</p>' +
     line('City subsidy (scales with rating)', '+' + money(b.subsidy), 'good') +
     line('Upkeep · ' + state.engines.length + ' vehicles', '−' + money(b.upkeep), 'bad') +
     (b.premium ? line('Insurance premium', '−' + money(b.premium), 'bad') : '') +

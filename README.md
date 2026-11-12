@@ -137,7 +137,7 @@ are driving into. The minimap is tinted by district.
 
 The **Finance** tab holds the levers:
 
-- **Loans** in $5,000 steps up to $30,000, at 3% of what you owe per game hour.
+- **Loans** in $5,000 steps up to $30,000, at 3% of what you owe per budget hour (every two real minutes).
 - **Insurance** for $70 an hour: a lost building costs 40% instead of all of it.
 - **Training** for fire attack, paramedics and rescue, three levels each (+12% spray power, 15% faster treatment, 12% faster rescue per level).
 - A breakdown of everything you earned and spent this shift, and a **day report** in the log every midnight.
@@ -174,7 +174,13 @@ There is a real budget, shown in the top bar and in Headquarters.
   happen after a run of 10–20 successful missions, only while the city is doing well (rating 85 or more,
   no forest fire, at most one building alight), and even then only on a lucky roll — a miss pushes the
   next chance a few missions on.
-- **Costs:** every game hour (two real minutes) the city deducts the **upkeep** of every vehicle (there are no crew wages). A lost building costs $350 (scaled the same way), a life $700, and kits
+- **Time:** the clock runs 3× faster than it used to: a game hour is 40 real seconds and a day is 16 minutes, so a shift
+  starting at 07:00 reaches dusk after about seven minutes and the rush hours come round quickly. Money is settled on its own
+  timer, a **budget hour** of two real minutes, so the economy is unchanged by the clock speed (`clockRate` in the config).
+- **Night:** after dusk the vehicles light the scene: long headlight beams with a pool of light on the road, big alternating red
+  and blue pulses from the light bars (red and white on an ambulance) across the street and the buildings, a floodlight round an
+  engine working at a scene, a searchlight under a helicopter, and larger warm pools under the street lights.
+- **Costs:** every budget hour (two real minutes) the city deducts the **upkeep** of every vehicle (there are no crew wages). A lost building costs $350 (scaled the same way), a life $700, and kits
   bought at a pharmacy $12 each.
 - The balance can go negative; you just cannot buy anything until it recovers. A full sixteen-bay fleet
   costs more than the subsidy pays, so it has to earn its keep.

@@ -45,7 +45,7 @@ export const CONFIG = {
       villa: 1.4, tower: 2.4, mall: 1.9, factory: 1.7, school: 1.5, tankfarm: 1.6,
     },
     budget: {
-      hourEvery: 120, // real seconds per game hour (60 / clockRate)
+      hourEvery: 120, // real seconds per budget hour (the money is settled on this timer, whatever the clock says)
       subsidy: 260, // per game hour at full rating
       subsidyFloor: 0.4, // share of the subsidy paid at rating 0
     },
@@ -287,6 +287,6 @@ export const CONFIG = {
   },
 
   clockStart: 7 * 60, // 07:00
-  clockRate: 0.5, // game minutes per real second
+  clockRate: 1.5, // game minutes per real second: a game hour is 40 s, a day 16 minutes
   logLimit: 40,
 };

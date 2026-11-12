@@ -203,9 +203,10 @@ export function render(ctx, state, cam, view, opts = {}) {
   drawHoses(ctx, state, now);
   drawEntities(ctx, state, bounds, now, z);
   drawWildfires(ctx, state, now, z);
-  if (currentDark > 0.15) {
+  if (currentDark > 0.12) {
     ctx.globalCompositeOperation = 'lighter';
-    drawStreetLights(ctx, state.city, bounds, z, true);
+    if (currentDark > 0.15) drawStreetLights(ctx, state.city, bounds, z, true);
+    drawVehicleLights(ctx, state, bounds, now, z);
     ctx.globalCompositeOperation = 'source-over';
   }
   drawDistrictLabels(ctx, state, z);
@@ -225,6 +226,114 @@ export function render(ctx, state, cam, view, opts = {}) {
   drawOffscreenVictims(ctx, state, cam, view, now);
   drawMinimap(ctx, state, cam, view);
   drawVignette(ctx, W, H);
+}
+
+// ---------------------------------------------------------- night lights ---
+
+/**
+ * The vehicles' lights at night, drawn additively over the scene: long headlight
+ * beams with a pool of light on the road ahead, big alternating red and blue
+ * pulses from the light bars of anything responding or working, a floodlight
+ * round an engine on scene, and a searchlight under a helicopter.
+ */
+function drawVehicleLights(ctx, state, bounds, now, z) {
+  if (z < 0.1) return;
+  const dark = Math.min(1, currentDark * 1.15);
+  const pad = 8;
+  const phase = Math.floor(now * 7) % 2;
+  const pulse = 0.75 + 0.25 * Math.sin(now * 14);
+  for (const e of state.engines) {
+    const tx = e.x / TILE;
+    const ty = e.y / TILE;
+    if (tx < bounds.x0 - pad || tx > bounds.x1 + pad || ty < bounds.y0 - pad || ty > bounds.y1 + pad) continue;
+    const spec = e.spec ?? {};
+    if (spec.boat && !spec.diver) continue;
+    const moving = e.path.length > 0;
+    const working = moving || e.pumping || e.status === 'on scene' || e.status === 'responding' || e.status === 'transporting';
+    const scale = e.type === 'medcar' || e.type === 'rapid' ? 0.7 : e.type === 'ambubus' ? 1.2 : 1;
+
+    ctx.save();
+    ctx.translate(e.x, e.y);
+    ctx.rotate(e.angle);
+
+    // Headlight beams: two cones with a pool where they land.
+    if (moving && !spec.flying) {
+      const len = 150 * scale + 20;
+      for (const side of [-1, 1]) {
+        const x0 = 38 * scale;
+        const y0 = side * 11 * scale;
+        const beam = ctx.createLinearGradient(x0, 0, x0 + len, 0);
+        beam.addColorStop(0, `rgba(255,240,200,${0.5 * dark})`);
+        beam.addColorStop(0.5, `rgba(255,236,190,${0.2 * dark})`);
+        beam.addColorStop(1, 'rgba(255,236,190,0)');
+        ctx.fillStyle = beam;
+        ctx.beginPath();
+        ctx.moveTo(x0, y0 - 3 * side);
+        ctx.lineTo(x0 + len, y0 + side * 46 - 20);
+        ctx.lineTo(x0 + len, y0 + side * 46 + 20);
+        ctx.lineTo(x0, y0 + 3 * side);
+        ctx.closePath();
+        ctx.fill();
+      }
+      const pool = ctx.createRadialGradient(38 * scale + len * 0.55, 0, 0, 38 * scale + len * 0.55, 0, 90 * scale + 20);
+      pool.addColorStop(0, `rgba(255,238,196,${0.34 * dark})`);
+      pool.addColorStop(1, 'rgba(255,238,196,0)');
+      ctx.fillStyle = pool;
+      const px = 38 * scale + len * 0.55;
+      ctx.fillRect(px - 120, -120, 240, 240);
+      // The lamps themselves.
+      for (const side of [-1, 1]) {
+        const lamp = ctx.createRadialGradient(40 * scale, side * 11 * scale, 0, 40 * scale, side * 11 * scale, 16);
+        lamp.addColorStop(0, `rgba(255,248,224,${0.9 * dark})`);
+        lamp.addColorStop(1, 'rgba(255,240,200,0)');
+        ctx.fillStyle = lamp;
+        ctx.fillRect(40 * scale - 16, side * 11 * scale - 16, 32, 32);
+      }
+    }
+
+    // Floodlights: an engine working at a scene lights the whole fireground.
+    if (!moving && (e.pumping || e.status === 'on scene') && !spec.flying) {
+      const r = 150 * scale + 20;
+      const flood = ctx.createRadialGradient(30 * scale, 0, 0, 30 * scale, 0, r);
+      flood.addColorStop(0, `rgba(255,244,214,${0.42 * dark})`);
+      flood.addColorStop(0.5, `rgba(255,236,196,${0.16 * dark})`);
+      flood.addColorStop(1, 'rgba(255,236,196,0)');
+      ctx.fillStyle = flood;
+      ctx.fillRect(30 * scale - r, -r, r * 2, r * 2);
+    }
+
+    // The light bar: red and blue (red and white on an ambulance) pulse out across
+    // the street, side by side, flashing alternately.
+    if (working && !spec.boat) {
+      const second = spec.medical ? '255,255,255' : '47,140,255';
+      const colours = [['255,59,48', -1], [second, 1]];
+      for (const [rgb, side] of colours) {
+        const on = (phase === 0) === (side < 0);
+        const r = (on ? 130 : 56) * scale + 16;
+        const a = (on ? 0.62 : 0.14) * dark * (on ? pulse : 1);
+        const cx = 8 * scale;
+        const cy = side * 9 * scale;
+        const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+        g.addColorStop(0, `rgba(${rgb},${a})`);
+        g.addColorStop(0.4, `rgba(${rgb},${a * 0.4})`);
+        g.addColorStop(1, `rgba(${rgb},0)`);
+        ctx.fillStyle = g;
+        ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+      }
+    }
+
+    // A helicopter's searchlight, sweeping the ground ahead of it.
+    if (spec.flying && !spec.plane && (e.path.length > 0 || e.pumping || e.status === 'on scene')) {
+      const sx = 46 + Math.sin(now * 1.3) * 10;
+      const g = ctx.createRadialGradient(sx, 24, 0, sx, 24, 92);
+      g.addColorStop(0, `rgba(235,244,255,${0.5 * dark})`);
+      g.addColorStop(0.6, `rgba(220,236,255,${0.18 * dark})`);
+      g.addColorStop(1, 'rgba(220,236,255,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(sx - 92, 24 - 92, 184, 184);
+    }
+    ctx.restore();
+  }
 }
 
 // ------------------------------------------------------------- daylight ---
@@ -278,9 +387,10 @@ function drawStreetLights(ctx, city, b, z, glowPass) {
         const px = cx * TILE;
         const py = cy * TILE;
         if (glowPass) {
-          const r = 70;
+          const r = 120;
           const g = ctx.createRadialGradient(px, py, 0, px, py, r);
-          g.addColorStop(0, `rgba(255,214,140,${0.5 * currentDark})`);
+          g.addColorStop(0, `rgba(255,214,140,${0.55 * currentDark})`);
+          g.addColorStop(0.45, `rgba(255,196,120,${0.2 * currentDark})`);
           g.addColorStop(1, 'rgba(255,190,110,0)');
           ctx.fillStyle = g;
           ctx.fillRect(px - r, py - r, r * 2, r * 2);
