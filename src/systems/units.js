@@ -7,6 +7,7 @@
 
 import { CONFIG, TILE } from '../core/config.js';
 import { SEA_Y } from '../data/city.js';
+import { ensureHotkeys, freeHotkey } from '../core/hotkeys.js';
 import { angleTo, approachAngle, clamp, closestOnRect, dist, distToRect } from '../core/math.js';
 import {
   findPath, nearestPassable, passable, smoothPath, standTileForRect, tileOf,
@@ -315,6 +316,7 @@ function spawnVehicle(state, type, station = null) {
     base,
     number,
     bayIndex,
+    hotkey: freeHotkey(state),
     name: `${spec.label} ${number}`,
     x: bay.x,
     y: bay.y,
@@ -455,6 +457,7 @@ function vehicleBase(state, type, overrides = {}) {
     base,
     number: 1,
     bayIndex: 0,
+    hotkey: '',
     name: spec.label,
     x: state.city.spawn.x,
     y: state.city.spawn.y,
@@ -501,6 +504,7 @@ export function restoreFleet(state, saved = {}) {
       number: entry.number ?? 1,
       name: entry.name ?? CONFIG.vehicles[type].label,
       bayIndex: entry.bayIndex ?? 0,
+      hotkey: entry.hotkey ?? '',
       x: entry.x ?? state.city.spawn.x,
       y: entry.y ?? state.city.spawn.y,
       angle: entry.angle ?? state.city.spawn.angle,
@@ -554,6 +558,7 @@ export function restoreFleet(state, saved = {}) {
   }
 
   state.units = [...state.engines, ...state.crew];
+  ensureHotkeys(state);
   state.activeEngineId = state.engines[0]?.id ?? null;
   state.selected = null;
   return state.engines;
@@ -780,6 +785,82 @@ function orderFlight(state, engine, wx, wy, buildingId, wildfireId) {
   return true;
 }
 
+// A road vehicle is about 1.2 tiles wide; its route may not cut a corner closer
+// than this to anything that is not road.
+const BODY_HALF = TILE * 0.46;
+const PARK_GAP = 2.7; // tiles between two parked vehicles (each is about 2.6 long)
+
+/** Where the other road vehicles are, or are heading: places not to park on. */
+function takenSpots(state, engine) {
+  const spots = [];
+  for (const e of state.engines) {
+    if (e === engine || e.spec.flying || e.spec.boat) continue;
+    if (e.path.length > 0 && e.goal) spots.push({ x: (e.goal.x + 0.5) * TILE, y: (e.goal.y + 0.5) * TILE });
+    else if (e.path.length === 0) spots.push({ x: e.x, y: e.y });
+  }
+  return spots;
+}
+
+const spotFree = (spots, tx, ty) => spots.every(
+  (s) => Math.hypot((tx + 0.5) * TILE - s.x, (ty + 0.5) * TILE - s.y) >= PARK_GAP * TILE,
+);
+
+/**
+ * The street tile nearest (cx, cy) where nobody else is parked or heading, so
+ * several vehicles sent to one scene each get a place of their own.
+ */
+function parkingTile(state, engine, cx, cy, maxR = 14) {
+  const spots = takenSpots(state, engine);
+  const gx = Math.floor(cx / TILE);
+  const gy = Math.floor(cy / TILE);
+  for (let r = 0; r <= maxR; r++) {
+    let best = null;
+    let bestD = Infinity;
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+        const x = gx + dx;
+        const y = gy + dy;
+        if (!passable(state.nav, 'drive', x, y) || !spotFree(spots, x, y)) continue;
+        const d = dx * dx + dy * dy;
+        if (d < bestD) {
+          bestD = d;
+          best = { x, y };
+        }
+      }
+    }
+    if (best) return best;
+  }
+  return null;
+}
+
+/**
+ * A street tile beside a hydrant that is near enough to a building for this
+ * vehicle's hose, the hydrant nearest the building first. Null if there is none.
+ */
+function hydrantParking(state, engine, building) {
+  const rect = buildingRect(building);
+  const hose = (engine.spec.hoseRange - 1) * TILE;
+  const spots = takenSpots(state, engine);
+  let best = null;
+  let bestD = Infinity;
+  for (const h of state.city.hydrants) {
+    const hx = (h.x + 0.5) * TILE;
+    const hy = (h.y + 0.5) * TILE;
+    const d = distToRect(hx, hy, rect);
+    if (d > hose + CONFIG.refillRange * TILE || d >= bestD) continue;
+    const tile = nearestPassable(state.nav, 'drive', h.x, h.y, 3);
+    if (!tile || !spotFree(spots, tile.x, tile.y)) continue;
+    const px = (tile.x + 0.5) * TILE;
+    const py = (tile.y + 0.5) * TILE;
+    if (dist(px, py, hx, hy) > CONFIG.refillRange * TILE * 0.9) continue;
+    if (distToRect(px, py, rect) > hose) continue;
+    bestD = d;
+    best = tile;
+  }
+  return best;
+}
+
 export function orderEngine(state, engine, wx, wy, buildingId = null, wildfireId = null) {
   if (!engine) return false;
   if (engine.spec.plane) return orderPlane(state, engine, wx, wy, buildingId, wildfireId);
@@ -789,13 +870,20 @@ export function orderEngine(state, engine, wx, wy, buildingId = null, wildfireId
   let goal = null;
   if (building) {
     const rect = buildingRect(building);
-    goal = nearestPassable(
-      state.nav,
-      'drive',
-      Math.floor((rect.x + rect.w / 2) / TILE),
-      Math.floor((rect.y + rect.h / 2) / TILE),
-      14,
-    );
+    const onFire = building.state === 'burning' || (building.trapped ?? 0) > 0;
+    if (engine.spec.hydrantOnly && onFire) {
+      // No pump of its own: park beside a hydrant the hose can reach the fire from.
+      goal = hydrantParking(state, engine, building);
+      if (!goal) {
+        addEvent(state, `${engine.name}: no hydrant within hose reach of ${building.name}`, 'warn');
+        return false;
+      }
+    } else {
+      const cx = rect.x + rect.w / 2;
+      const cy = rect.y + rect.h / 2;
+      goal = parkingTile(state, engine, cx, cy, 14)
+        ?? nearestPassable(state.nav, 'drive', Math.floor(cx / TILE), Math.floor(cy / TILE), 14);
+    }
   }
   if (!goal) {
     goal = nearestPassable(state.nav, 'drive', Math.floor(wx / TILE), Math.floor(wy / TILE), 14);
@@ -815,7 +903,7 @@ export function orderEngine(state, engine, wx, wy, buildingId = null, wildfireId
     addEvent(state, `${engine.name}: supply line detached`, 'info');
   }
   const crewOut = crewOf(state, engine).some((c) => !c.riding);
-  engine.path = smoothPath(state.nav, 'drive', { x: engine.x, y: engine.y }, tiles);
+  engine.path = smoothPath(state.nav, 'drive', { x: engine.x, y: engine.y }, tiles, BODY_HALF);
   engine.targetId = building?.id ?? null;
   engine.wildfireId = wildfireId;
   engine.blockadeId = null;
@@ -830,6 +918,10 @@ export function orderEngine(state, engine, wx, wy, buildingId = null, wildfireId
 /** Drive to the nearest street to a wildfire and deploy the crew there. */
 export function orderEngineToWildfire(state, engine, wildfire) {
   if (!engine || !wildfire) return false;
+  if (engine.spec.hydrantOnly) {
+    addEvent(state, `${engine.name} has no water of its own — there are no hydrants in the forest`, 'warn');
+    return false;
+  }
   if (engine.spec.flying) return orderEngine(state, engine, wildfire.x, wildfire.y, null, wildfire.id);
   const goal = nearestPassable(
     state.nav,
@@ -962,7 +1054,7 @@ export function repathEngines(state) {
       addEvent(state, `${engine.name}: every route is blocked — stopped`, 'warn');
       continue;
     }
-    engine.path = smoothPath(state.nav, 'drive', { x: engine.x, y: engine.y }, tiles);
+    engine.path = smoothPath(state.nav, 'drive', { x: engine.x, y: engine.y }, tiles, BODY_HALF);
   }
 }
 
@@ -1106,15 +1198,18 @@ export function sendToPharmacy(state, engine) {
   return ok;
 }
 
-/** The fire that most needs an engine right now. */
-export function urgentFire(state) {
+/**
+ * The fire that most needs an engine right now. Every vehicle already sent to a
+ * fire counts against it, so the next one goes to a fire that has nobody yet.
+ */
+export function urgentFire(state, except = null) {
   const fires = activeFires(state);
   if (fires.length === 0) return null;
   let best = null;
   let bestScore = -Infinity;
   for (const b of fires) {
-    const rect = buildingRect(b);
-    const score = b.fire * 60 + (1 - b.integrity / b.maxIntegrity) * 25;
+    const engaged = state.engines.filter((e) => e !== except && e.targetId === b.id).length;
+    const score = b.fire * 60 + (1 - b.integrity / b.maxIntegrity) * 25 - engaged * 45;
     if (score > bestScore) {
       bestScore = score;
       best = b;
@@ -1134,7 +1229,10 @@ function pickEngineFor(state, target) {
     if (!isFirefighter(engine)) continue;
     // A fireboat can only help where there is water in reach.
     if (engine.spec.boat && !boatCanReach(state, engine, cx, cy, Math.max(target.w, target.h) / 2)) continue;
-    const d = dist(engine.x, engine.y, cx, cy);
+    // A pumpless car is only any use where a hydrant is within hose reach; it
+    // goes after the real engines.
+    if (engine.spec.hydrantOnly && !hydrantParking(state, engine, target)) continue;
+    const d = dist(engine.x, engine.y, cx, cy) * (engine.spec.hydrantOnly ? 1.6 : 1);
     if (d < nearD) {
       nearD = d;
       near = engine;
@@ -1153,7 +1251,7 @@ function pickEngineFor(state, target) {
  * otherwise the given engine takes it (the player's explicit choice).
  */
 export function dispatchEngine(state, engine = null, buildingId = null) {
-  const target = buildingOf(state, buildingId) ?? urgentFire(state);
+  const target = buildingOf(state, buildingId) ?? urgentFire(state, engine);
   if (!target) {
     addEvent(state, 'No active fires — the district is quiet', 'info');
     return false;
@@ -1222,6 +1320,14 @@ function arriveEngine(state, engine) {
     return;
   }
   const target = buildingOf(state, engine.targetId);
+  // A car with no pump hooks its supply line to the hydrant it parked beside.
+  if (engine.spec.hydrantOnly && !engine.supply) {
+    const hydrant = hydrantInReach(state, engine);
+    if (hydrant) {
+      engine.supply = { x: (hydrant.x + 0.5) * TILE, y: (hydrant.y + 0.5) * TILE };
+      addEvent(state, `${engine.name}: supply line connected`, 'good');
+    }
+  }
   // A burning building, or one with people still trapped inside, gets the crew out.
   if (target && (target.state === 'burning' || (target.trapped ?? 0) > 0)) {
     const reach = distToRect(engine.x, engine.y, buildingRect(target));
@@ -1721,6 +1827,11 @@ function updateCrewBlockade(state, crew, engine, dt) {
   return true;
 }
 
+/** Is there water for the hose: the tank, or for a pumpless car the hydrant line. */
+function hasWater(engine) {
+  return engine.spec.hydrantOnly ? Boolean(engine.supply) : engine.water > 0;
+}
+
 function chooseTarget(state, crew, engine) {
   let best = null;
   let bestScore = Infinity;
@@ -2087,9 +2198,9 @@ function updateCrew(state, crew, dt) {
   crew.rescueId = null;
 
   if (reach <= CONFIG.crew.sprayRange * TILE && hoseOk) {
-    if (engine.water <= 0) {
+    if (!hasWater(engine)) {
       crew.spraying = false;
-      crew.status = 'no water';
+      crew.status = engine.spec.hydrantOnly ? 'no hydrant' : 'no water';
       return;
     }
     crew.spraying = true;
@@ -2108,10 +2219,12 @@ function updateCrew(state, crew, dt) {
       engineId: engine.id,
     });
     state.hoses.push({ ax: engine.x, ay: engine.y, bx: crew.x, by: crew.y, live: true });
-    engine.water = Math.max(0, engine.water - CONFIG.crew.sprayWater * dt);
-    if (engine.water <= 0 && !engine.emptyWarned) {
-      engine.emptyWarned = true;
-      addEvent(state, `${engine.name} is out of water — find a hydrant`, 'warn');
+    if (!engine.spec.hydrantOnly) {
+      engine.water = Math.max(0, engine.water - CONFIG.crew.sprayWater * dt);
+      if (engine.water <= 0 && !engine.emptyWarned) {
+        engine.emptyWarned = true;
+        addEvent(state, `${engine.name} is out of water — find a hydrant`, 'warn');
+      }
     }
     return;
   }

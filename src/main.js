@@ -12,6 +12,7 @@ import {
   selectPatient, selectBlockade, selectVictim, commandDispatchVictim,
   commandBuyStation, commandLoan, commandRepay, commandInsurance,
   commandTrain, commandAcceptContract, commandEquip,
+  commandDispatchAll, selectUnitByKey, commandBindKey,
   selectWildfire, getSelected, serialize, loadState,
 } from './systems/game.js';
 import { createAudio } from './systems/audio.js';
@@ -21,6 +22,7 @@ import { drowningCall } from './systems/water.js';
 import { activeFires } from './systems/fire.js';
 import { addEvent } from './systems/events.js';
 import { engineForUnit } from './systems/units.js';
+import { isUnitKey } from './core/hotkeys.js';
 import { startWildfire } from './systems/wildfire.js';
 import { ignite } from './systems/fire.js';
 import { render, createCamera, clampCamera, screenToWorld } from './render/render.js';
@@ -167,6 +169,23 @@ function setOrderMode(on) {
   stage.classList.toggle('order-mode', on);
   document.getElementById('btn-order')?.classList.toggle('is-active', on);
   document.getElementById('order-hint').hidden = !on;
+}
+
+// Rebinding a unit's shortcut: the next key pressed becomes it.
+let rebindId = null;
+
+function setRebind(id) {
+  rebindId = id;
+  state.ui.rebinding = id;
+  const hint = document.getElementById('order-hint');
+  if (id) {
+    const engine = state.engines.find((e) => e.id === id);
+    hint.textContent = 'Press a key for ' + (engine?.name ?? 'this unit') + ' · Backspace clears it · Esc cancels';
+    hint.hidden = false;
+  } else {
+    hint.textContent = 'Tap the map to send the selected unit there';
+    hint.hidden = !orderMode;
+  }
 }
 
 function toggleOrderMode() {
@@ -494,6 +513,12 @@ function onAction(action, data = {}) {
     case 'pharmacy': commandPharmacy(state); break;
     case 'hospital': commandHospital(state); break;
     case 'dispatch': commandDispatch(state); break;
+    case 'dispatch-all': if (commandDispatchAll(state)) audio.play('radio'); break;
+    case 'rebind-key': {
+      const engine = engineForUnit(state, getSelected(state));
+      if (engine) setRebind(rebindId === engine.id ? null : engine.id);
+      break;
+    }
     case 'deploy': commandDeploy(state); break;
     case 'recall': commandRecall(state); break;
     case 'home': commandReturnHome(state); break;
@@ -689,6 +714,30 @@ window.addEventListener('keydown', (ev) => {
   if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
   const key = keyOf(ev);
 
+  // Waiting for a key to give a unit as its shortcut.
+  if (rebindId) {
+    ev.preventDefault();
+    if (key === 'escape') {
+      setRebind(null);
+      return;
+    }
+    const engine = state.engines.find((e) => e.id === rebindId);
+    if (key === 'backspace' || key === 'delete') {
+      if (engine) commandBindKey(state, engine.id, '');
+      setRebind(null);
+      return;
+    }
+    if (!engine || ev.repeat) return;
+    if (!isUnitKey(key)) {
+      addEvent(state, 'That key is already used by the game — pick a digit or one of Q W S Z I J L N O Y', 'warn');
+      return;
+    }
+    commandBindKey(state, engine.id, key);
+    addEvent(state, engine.name + ' is now on key ' + key.toUpperCase(), 'info');
+    setRebind(null);
+    return;
+  }
+
   if (key === 'f1' || ev.key === '?') {
     ev.preventDefault();
     toggleHelp();
@@ -740,14 +789,11 @@ window.addEventListener('keydown', (ev) => {
     return;
   }
 
-  if (key >= '1' && key <= '9') {
-    const engine = state.engines[Number(key) - 1];
-    if (engine) selectUnit(state, engine.id);
-    return;
-  }
+  if (isUnitKey(key) && selectUnitByKey(state, key)) return;
 
   switch (key) {
     case 'd': commandDispatch(state); break;
+    case 'a': if (commandDispatchAll(state)) audio.play('radio'); break;
     case 'e': commandDeploy(state); break;
     case 'r': commandRecall(state); break;
     case 'h': commandReturnHome(state); break;

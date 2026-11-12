@@ -25,15 +25,15 @@ const burnable = (state) => state.buildings.find((b) => b.type !== 'station' && 
 
 // -------------------------------------------------------------- stations ---
 
-test('Station 2 is for sale: it adds eight bays, and vehicles can be delivered to either', () => {
+test('Station 2 is for sale: it adds sixteen bays, and vehicles can be delivered to either', () => {
   const state = shift();
-  assert.equal(totalBays(state), 8);
+  assert.equal(totalBays(state), 16);
   assert.equal(commandBuyVehicle(state, 'engine', 1), null, 'delivered to a station that is not open');
 
   const credits = state.credits;
   assert.equal(commandBuyStation(state), true);
   assert.equal(state.credits, credits - CONFIG.economy.stationPrice);
-  assert.equal(totalBays(state), 16);
+  assert.equal(totalBays(state), 32);
   assert.equal(commandBuyStation(state), false, 'bought it twice');
 
   const engine = commandBuyVehicle(state, 'engine', 1);
@@ -44,11 +44,11 @@ test('Station 2 is for sale: it adds eight bays, and vehicles can be delivered t
   assert.equal(engine.status, 'in quarters');
 });
 
-test('with Station 2 open, sixteen vehicles fit and a seventeenth does not', () => {
+test('with Station 2 open, thirty-two vehicles fit and a thirty-third does not', () => {
   const state = shift();
   commandBuyStation(state);
-  for (let i = 0; i < 15; i++) assert.ok(commandBuyVehicle(state, 'engine'), 'vehicle ' + (i + 2));
-  assert.equal(state.engines.length, 16);
+  for (let i = 0; i < 31; i++) assert.ok(commandBuyVehicle(state, 'engine'), 'vehicle ' + (i + 2));
+  assert.equal(state.engines.length, 32);
   assert.equal(freeBay(state), -1);
   assert.equal(commandBuyVehicle(state, 'engine'), null);
 });

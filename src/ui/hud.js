@@ -44,6 +44,7 @@ const STATUS_TONE = {
   'suiting up': 'warn',
   'in quarters': 'good',
   'no water': 'bad',
+  'no hydrant': 'bad',
   'hose too short': 'bad',
   'beyond hose reach': 'bad',
   'at hose limit': 'bad',
@@ -69,6 +70,7 @@ const SHORT_STATUS = {
   'beyond hose reach': 'Too far',
   'out of hose': 'Out of hose',
   'no water': 'No water',
+  'no hydrant': 'No hydrant',
   restocking: 'Restocking',
   treating: 'Treating',
   clearing: 'Clearing',
@@ -264,13 +266,13 @@ export function closePanels() {
   if (!unitsCollapsed) setUnitsCollapsed(true);
 }
 
-const unitKey = (index) => (index < 9 ? String(index + 1) : '');
+const unitKey = (engine) => (engine.hotkey ? engine.hotkey.toUpperCase() : '');
 
 function renderRoster(state) {
   const box = $('roster-units');
   const sig = [
     unitFilter, unitsCollapsed, [...collapsedGroups].join(','),
-    state.engines.map((e) => e.id + e.name).join(','),
+    state.engines.map((e) => e.id + e.name + (e.hotkey ?? '')).join(','),
   ].join('|');
   if (sig === rosterKey) return;
   rosterKey = sig;
@@ -294,7 +296,7 @@ function renderRoster(state) {
     if (!folded) {
       html += '<div class="ugroup__list">' + members.map(({ engine, index }) =>
         '<button type="button" class="unit" data-cat="' + group + '" data-unit="' + engine.id + '" title="Click to select · double-click to find">' +
-        '<span class="unit__key">' + unitKey(index) + '</span><span class="unit__dot"></span>' +
+        '<span class="unit__key">' + unitKey(engine) + '</span><span class="unit__dot"></span>' +
         '<span class="unit__text"><span class="unit__name">' + esc(engine.name) + '</span><span class="unit__status">—</span></span>' +
         '<span class="unit__bar"><i></i></span></button>').join('') + '</div>';
     }
@@ -514,6 +516,7 @@ function selectionSignature(state, entity) {
     return [
       entity.id, entity.status, Math.round(entity.water / 80), entity.riding,
       entity.kind === 'crew' ? entity.targetId : '', supply, entity.kits ?? '', entity.cargo?.length ?? '', tools,
+      entity.kind === 'engine' ? (entity.hotkey ?? '') + (state.ui.rebinding === entity.id ? '*' : '') : '',
     ].join(':');
   }
   return [
@@ -556,6 +559,15 @@ function updateSelection(state) {
       : selected.kind === 'unit'
       ? (entity.kind === 'engine' ? engineCard(state, entity) : crewCard(state, entity))
       : buildingCard(state, entity);
+  if (selected.kind === 'unit' && entity.kind === 'engine') panel.insertAdjacentHTML('beforeend', shortcutRow(state, entity));
+}
+
+/** The unit's selection key, with a button to change it. */
+function shortcutRow(state, engine) {
+  const waiting = state.ui.rebinding === engine.id;
+  return '<div class="sel__shortcut"><span>Shortcut</span>' +
+    '<button type="button" class="btn btn--small' + (waiting ? ' is-active' : '') + '" data-action="rebind-key" title="Click, then press the key you want for this unit (a digit or Q W S Z I J L N O Y). Backspace clears it.">' +
+    (waiting ? 'Press a key…' : (engine.hotkey ? '<kbd>' + esc(engine.hotkey.toUpperCase()) + '</kbd> change' : 'Set a key')) + '</button></div>';
 }
 
 function wildfireCard(state, wildfire) {
@@ -689,19 +701,22 @@ function engineCard(state, engine) {
   const deployed = crew.length - aboard;
   const waterPct = pct(engine.water, engine.capacity);
   const hydrant = hydrantInReach(state, engine);
+  const pumpless = Boolean(engine.spec.hydrantOnly);
   const supply = engine.supply
     ? '<div class="supply is-on">Hydrant supply connected</div>'
     : hydrant
       ? '<div class="supply is-ready">Hydrant in reach — press G</div>'
-      : '<div class="supply">Tank supply only</div>';
+      : '<div class="supply">' + (pumpless ? 'No water until it is at a hydrant' : 'Tank supply only') + '</div>';
   return `
     <div class="sel__kind">${esc(engine.spec.label)} company</div>
     <h2 class="sel__name">${esc(engine.name)}</h2>
     ${statusChip(engine.status)}
-    <div class="bar__label"><span>Water</span><span>${Math.round(engine.water)} / ${engine.capacity} L</span></div>
-    <div class="bar"><i style="width:${waterPct}"></i></div>
+    ${pumpless ? '' : `<div class="bar__label"><span>Water</span><span>${Math.round(engine.water)} / ${engine.capacity} L</span></div>
+    <div class="bar"><i style="width:${waterPct}"></i></div>`}
     ${supply}
-    <p class="sel__meta">${aboard} aboard · ${deployed} deployed<br>Hose reaches ${engine.spec.hoseRange} tiles; the deck gun ${engine.spec.turretRange}.</p>
+    <p class="sel__meta">${aboard} aboard · ${deployed} deployed<br>${pumpless
+      ? 'No pump or tank: it parks at the hydrant nearest the fire, connects, and the crew run a hose up to ' + engine.spec.hoseRange + ' tiles.'
+      : 'Hose reaches ' + engine.spec.hoseRange + ' tiles; the deck gun ' + engine.spec.turretRange + '.'}</p>
     <div class="sel__label">Equipment — a crew member takes it from the lockers</div>
     ${toolButtons(state, engine)}
     <div class="sel__actions">
@@ -902,6 +917,7 @@ const vehicleBlurb = (spec) => {
   if (spec.medical) return spec.crew + ' paramedics · ' + spec.kits + ' kits · ' + spec.carry + ' stretchers';
   if (spec.flying) return 'no crew · ' + spec.capacity.toLocaleString('en-US') + ' L · flies over roads · dips in the harbour';
   if (spec.command) return spec.crew + ' crew · parked, boosts crews within ' + CONFIG.command.range + ' tiles by ' + Math.round(CONFIG.command.aura * 100) + '%';
+  if (spec.hydrantOnly) return spec.crew + ' crew · no pump or tank · hooks to a hydrant · hose ' + spec.hoseRange + ' · chainsaw, cutter, diving gear';
   return spec.crew + ' crew · ' + spec.capacity.toLocaleString('en-US') + ' L · hose ' + spec.hoseRange;
 };
 
@@ -922,7 +938,7 @@ function fleetTab(state) {
         ? Math.round((engine.water / engine.capacity) * 100) + '% water'
         : 'no tank';
     return '<div class="station__engine">' +
-      '<span class="station__num">' + (index + 1) + '</span>' +
+      '<span class="station__num">' + (engine.hotkey ? esc(engine.hotkey.toUpperCase()) : '–') + '</span>' +
       '<div class="station__text"><b>' + esc(engine.name) + '</b>' +
       '<span>' + esc(SHORT_STATUS[engine.status] ?? engine.status) + ' · ' + load + ' · ' + aboard + '/' + crew.length + ' aboard · ' + esc(stationName(engine)) + '</span></div>' +
       '<button type="button" class="station__sell" data-action="sell-vehicle" data-engine="' + engine.id + '">Sell $' + refund.toLocaleString('en-US') + '</button>' +
@@ -935,13 +951,13 @@ function fleetTab(state) {
     ? '<div class="station__chooser"><span>Deliver new vehicles to</span>' +
       state.city.stations.map((st, i) => st.sea ? '' : '<button type="button" class="btn btn--small' + (buyStation === i ? ' is-active' : '') + '" data-action="deliver-to" data-station="' + i + '">' + esc(st.name) + '</button>').join('') +
       '</div>'
-    : '<div class="station__expand"><div><b>' + esc(two.name) + ' · Civic Quarter</b><span>Eight more bays and a second helipad, deep in the city. Calls start coming from its district too.</span></div>' +
+    : '<div class="station__expand"><div><b>' + esc(two.name) + ' · Civic Quarter</b><span>Sixteen more bays and a second helipad, deep in the city. Calls start coming from its district too.</span></div>' +
       '<button type="button" class="btn btn--small btn--primary" data-action="buy-station"' + (state.credits < CONFIG.economy.stationPrice ? ' disabled' : '') + '>Open $' + CONFIG.economy.stationPrice.toLocaleString('en-US') + '</button></div>';
 
   const dock = state.city.stations[2];
   const dockBox = dockOpen
     ? '<div class="station__chooser"><span>' + esc(dock.name) + ' · ' + state.engines.filter((e) => e.spec.boat).length + '/' + totalBerths(state) + ' berths</span></div>'
-    : '<div class="station__expand"><div><b>' + esc(dock.name) + '</b><span>Eight berths on the harbour. Needed for fireboats and rescue boats, which can sail the river and the bay.</span></div>' +
+    : '<div class="station__expand"><div><b>' + esc(dock.name) + '</b><span>Sixteen berths on the harbour. Needed for fireboats and rescue boats, which can sail the river and the bay.</span></div>' +
       '<button type="button" class="btn btn--small btn--primary" data-action="buy-dock"' + (state.credits < CONFIG.economy.dockPrice ? ' disabled' : '') + '>Open $' + CONFIG.economy.dockPrice.toLocaleString('en-US') + '</button></div>';
 
   const buys = Object.entries(CONFIG.vehicles).map(([type, spec]) => {
@@ -955,7 +971,7 @@ function fleetTab(state) {
 
   return '<div class="station__balance">$' + state.credits.toLocaleString('en-US') + '<span>credits · ' + landCount + '/' + bays + ' bays</span></div>' +
     '<div class="station__list">' + engines + '</div>' +
-    (maxed ? '<p class="station__full">Every bay you own is full' + (open2 ? '.' : ' — open Station 2 for eight more.') + '</p>' : '') +
+    (maxed ? '<p class="station__full">Every bay you own is full' + (open2 ? '.' : ' — open Station 2 for sixteen more.') + '</p>' : '') +
     stationBox + dockBox +
     '<div class="station__buys">' + buys + '</div>';
 }
@@ -1046,7 +1062,7 @@ export function updateStation(state) {
     '<button type="button" class="btn btn--small" data-action="load-game">Load</button>' +
     '<button type="button" class="btn btn--small" data-action="new-shift">New shift</button></div>' +
     '<p class="station__saved">' + (state.saveStatus ? 'Saved at ' + state.saveStatus : 'Autosaves every 30 seconds') + '</p>' +
-    '<p class="station__keys"><kbd>B</kbd> headquarters · <kbd>D</kbd> dispatch · <kbd>E</kbd> deploy · <kbd>R</kbd> pack up · <kbd>G</kbd> hydrant · <kbd>P</kbd> pharmacy · <kbd>K</kbd> hospital · <kbd>Tab</kbd> next incident · <kbd>M</kbd> sound · <kbd>F1</kbd> controls</p>';
+    '<p class="station__keys"><kbd>B</kbd> headquarters · <kbd>D</kbd> dispatch · <kbd>A</kbd> dispatch all · <kbd>E</kbd> deploy · <kbd>R</kbd> pack up · <kbd>G</kbd> hydrant · <kbd>P</kbd> pharmacy · <kbd>K</kbd> hospital · <kbd>Tab</kbd> next incident · <kbd>M</kbd> sound · <kbd>F1</kbd> controls</p>';
 
   const html = '<p class="menu__eyebrow">Headquarters</p>' + tabs + body + footer;
   // Rebuilding the DOM under the pointer swallows clicks, so only touch it on a change.

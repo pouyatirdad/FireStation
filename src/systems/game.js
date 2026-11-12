@@ -28,6 +28,8 @@ import {
   createTraffic, findBlockade, restoreBlockades, updateTraffic,
 } from './blockades.js';
 import { explode, updateChains } from './chains.js';
+import { dispatchAll } from './dispatch.js';
+import { bindHotkey, engineByKey } from '../core/hotkeys.js';
 import { createWind, updateWind } from './wind.js';
 import { createLedger, spend, updateEconomy } from './economy.js';
 import {
@@ -275,7 +277,7 @@ function closestIdleEngine(state, x, y, radiusTiles = 0) {
   let near = null;
   let nearD = Infinity;
   for (const engine of state.engines) {
-    if (!isFirefighter(engine)) continue;
+    if (!isFirefighter(engine) || engine.spec.hydrantOnly) continue;
     // A fireboat only helps where there is water in reach of the fire.
     if (engine.spec.boat && !boatCanReach(state, engine, x, y, radiusTiles)) continue;
     // Aircraft are the right tool for a forest fire, wherever they are parked.
@@ -459,12 +461,45 @@ export function commandDispatch(state, buildingId = null) {
     const wreck = state.blockades[0];
     if (wreck) return commandDispatchBlockade(state, wreck.id);
   }
-  const chosen = dispatchEngine(state, engine, target?.id ?? null);
+  // The selected engine already has a job and no particular fire was named: call
+  // the next free vehicle instead, so pressing D again reinforces a different
+  // scene rather than shuffling the same engine about.
+  let sending = engine;
+  if (engine && !target && isFirefighter(engine) && (engine.targetId || engine.wildfireId || engine.path.length > 0)) {
+    const spare = state.engines.some((e) => e !== engine && isFirefighter(e) && !e.spec.boat
+      && !e.targetId && !e.wildfireId && e.path.length === 0 && e.packTimer === 0);
+    if (spare) sending = null;
+  }
+  const chosen = dispatchEngine(state, sending, target?.id ?? null);
   if (chosen) {
     selectUnit(state, chosen.id);
     return true;
   }
   return false;
+}
+
+/**
+ * Dispatch everything: every free vehicle goes to an incident of its own (fires,
+ * forest fires, injured people, people in the water, wrecks), the nearest ones
+ * first, and spare vehicles reinforce the biggest fires.
+ */
+export function commandDispatchAll(state) {
+  const result = dispatchAll(state);
+  return result.sent + result.hospital > 0 ? result : false;
+}
+
+/** Select the vehicle bound to a key. Returns true if there is one. */
+export function selectUnitByKey(state, key) {
+  const engine = engineByKey(state, key);
+  if (!engine) return false;
+  selectUnit(state, engine.id);
+  return true;
+}
+
+/** Rebind a vehicle's selection key (a key a unit may use; '' clears it). */
+export function commandBindKey(state, id, key) {
+  const engine = state.engines.find((e) => e.id === id);
+  return bindHotkey(state, engine, key);
 }
 
 export function commandDeploy(state) {
@@ -551,7 +586,7 @@ export function commandBuyStation(state, index = 1) {
   state.ownedStations[index] = true;
   addEvent(
     state,
-    index === 2 ? 'The Harbour Dock is open — eight berths for boats' : 'Station 2 is open — eight more bays across the city',
+    index === 2 ? 'The Harbour Dock is open — sixteen berths for boats' : 'Station 2 is open — sixteen more bays across the city',
     'good',
   );
   return true;
@@ -612,6 +647,7 @@ export function serialize(state) {
       number: e.number,
       name: e.name,
       bayIndex: e.bayIndex,
+      hotkey: e.hotkey ?? '',
       x: e.x,
       y: e.y,
       angle: e.angle,

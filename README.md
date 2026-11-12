@@ -71,6 +71,7 @@ the night.
 | **Tanker** | 2 | 6,000 L | 12 | 7 | $1,500 | $26 |
 | **Rescue** | 4 | 600 L | 16 | 6 | $1,600 | $30 |
 | **Ambulance** | 2 paramedics | 8 kits | walks 22 tiles | — | $1,400 | $22 |
+| **Rapid response** | 2 | none (hydrant only) | 16 | — | $1,300 | $20 |
 | **Command** | 2 | — | — | — | $2,600 | $40 |
 | **Helicopter** | none | 2,600 L | — | 11 (from the air) | $8,000 | $95 |
 | **Air tanker** | none | 5,000 L | — | 8 (circling) | $11,000 | $140 |
@@ -79,11 +80,12 @@ the night.
 | **Paramedic car** | 1 paramedic | 4 kits | walks 18 tiles | — | $750 | $12 |
 | **Ambulance bus** | 4 paramedics | 16 kits, 8 stretchers | walks 24 tiles | — | $3,400 | $48 |
 
+- **Rapid response car:** a small, quick utility car with two crew and a locker of tools (a chainsaw, a rescue cutter and diving gear) but no pump, no tank and no deck gun. Sent to a fire it drives to the hydrant nearest the building, connects its supply line there by itself (or press <kbd>G</kbd>) and the crew run the hose out, up to 16 tiles. It is no use where there is no hydrant in hose reach, such as a forest fire. Dispatch picks it after the real engines.
 - **Command car:** no hose, no water. Parked, it makes every crew within 26 tiles spray 20% harder.
 - **Lockers:** an **engine** carries a chainsaw and two sets of diving gear; a **ladder** one chainsaw; a
   **rescue** unit two chainsaws, two rescue cutters and two sets of diving gear; a **tanker** only hose.
 - **Helicopter:** flies in a straight line over roads, wrecks and traffic and hovers over the target, dropping water on buildings and forest fires alike. It refills on any station apron or by dipping in the harbour (the south edge of the map), so it is fast but never close to the water. It is the first choice when you right-click a forest fire.
-- **Station 2:** a second station in the Civic Quarter, for sale at $9,000. It adds eight bays and a second helipad, its apron refills and restocks like Station 1's, and calls begin to come from its district too.
+- **Station 2:** a second station in the Civic Quarter, for sale at $9,000. It adds sixteen bays and a second helipad, its apron refills and restocks like Station 1's, and calls begin to come from its district too.
 
 
 Selling returns 60% of the price. Every incident carries its own reward:
@@ -114,7 +116,7 @@ The south of the map is the **harbour** and a **river** runs down through the ea
 
 - **No special vehicle is needed to dive.** An engine or rescue unit drives to the bank, the firefighters it has diving gear for suit up and swim out, and the others stay aboard; the **rescue boat** sails to the casualty and puts its divers over the side. Right-click the person, or give a firefighter diving gear (<kbd>V</kbd>) yourself. Someone brought out is a critical patient: the ambulances and the hospital take over.
 - **Fireboat** pumps river or harbour water without limit from 18 tiles out, but only works fires near the water. **Air tanker** circles a fire dropping water and skims the sea to refill. Both are strong, and neither is any use inland.
-- Boats berth at the **Harbour Dock** ($6,500, eight berths on the quay), which has to be bought first.
+- Boats berth at the **Harbour Dock** ($6,500, sixteen berths on the quay), which has to be bought first.
 - A fire that nobody is fighting spreads more and further the longer it burns dry, and is flagged **out of control** after a minute. Get water on it early.
 
 ### Chained incidents
@@ -140,7 +142,7 @@ There is a real budget, shown in the top bar and in Headquarters.
   next chance a few missions on.
 - **Costs:** every game hour (two real minutes) the city deducts the **upkeep** of every vehicle (there are no crew wages). A lost building costs $350 (scaled the same way), a life $700, and kits
   bought at a pharmacy $12 each.
-- The balance can go negative; you just cannot buy anything until it recovers. A full eight-bay fleet
+- The balance can go negative; you just cannot buy anything until it recovers. A full sixteen-bay fleet
   costs more than the subsidy pays, so it has to earn its keep.
 
 ![Apparatus](docs/screenshot-station.png)
@@ -194,8 +196,9 @@ Hydrant, pharmacy, hospital and equipment actions are buttons on the selection c
 | Right click | Send the selected unit there; on a burning building, wildfire, wreck or injured person, dispatch |
 | Drag / arrow keys | Pan the map |
 | Scroll | Zoom around the pointer |
-| <kbd>1</kbd>–<kbd>8</kbd> | Select a vehicle |
-| <kbd>D</kbd> | Dispatch the selected vehicle or firefighter (or the nearest idle one) to the selected building, else the fire that most needs it; with nothing alight, to a forest fire or a building with people trapped. An ambulance goes to the nearest patient |
+| <kbd>1</kbd>–<kbd>9</kbd>, <kbd>0</kbd>, <kbd>Q</kbd> <kbd>W</kbd> <kbd>S</kbd> <kbd>Z</kbd> <kbd>I</kbd> <kbd>J</kbd> <kbd>L</kbd> <kbd>N</kbd> <kbd>O</kbd> <kbd>Y</kbd> | Select a vehicle. Every vehicle gets its own key (a digit first); select one and press **Shortcut** on its card, then the key you want, to change it. The vehicle that had that key takes the old one; Backspace clears a key |
+| <kbd>D</kbd> | Dispatch the selected vehicle or firefighter (or the nearest idle one) to the selected building, else the fire that most needs it **and has the fewest units on it**; with nothing alight, to a forest fire or a building with people trapped. An ambulance goes to the nearest patient. If the selected engine is already on a job, <kbd>D</kbd> calls the next free one instead |
+| <kbd>A</kbd> | **Dispatch all** (also the *Dispatch all* button above the incident list and *All* in the bottom bar): every free vehicle gets an incident of its own — fires, forest fires, injured people, people in the water, wrecks — nearest first, with fires and rescues before wrecks. Loaded ambulances head for the hospital. Vehicles left over reinforce the big fires, up to four to a scene. Nobody already on a job is pulled off it |
 | <kbd>U</kbd> | Show or hide the unit list (hidden by default) |
 | <kbd>P</kbd> | Send the selected ambulance to the nearest pharmacy |
 | <kbd>K</kbd> | Send the selected ambulance to the nearest hospital with its patients |

@@ -1860,3 +1860,27 @@ body {
   .stats .stat:nth-child(4),
   .stats .stat:nth-child(7) { display: none; }
 }
+
+/* Dispatch all, and a unit's rebindable shortcut. */
+.btn--alert {
+  background: rgba(255, 107, 99, 0.18);
+  border-color: rgba(255, 107, 99, 0.55);
+  color: #ffd9d6;
+}
+.btn--alert:hover { background: rgba(255, 107, 99, 0.3); }
+.panel__action { margin-left: auto; text-transform: none; letter-spacing: 0; }
+.sel__shortcut {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 7px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.sel__shortcut .btn { text-transform: none; letter-spacing: 0; }
+.sel__shortcut .btn.is-active { background: rgba(255, 180, 70, 0.22); border-color: rgba(255, 180, 70, 0.6); }

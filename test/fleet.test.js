@@ -23,7 +23,7 @@ test('buying an engine costs credits, adds three crew and a bay', () => {
   assert.equal(state.activeEngineId, engine.id);
 });
 
-test('the station has only eight bays and a vehicle must be affordable', () => {
+test('the station has sixteen bays and a vehicle must be affordable', () => {
   const state = createGame(7);
   startShift(state);
 
@@ -31,9 +31,9 @@ test('the station has only eight bays and a vehicle must be affordable', () => {
   assert.equal(commandBuyEngine(state), null, 'bought an engine with no credits');
 
   state.credits = 100000;
-  for (let i = 0; i < 7; i++) assert.ok(commandBuyEngine(state), `bought ${i + 2} engines`);
-  assert.equal(state.engines.length, 8);
-  assert.equal(commandBuyEngine(state), null, 'bought a ninth engine');
+  for (let i = 0; i < 15; i++) assert.ok(commandBuyEngine(state), `bought ${i + 2} engines`);
+  assert.equal(state.engines.length, 16);
+  assert.equal(commandBuyEngine(state), null, 'bought a seventeenth engine');
 });
 
 test('with two engines, dispatch sends the idle one', () => {

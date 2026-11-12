@@ -668,11 +668,13 @@ function drawWater(ctx, state, b, z) {
   const dock = city.stations?.[2];
   if (dock && z >= 0.3 && b.y1 >= SEA_Y - 2) {
     ctx.fillStyle = '#8a6a45';
-    for (const berth of dock.bays) {
-      ctx.fillRect(berth.x + 1.3 * TILE, SEA_Y * TILE, 7, 3.2 * TILE);
+    const front = dock.bays.filter((berth) => !berth.extra);
+    const deep = dock.bays.some((berth) => berth.extra);
+    for (const berth of front) {
+      ctx.fillRect(berth.x + 1.3 * TILE, SEA_Y * TILE, 7, (deep ? 6.6 : 3.2) * TILE);
     }
     ctx.fillStyle = '#7a5d3b';
-    ctx.fillRect(dock.bays[0].x - 1.2 * TILE, SEA_Y * TILE, (dock.bays.length * 3 + 0.4) * TILE, 5);
+    ctx.fillRect(front[0].x - 1.2 * TILE, SEA_Y * TILE, (front.length * 3 + 0.4) * TILE, 5);
   }
 }
 
@@ -2228,7 +2230,7 @@ function lightBar(ctx, x, busy, now, colors = ['#ff3b30', '#2f8cff']) {
 
 function drawEngine(ctx, e, now) {
   const type = e.type ?? 'engine';
-  const label = `${(e.spec?.label ?? 'Engine')[0]}${e.number}`;
+  const label = `${e.spec?.tag ?? (e.spec?.label ?? 'Engine')[0]}${e.number}`;
   const busy = e.status === 'responding' || e.pumping;
 
   ctx.save();
@@ -2248,6 +2250,7 @@ function drawEngine(ctx, e, now) {
 
   // Small and large relatives of the ambulance reuse its art, scaled.
   if (type === 'medcar') ctx.scale(0.62, 0.78);
+  else if (type === 'rapid') ctx.scale(0.68, 0.8);
   else if (type === 'ambubus') ctx.scale(1.38, 1.04);
 
   if (type === 'command') {
@@ -2303,6 +2306,27 @@ function drawEngine(ctx, e, now) {
     ctx.lineTo(-26, 16);
     ctx.stroke();
     cab(ctx, 15, 27, '#eceae3');
+    lightBar(ctx, 21, busy, now);
+    chevrons(ctx, -41, 3);
+  } else if (type === 'rapid') {
+    // A small red utility car: tool lockers behind the cab, a hose reel on the roof.
+    paint(ctx, -41, -17, 58, 34, 7, '#c4281f');
+    ctx.fillStyle = '#efe9d6';
+    ctx.fillRect(-41, -17, 58, 2.2);
+    ctx.fillRect(-41, 14.8, 58, 2.2);
+    lockers(ctx, -39, 13);
+    ctx.fillStyle = '#2f3438';
+    ctx.beginPath();
+    ctx.arc(-17, 0, 9, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#e4e6e8';
+    ctx.lineWidth = 1.6;
+    for (const r of [3, 5.5, 8]) {
+      ctx.beginPath();
+      ctx.arc(-17, 0, r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    cab(ctx, 15, 27, '#a8221b');
     lightBar(ctx, 21, busy, now);
     chevrons(ctx, -41, 3);
   } else if (type === 'rescue') {

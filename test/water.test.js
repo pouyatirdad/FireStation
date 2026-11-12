@@ -68,11 +68,11 @@ test('streets cross the river on bridges that people can drive and walk over', (
   assert.equal(passable(nav, 'swim', wx, 50), true);
 });
 
-test('the streets stop at the quay and the harbour dock has eight berths on the water', () => {
+test('the streets stop at the quay and the harbour dock has sixteen berths on the water', () => {
   for (let y = SEA_Y; y < city.h; y++) assert.equal(city.road[y * city.w + 100], 0, 'a road in the sea');
   const dock = city.stations[2];
   assert.equal(dock.id, 'dock');
-  assert.equal(dock.bays.length, 8);
+  assert.equal(dock.bays.length, 16);
   for (const berth of dock.bays) {
     assert.equal(city.water[Math.floor(berth.y / TILE) * city.w + Math.floor(berth.x / TILE)], 1, 'a berth on dry land');
   }
@@ -100,8 +100,8 @@ test('boats berth only at the Harbour Dock, which has to be bought', () => {
   assert.ok(boat);
   assert.equal(state.city.bays[boat.bayIndex].sea, true);
   assert.equal(commandBuyVehicle(state, 'engine').bayIndex < 8, true, 'a land vehicle was put in a berth');
-  for (let i = 0; i < 7; i++) assert.ok(commandBuyVehicle(state, 'rescueboat'), `berth ${i + 2}`);
-  assert.equal(commandBuyVehicle(state, 'rescueboat'), null, 'a ninth boat');
+  for (let i = 0; i < 15; i++) assert.ok(commandBuyVehicle(state, 'rescueboat'), `berth ${i + 2}`);
+  assert.equal(commandBuyVehicle(state, 'rescueboat'), null, 'a seventeenth boat');
   assert.equal(freeBay(state, 2, true), -1);
 });
 

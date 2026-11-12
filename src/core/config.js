@@ -157,6 +157,18 @@ export const CONFIG = {
       refillRate: 1200, rescueTime: 3, refund: 0.55,
       flying: true, plane: true,
     },
+    // A small, quick utility car: two crew and a locker of tools (chainsaw, rescue
+    // cutter, diving gear) but no pump, no tank and no deck gun. For a fire it
+    // drives to the hydrant nearest the building, hooks its supply line to it and
+    // its crew run the hose out from there. It is no good where there is no
+    // hydrant (a forest fire).
+    rapid: {
+      label: 'Rapid response', cost: 1300, crew: 2, speed: 11.5, capacity: 0, upkeep: 20,
+      hoseRange: 16, turretRange: 0, turretPower: 0, turretWater: 0,
+      refillRate: 0, rescueTime: 2.6, refund: 0.6,
+      hydrantOnly: true, tag: 'U',
+      tools: { chainsaw: 1, cutter: 1, diving: 1 },
+    },
     // The chief's car: no hose, no water. Parked, it boosts every crew within
     // range (spray power +20%), so it earns its place on a big fire.
     command: {

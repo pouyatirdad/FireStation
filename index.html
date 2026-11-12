@@ -1874,6 +1874,30 @@ body {
   .stats .stat:nth-child(7) { display: none; }
 }
 
+/* Dispatch all, and a unit's rebindable shortcut. */
+.btn--alert {
+  background: rgba(255, 107, 99, 0.18);
+  border-color: rgba(255, 107, 99, 0.55);
+  color: #ffd9d6;
+}
+.btn--alert:hover { background: rgba(255, 107, 99, 0.3); }
+.panel__action { margin-left: auto; text-transform: none; letter-spacing: 0; }
+.sel__shortcut {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 7px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.sel__shortcut .btn { text-transform: none; letter-spacing: 0; }
+.sel__shortcut .btn.is-active { background: rgba(255, 180, 70, 0.22); border-color: rgba(255, 180, 70, 0.6); }
+
 </style>
 <!-- build:css:end -->
 </head>
@@ -1981,7 +2005,9 @@ body {
 
     <aside class="dock dock--right" id="dock-right">
       <section class="panel panel--incidents" id="incidents" aria-label="Incidents">
-        <h2 class="panel__title">Incidents <span class="count" id="incident-count" data-on="">0</span></h2>
+        <h2 class="panel__title">Incidents <span class="count" id="incident-count" data-on="">0</span>
+          <button type="button" class="btn btn--small btn--alert panel__action" data-action="dispatch-all" title="Send every free vehicle to an incident of its own (A)">Dispatch all<kbd>A</kbd></button>
+        </h2>
         <ol class="incident-list" id="incident-list"></ol>
       </section>
       <section class="panel panel--log" id="log" aria-label="Dispatch log">
@@ -1993,6 +2019,7 @@ body {
     <div class="roster" id="roster">
       <div class="roster__actions">
         <button type="button" class="btn btn--small" data-action="dispatch">Dispatch<kbd>D</kbd></button>
+        <button type="button" class="btn btn--small btn--alert" data-action="dispatch-all" title="Send every free vehicle to an incident of its own">All<kbd>A</kbd></button>
         <button type="button" class="btn btn--small" data-action="deploy">Deploy<kbd>E</kbd></button>
         <button type="button" class="btn btn--small" data-action="recall">Pack up<kbd>R</kbd></button>
         <button type="button" class="btn btn--small" data-action="home">Station<kbd>H</kbd></button>
@@ -2008,6 +2035,7 @@ body {
       <span><b>Click</b> select</span>
       <span><b>Right-click</b> order</span>
       <span><kbd>D</kbd> dispatch</span>
+      <span><kbd>A</kbd> dispatch all</span>
       <span><kbd>E</kbd> deploy</span>
       <span><kbd>G</kbd> hydrant</span>
       <span><kbd>Tab</kbd> next incident</span>
@@ -2071,7 +2099,7 @@ body {
           <dt>Drag</dt><dd>Pan the map</dd>
           <dt>Scroll</dt><dd>Zoom around the pointer</dd>
           <dt>Arrow keys</dt><dd>Pan the map</dd>
-          <dt>1 – 8</dt><dd>Select a vehicle</dd>
+          <dt>1 – 9, 0, Q W S Z I J L N O Y</dt><dd>Select a vehicle. Every vehicle has its own key; select one and press <b>Shortcut</b> on its card to give it a different key (Backspace clears it)</dd>
           <dt>Tab</dt><dd>Jump to the next incident (fire, forest fire, wreck or injured person)</dd>
           <dt>Home</dt><dd>Jump back to Station 1</dd>
           <dt>U</dt><dd>Show or hide the unit list (the Units button, top left)</dd>
@@ -2080,7 +2108,8 @@ body {
           <dt>K</dt><dd>Send the selected ambulance to the nearest hospital with its patients</dd>
           <dt>M</dt><dd>Sound on or off</dd>
           <dt>Space</dt><dd>Pause or resume</dd>
-          <dt>D</dt><dd>Dispatch to the fire that most needs it — an ambulance goes to the nearest patient</dd>
+          <dt>D</dt><dd>Dispatch to the fire that most needs it (one with no unit on it first) — an ambulance goes to the nearest patient</dd>
+          <dt>A</dt><dd>Dispatch all: every free vehicle goes to an incident of its own — fires, forest fires, injured people, people in the water, wrecks — and spare vehicles reinforce the big fires</dd>
           <dt>E</dt><dd>Deploy the crew at the engine</dd>
           <dt>R</dt><dd>Pack the crew back up</dd>
           <dt>G</dt><dd>Connect or detach the hydrant supply line</dd>
@@ -2278,6 +2307,18 @@ const CONFIG = {
       hoseRange: 0, turretRange: 8, turretPower: 0.07, turretWater: 110,
       refillRate: 1200, rescueTime: 3, refund: 0.55,
       flying: true, plane: true,
+    },
+    // A small, quick utility car: two crew and a locker of tools (chainsaw, rescue
+    // cutter, diving gear) but no pump, no tank and no deck gun. For a fire it
+    // drives to the hydrant nearest the building, hooks its supply line to it and
+    // its crew run the hose out from there. It is no good where there is no
+    // hydrant (a forest fire).
+    rapid: {
+      label: 'Rapid response', cost: 1300, crew: 2, speed: 11.5, capacity: 0, upkeep: 20,
+      hoseRange: 16, turretRange: 0, turretPower: 0, turretWater: 0,
+      refillRate: 0, rescueTime: 2.6, refund: 0.6,
+      hydrantOnly: true, tag: 'U',
+      tools: { chainsaw: 1, cutter: 1, diving: 1 },
     },
     // The chief's car: no hose, no water. Parked, it boosts every crew within
     // range (spray power +20%), so it earns its place on a big fire.
@@ -2558,6 +2599,11 @@ const BAYS = [
   { x: 56.2, y: 56.6 },
   { x: 59.2, y: 56.6 },
 ];
+
+// Eight more bays squeezed into the gaps between those, so a station holds
+// sixteen. They come after every original bay in `city.bays`, which keeps the
+// bay numbers in old saves valid.
+const EXTRA_BAYS = [52.6, 56.6].flatMap((y) => [51.7, 54.7, 57.7, 60.7].map((x) => ({ x, y })));
 
 const SPEC = {
   house: { floors: [1, 2], hp: [60, 85], risk: 0.9 },
@@ -3369,10 +3415,19 @@ function createCity(seed = 7) {
     y: (b.y - APRON.y0 + apron2.y0) * TILE,
     station: 1,
   }));
+  const extra1 = EXTRA_BAYS.map((b) => ({ x: b.x * TILE, y: b.y * TILE, station: 0, extra: true }));
+  const extra2 = EXTRA_BAYS.map((b) => ({
+    x: (b.x - APRON.x0 + apron2.x0) * TILE,
+    y: (b.y - APRON.y0 + apron2.y0) * TILE,
+    station: 1,
+    extra: true,
+  }));
+  // A second row of berths, a boat's length further out on the water.
+  const extraBerths = berths.map((b) => ({ ...b, y: (SEA_Y + 5.8) * TILE, extra: true }));
   const stations = [
-    { id: 'station', name: 'Station 1', building: station, apron: { ...APRON }, bays: bays1 },
-    { id: 'station2', name: 'Station 2', building: station2, apron: apron2, bays: bays2 },
-    { id: 'dock', name: 'Harbour Dock', building: dockBuilding, apron: apronD, bays: berths, sea: true },
+    { id: 'station', name: 'Station 1', building: station, apron: { ...APRON }, bays: [...bays1, ...extra1] },
+    { id: 'station2', name: 'Station 2', building: station2, apron: apron2, bays: [...bays2, ...extra2] },
+    { id: 'dock', name: 'Harbour Dock', building: dockBuilding, apron: apronD, bays: [...berths, ...extraBerths], sea: true },
   ];
 
   return {
@@ -3397,8 +3452,9 @@ function createCity(seed = 7) {
     parks,
     cars,
     lot: stationLot,
-    // Every bay of every station, Station 1's first so existing indexes hold.
-    bays: [...bays1, ...bays2, ...berths],
+    // Every bay of every station. The original twenty-four keep their numbers
+    // (Station 1, Station 2, the dock); the extra bays follow in the same order.
+    bays: [...bays1, ...bays2, ...berths, ...extra1, ...extra2, ...extraBerths],
     stations,
     districts,
     pharmacies: buildings.filter((b) => b.type === 'pharmacy'),
@@ -3409,6 +3465,72 @@ function createCity(seed = 7) {
 }
 
 return { CITY_W, CITY_H, CITY_NAME, V_ROADS, H_ROADS, SEA_Y, RIVER_HALF_WIDTH, riverCentre, APRON, createCity };
+})();
+
+// ---- src/core/hotkeys.js ----
+__m["src/core/hotkeys.js"] = (function () {
+// Keyboard shortcuts for selecting a vehicle. Every vehicle gets one (digits
+// first, then a few letters the game does not use) and the player can rebind it.
+// The game's own keys are reserved so a unit can never steal "D" for dispatch.
+
+// Keys that already do something (see the key handler in main.js).
+const RESERVED_KEYS = new Set([
+  'd', 'a', 'e', 'r', 'h', 'g', 'p', 'k', 'c', 'u', 'f', 'x', 'v', 't', 'm', 'b',
+]);
+
+// What a unit may be bound to, in the order they are handed out.
+const UNIT_KEYS = [
+  '1', '2', '3', '4', '5', '6', '7', '8', '9', '0',
+  'q', 'w', 's', 'z', 'i', 'j', 'l', 'n', 'o', 'y',
+];
+
+const isUnitKey = (key) => UNIT_KEYS.includes(key);
+
+/** The engine bound to a key, if any. */
+function engineByKey(state, key) {
+  return state.engines.find((e) => e.hotkey === key) ?? null;
+}
+
+/** The first key no vehicle has, or '' if every key is taken. */
+function freeHotkey(state, except = null) {
+  const taken = new Set(state.engines.filter((e) => e !== except && e.hotkey).map((e) => e.hotkey));
+  return UNIT_KEYS.find((k) => !taken.has(k)) ?? '';
+}
+
+/**
+ * Bind a key to a vehicle. If another vehicle already has it, the two swap, so
+ * nobody ends up without a shortcut. An empty key clears the binding.
+ * Returns false when the key is not one a unit may use.
+ */
+function bindHotkey(state, engine, key) {
+  if (!engine) return false;
+  if (!key) {
+    engine.hotkey = '';
+    return true;
+  }
+  if (!isUnitKey(key)) return false;
+  const holder = engineByKey(state, key);
+  if (holder && holder !== engine) holder.hotkey = engine.hotkey ?? '';
+  engine.hotkey = key;
+  return true;
+}
+
+/** Give every vehicle without a (valid, unique) key the first free one. */
+function ensureHotkeys(state) {
+  const seen = new Set();
+  for (const engine of state.engines) {
+    if (engine.hotkey && isUnitKey(engine.hotkey) && !seen.has(engine.hotkey)) seen.add(engine.hotkey);
+    else engine.hotkey = '';
+  }
+  for (const engine of state.engines) {
+    if (engine.hotkey) continue;
+    const key = UNIT_KEYS.find((k) => !seen.has(k)) ?? '';
+    engine.hotkey = key;
+    if (key) seen.add(key);
+  }
+}
+
+return { RESERVED_KEYS, UNIT_KEYS, isUnitKey, engineByKey, freeHotkey, bindHotkey, ensureHotkeys };
 })();
 
 // ---- src/systems/grid.js ----
@@ -3500,6 +3622,25 @@ function lineClear(nav, mode, ax, ay, bx, by) {
     if (!passable(nav, mode, x, y)) return false;
   }
   return false;
+}
+
+/**
+ * Like `lineClear`, but for something with a body: the line and two parallel
+ * lines `half` pixels to each side must all stay on `mode` ground. A road is only
+ * two tiles wide, so this is what stops a long vehicle cutting a corner across
+ * the pavement (and the building behind it).
+ */
+function corridorClear(nav, mode, ax, ay, bx, by, half) {
+  if (!lineClear(nav, mode, ax, ay, bx, by)) return false;
+  if (!(half > 0)) return true;
+  const dx = bx - ax;
+  const dy = by - ay;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-6) return true;
+  const nx = (-dy / len) * half;
+  const ny = (dx / len) * half;
+  return lineClear(nav, mode, ax + nx, ay + ny, bx + nx, by + ny)
+    && lineClear(nav, mode, ax - nx, ay - ny, bx - nx, by - ny);
 }
 
 class MinHeap {
@@ -3652,8 +3793,12 @@ function findPath(nav, mode, from, to) {
   return null;
 }
 
-/** Drop waypoints that a straight line already clears, so units do not zigzag. */
-function smoothPath(nav, mode, startPx, tiles) {
+/**
+ * Drop waypoints that a straight line already clears, so units do not zigzag.
+ * With `half` (a body's half-width in pixels) a shortcut is only taken if the
+ * whole body fits along it.
+ */
+function smoothPath(nav, mode, startPx, tiles, half = 0) {
   if (!tiles.length) return [];
   const points = tiles.map((t) => tileCenter(t.x, t.y));
   const out = [];
@@ -3661,7 +3806,7 @@ function smoothPath(nav, mode, startPx, tiles) {
   let i = 0;
   while (i < points.length) {
     let j = points.length - 1;
-    while (j > i && !lineClear(nav, mode, anchor.x, anchor.y, points[j].x, points[j].y)) j--;
+    while (j > i && !corridorClear(nav, mode, anchor.x, anchor.y, points[j].x, points[j].y, half)) j--;
     out.push(points[j]);
     anchor = points[j];
     i = j + 1;
@@ -3694,7 +3839,7 @@ function standTileForRect(nav, rect, fromX, fromY, radius = 4) {
   return best;
 }
 
-return { buildNav, index, passable, walkableAt, driveableAt, tileOf, tileCenter, lineClear, nearestPassable, findPath, smoothPath, standTileForRect };
+return { buildNav, index, passable, walkableAt, driveableAt, tileOf, tileCenter, lineClear, corridorClear, nearestPassable, findPath, smoothPath, standTileForRect };
 })();
 
 // ---- src/systems/events.js ----
@@ -5379,6 +5524,7 @@ return { findVictim, spawnVictim, restoreVictims, nearestVictim, rescueVictim, u
 __m["src/systems/units.js"] = (function () {
 const { CONFIG, TILE } = __m["src/core/config.js"];
 const { SEA_Y } = __m["src/data/city.js"];
+const { ensureHotkeys, freeHotkey } = __m["src/core/hotkeys.js"];
 const { angleTo, approachAngle, clamp, closestOnRect, dist, distToRect } = __m["src/core/math.js"];
 const { findPath, nearestPassable, passable, smoothPath, standTileForRect, tileOf } = __m["src/systems/grid.js"];
 const { addEvent } = __m["src/systems/events.js"];
@@ -5396,6 +5542,7 @@ const { findVictim, rescueVictim } = __m["src/systems/water.js"];
 // A shift starts with one engine and three firefighters. More engines can be
 // bought at the station; each one is independent — its own tank, hose, deck gun
 // and crew — and the selection tells the orders where to go.
+
 
 
 
@@ -5702,6 +5849,7 @@ function spawnVehicle(state, type, station = null) {
     base,
     number,
     bayIndex,
+    hotkey: freeHotkey(state),
     name: `${spec.label} ${number}`,
     x: bay.x,
     y: bay.y,
@@ -5842,6 +5990,7 @@ function vehicleBase(state, type, overrides = {}) {
     base,
     number: 1,
     bayIndex: 0,
+    hotkey: '',
     name: spec.label,
     x: state.city.spawn.x,
     y: state.city.spawn.y,
@@ -5888,6 +6037,7 @@ function restoreFleet(state, saved = {}) {
       number: entry.number ?? 1,
       name: entry.name ?? CONFIG.vehicles[type].label,
       bayIndex: entry.bayIndex ?? 0,
+      hotkey: entry.hotkey ?? '',
       x: entry.x ?? state.city.spawn.x,
       y: entry.y ?? state.city.spawn.y,
       angle: entry.angle ?? state.city.spawn.angle,
@@ -5941,6 +6091,7 @@ function restoreFleet(state, saved = {}) {
   }
 
   state.units = [...state.engines, ...state.crew];
+  ensureHotkeys(state);
   state.activeEngineId = state.engines[0]?.id ?? null;
   state.selected = null;
   return state.engines;
@@ -6167,6 +6318,82 @@ function orderFlight(state, engine, wx, wy, buildingId, wildfireId) {
   return true;
 }
 
+// A road vehicle is about 1.2 tiles wide; its route may not cut a corner closer
+// than this to anything that is not road.
+const BODY_HALF = TILE * 0.46;
+const PARK_GAP = 2.7; // tiles between two parked vehicles (each is about 2.6 long)
+
+/** Where the other road vehicles are, or are heading: places not to park on. */
+function takenSpots(state, engine) {
+  const spots = [];
+  for (const e of state.engines) {
+    if (e === engine || e.spec.flying || e.spec.boat) continue;
+    if (e.path.length > 0 && e.goal) spots.push({ x: (e.goal.x + 0.5) * TILE, y: (e.goal.y + 0.5) * TILE });
+    else if (e.path.length === 0) spots.push({ x: e.x, y: e.y });
+  }
+  return spots;
+}
+
+const spotFree = (spots, tx, ty) => spots.every(
+  (s) => Math.hypot((tx + 0.5) * TILE - s.x, (ty + 0.5) * TILE - s.y) >= PARK_GAP * TILE,
+);
+
+/**
+ * The street tile nearest (cx, cy) where nobody else is parked or heading, so
+ * several vehicles sent to one scene each get a place of their own.
+ */
+function parkingTile(state, engine, cx, cy, maxR = 14) {
+  const spots = takenSpots(state, engine);
+  const gx = Math.floor(cx / TILE);
+  const gy = Math.floor(cy / TILE);
+  for (let r = 0; r <= maxR; r++) {
+    let best = null;
+    let bestD = Infinity;
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+        const x = gx + dx;
+        const y = gy + dy;
+        if (!passable(state.nav, 'drive', x, y) || !spotFree(spots, x, y)) continue;
+        const d = dx * dx + dy * dy;
+        if (d < bestD) {
+          bestD = d;
+          best = { x, y };
+        }
+      }
+    }
+    if (best) return best;
+  }
+  return null;
+}
+
+/**
+ * A street tile beside a hydrant that is near enough to a building for this
+ * vehicle's hose, the hydrant nearest the building first. Null if there is none.
+ */
+function hydrantParking(state, engine, building) {
+  const rect = buildingRect(building);
+  const hose = (engine.spec.hoseRange - 1) * TILE;
+  const spots = takenSpots(state, engine);
+  let best = null;
+  let bestD = Infinity;
+  for (const h of state.city.hydrants) {
+    const hx = (h.x + 0.5) * TILE;
+    const hy = (h.y + 0.5) * TILE;
+    const d = distToRect(hx, hy, rect);
+    if (d > hose + CONFIG.refillRange * TILE || d >= bestD) continue;
+    const tile = nearestPassable(state.nav, 'drive', h.x, h.y, 3);
+    if (!tile || !spotFree(spots, tile.x, tile.y)) continue;
+    const px = (tile.x + 0.5) * TILE;
+    const py = (tile.y + 0.5) * TILE;
+    if (dist(px, py, hx, hy) > CONFIG.refillRange * TILE * 0.9) continue;
+    if (distToRect(px, py, rect) > hose) continue;
+    bestD = d;
+    best = tile;
+  }
+  return best;
+}
+
 function orderEngine(state, engine, wx, wy, buildingId = null, wildfireId = null) {
   if (!engine) return false;
   if (engine.spec.plane) return orderPlane(state, engine, wx, wy, buildingId, wildfireId);
@@ -6176,13 +6403,20 @@ function orderEngine(state, engine, wx, wy, buildingId = null, wildfireId = null
   let goal = null;
   if (building) {
     const rect = buildingRect(building);
-    goal = nearestPassable(
-      state.nav,
-      'drive',
-      Math.floor((rect.x + rect.w / 2) / TILE),
-      Math.floor((rect.y + rect.h / 2) / TILE),
-      14,
-    );
+    const onFire = building.state === 'burning' || (building.trapped ?? 0) > 0;
+    if (engine.spec.hydrantOnly && onFire) {
+      // No pump of its own: park beside a hydrant the hose can reach the fire from.
+      goal = hydrantParking(state, engine, building);
+      if (!goal) {
+        addEvent(state, `${engine.name}: no hydrant within hose reach of ${building.name}`, 'warn');
+        return false;
+      }
+    } else {
+      const cx = rect.x + rect.w / 2;
+      const cy = rect.y + rect.h / 2;
+      goal = parkingTile(state, engine, cx, cy, 14)
+        ?? nearestPassable(state.nav, 'drive', Math.floor(cx / TILE), Math.floor(cy / TILE), 14);
+    }
   }
   if (!goal) {
     goal = nearestPassable(state.nav, 'drive', Math.floor(wx / TILE), Math.floor(wy / TILE), 14);
@@ -6202,7 +6436,7 @@ function orderEngine(state, engine, wx, wy, buildingId = null, wildfireId = null
     addEvent(state, `${engine.name}: supply line detached`, 'info');
   }
   const crewOut = crewOf(state, engine).some((c) => !c.riding);
-  engine.path = smoothPath(state.nav, 'drive', { x: engine.x, y: engine.y }, tiles);
+  engine.path = smoothPath(state.nav, 'drive', { x: engine.x, y: engine.y }, tiles, BODY_HALF);
   engine.targetId = building?.id ?? null;
   engine.wildfireId = wildfireId;
   engine.blockadeId = null;
@@ -6217,6 +6451,10 @@ function orderEngine(state, engine, wx, wy, buildingId = null, wildfireId = null
 /** Drive to the nearest street to a wildfire and deploy the crew there. */
 function orderEngineToWildfire(state, engine, wildfire) {
   if (!engine || !wildfire) return false;
+  if (engine.spec.hydrantOnly) {
+    addEvent(state, `${engine.name} has no water of its own — there are no hydrants in the forest`, 'warn');
+    return false;
+  }
   if (engine.spec.flying) return orderEngine(state, engine, wildfire.x, wildfire.y, null, wildfire.id);
   const goal = nearestPassable(
     state.nav,
@@ -6349,7 +6587,7 @@ function repathEngines(state) {
       addEvent(state, `${engine.name}: every route is blocked — stopped`, 'warn');
       continue;
     }
-    engine.path = smoothPath(state.nav, 'drive', { x: engine.x, y: engine.y }, tiles);
+    engine.path = smoothPath(state.nav, 'drive', { x: engine.x, y: engine.y }, tiles, BODY_HALF);
   }
 }
 
@@ -6493,15 +6731,18 @@ function sendToPharmacy(state, engine) {
   return ok;
 }
 
-/** The fire that most needs an engine right now. */
-function urgentFire(state) {
+/**
+ * The fire that most needs an engine right now. Every vehicle already sent to a
+ * fire counts against it, so the next one goes to a fire that has nobody yet.
+ */
+function urgentFire(state, except = null) {
   const fires = activeFires(state);
   if (fires.length === 0) return null;
   let best = null;
   let bestScore = -Infinity;
   for (const b of fires) {
-    const rect = buildingRect(b);
-    const score = b.fire * 60 + (1 - b.integrity / b.maxIntegrity) * 25;
+    const engaged = state.engines.filter((e) => e !== except && e.targetId === b.id).length;
+    const score = b.fire * 60 + (1 - b.integrity / b.maxIntegrity) * 25 - engaged * 45;
     if (score > bestScore) {
       bestScore = score;
       best = b;
@@ -6521,7 +6762,10 @@ function pickEngineFor(state, target) {
     if (!isFirefighter(engine)) continue;
     // A fireboat can only help where there is water in reach.
     if (engine.spec.boat && !boatCanReach(state, engine, cx, cy, Math.max(target.w, target.h) / 2)) continue;
-    const d = dist(engine.x, engine.y, cx, cy);
+    // A pumpless car is only any use where a hydrant is within hose reach; it
+    // goes after the real engines.
+    if (engine.spec.hydrantOnly && !hydrantParking(state, engine, target)) continue;
+    const d = dist(engine.x, engine.y, cx, cy) * (engine.spec.hydrantOnly ? 1.6 : 1);
     if (d < nearD) {
       nearD = d;
       near = engine;
@@ -6540,7 +6784,7 @@ function pickEngineFor(state, target) {
  * otherwise the given engine takes it (the player's explicit choice).
  */
 function dispatchEngine(state, engine = null, buildingId = null) {
-  const target = buildingOf(state, buildingId) ?? urgentFire(state);
+  const target = buildingOf(state, buildingId) ?? urgentFire(state, engine);
   if (!target) {
     addEvent(state, 'No active fires — the district is quiet', 'info');
     return false;
@@ -6609,6 +6853,14 @@ function arriveEngine(state, engine) {
     return;
   }
   const target = buildingOf(state, engine.targetId);
+  // A car with no pump hooks its supply line to the hydrant it parked beside.
+  if (engine.spec.hydrantOnly && !engine.supply) {
+    const hydrant = hydrantInReach(state, engine);
+    if (hydrant) {
+      engine.supply = { x: (hydrant.x + 0.5) * TILE, y: (hydrant.y + 0.5) * TILE };
+      addEvent(state, `${engine.name}: supply line connected`, 'good');
+    }
+  }
   // A burning building, or one with people still trapped inside, gets the crew out.
   if (target && (target.state === 'burning' || (target.trapped ?? 0) > 0)) {
     const reach = distToRect(engine.x, engine.y, buildingRect(target));
@@ -7108,6 +7360,11 @@ function updateCrewBlockade(state, crew, engine, dt) {
   return true;
 }
 
+/** Is there water for the hose: the tank, or for a pumpless car the hydrant line. */
+function hasWater(engine) {
+  return engine.spec.hydrantOnly ? Boolean(engine.supply) : engine.water > 0;
+}
+
 function chooseTarget(state, crew, engine) {
   let best = null;
   let bestScore = Infinity;
@@ -7474,9 +7731,9 @@ function updateCrew(state, crew, dt) {
   crew.rescueId = null;
 
   if (reach <= CONFIG.crew.sprayRange * TILE && hoseOk) {
-    if (engine.water <= 0) {
+    if (!hasWater(engine)) {
       crew.spraying = false;
-      crew.status = 'no water';
+      crew.status = engine.spec.hydrantOnly ? 'no hydrant' : 'no water';
       return;
     }
     crew.spraying = true;
@@ -7495,10 +7752,12 @@ function updateCrew(state, crew, dt) {
       engineId: engine.id,
     });
     state.hoses.push({ ax: engine.x, ay: engine.y, bx: crew.x, by: crew.y, live: true });
-    engine.water = Math.max(0, engine.water - CONFIG.crew.sprayWater * dt);
-    if (engine.water <= 0 && !engine.emptyWarned) {
-      engine.emptyWarned = true;
-      addEvent(state, `${engine.name} is out of water — find a hydrant`, 'warn');
+    if (!engine.spec.hydrantOnly) {
+      engine.water = Math.max(0, engine.water - CONFIG.crew.sprayWater * dt);
+      if (engine.water <= 0 && !engine.emptyWarned) {
+        engine.emptyWarned = true;
+        addEvent(state, `${engine.name} is out of water — find a hydrant`, 'warn');
+      }
     }
     return;
   }
@@ -7703,6 +7962,7 @@ const STATUS_TONE = {
   'suiting up': 'warn',
   'in quarters': 'good',
   'no water': 'bad',
+  'no hydrant': 'bad',
   'hose too short': 'bad',
   'beyond hose reach': 'bad',
   'at hose limit': 'bad',
@@ -7728,6 +7988,7 @@ const SHORT_STATUS = {
   'beyond hose reach': 'Too far',
   'out of hose': 'Out of hose',
   'no water': 'No water',
+  'no hydrant': 'No hydrant',
   restocking: 'Restocking',
   treating: 'Treating',
   clearing: 'Clearing',
@@ -7923,13 +8184,13 @@ function closePanels() {
   if (!unitsCollapsed) setUnitsCollapsed(true);
 }
 
-const unitKey = (index) => (index < 9 ? String(index + 1) : '');
+const unitKey = (engine) => (engine.hotkey ? engine.hotkey.toUpperCase() : '');
 
 function renderRoster(state) {
   const box = $('roster-units');
   const sig = [
     unitFilter, unitsCollapsed, [...collapsedGroups].join(','),
-    state.engines.map((e) => e.id + e.name).join(','),
+    state.engines.map((e) => e.id + e.name + (e.hotkey ?? '')).join(','),
   ].join('|');
   if (sig === rosterKey) return;
   rosterKey = sig;
@@ -7953,7 +8214,7 @@ function renderRoster(state) {
     if (!folded) {
       html += '<div class="ugroup__list">' + members.map(({ engine, index }) =>
         '<button type="button" class="unit" data-cat="' + group + '" data-unit="' + engine.id + '" title="Click to select · double-click to find">' +
-        '<span class="unit__key">' + unitKey(index) + '</span><span class="unit__dot"></span>' +
+        '<span class="unit__key">' + unitKey(engine) + '</span><span class="unit__dot"></span>' +
         '<span class="unit__text"><span class="unit__name">' + esc(engine.name) + '</span><span class="unit__status">—</span></span>' +
         '<span class="unit__bar"><i></i></span></button>').join('') + '</div>';
     }
@@ -8173,6 +8434,7 @@ function selectionSignature(state, entity) {
     return [
       entity.id, entity.status, Math.round(entity.water / 80), entity.riding,
       entity.kind === 'crew' ? entity.targetId : '', supply, entity.kits ?? '', entity.cargo?.length ?? '', tools,
+      entity.kind === 'engine' ? (entity.hotkey ?? '') + (state.ui.rebinding === entity.id ? '*' : '') : '',
     ].join(':');
   }
   return [
@@ -8215,6 +8477,15 @@ function updateSelection(state) {
       : selected.kind === 'unit'
       ? (entity.kind === 'engine' ? engineCard(state, entity) : crewCard(state, entity))
       : buildingCard(state, entity);
+  if (selected.kind === 'unit' && entity.kind === 'engine') panel.insertAdjacentHTML('beforeend', shortcutRow(state, entity));
+}
+
+/** The unit's selection key, with a button to change it. */
+function shortcutRow(state, engine) {
+  const waiting = state.ui.rebinding === engine.id;
+  return '<div class="sel__shortcut"><span>Shortcut</span>' +
+    '<button type="button" class="btn btn--small' + (waiting ? ' is-active' : '') + '" data-action="rebind-key" title="Click, then press the key you want for this unit (a digit or Q W S Z I J L N O Y). Backspace clears it.">' +
+    (waiting ? 'Press a key…' : (engine.hotkey ? '<kbd>' + esc(engine.hotkey.toUpperCase()) + '</kbd> change' : 'Set a key')) + '</button></div>';
 }
 
 function wildfireCard(state, wildfire) {
@@ -8348,19 +8619,22 @@ function engineCard(state, engine) {
   const deployed = crew.length - aboard;
   const waterPct = pct(engine.water, engine.capacity);
   const hydrant = hydrantInReach(state, engine);
+  const pumpless = Boolean(engine.spec.hydrantOnly);
   const supply = engine.supply
     ? '<div class="supply is-on">Hydrant supply connected</div>'
     : hydrant
       ? '<div class="supply is-ready">Hydrant in reach — press G</div>'
-      : '<div class="supply">Tank supply only</div>';
+      : '<div class="supply">' + (pumpless ? 'No water until it is at a hydrant' : 'Tank supply only') + '</div>';
   return `
     <div class="sel__kind">${esc(engine.spec.label)} company</div>
     <h2 class="sel__name">${esc(engine.name)}</h2>
     ${statusChip(engine.status)}
-    <div class="bar__label"><span>Water</span><span>${Math.round(engine.water)} / ${engine.capacity} L</span></div>
-    <div class="bar"><i style="width:${waterPct}"></i></div>
+    ${pumpless ? '' : `<div class="bar__label"><span>Water</span><span>${Math.round(engine.water)} / ${engine.capacity} L</span></div>
+    <div class="bar"><i style="width:${waterPct}"></i></div>`}
     ${supply}
-    <p class="sel__meta">${aboard} aboard · ${deployed} deployed<br>Hose reaches ${engine.spec.hoseRange} tiles; the deck gun ${engine.spec.turretRange}.</p>
+    <p class="sel__meta">${aboard} aboard · ${deployed} deployed<br>${pumpless
+      ? 'No pump or tank: it parks at the hydrant nearest the fire, connects, and the crew run a hose up to ' + engine.spec.hoseRange + ' tiles.'
+      : 'Hose reaches ' + engine.spec.hoseRange + ' tiles; the deck gun ' + engine.spec.turretRange + '.'}</p>
     <div class="sel__label">Equipment — a crew member takes it from the lockers</div>
     ${toolButtons(state, engine)}
     <div class="sel__actions">
@@ -8561,6 +8835,7 @@ const vehicleBlurb = (spec) => {
   if (spec.medical) return spec.crew + ' paramedics · ' + spec.kits + ' kits · ' + spec.carry + ' stretchers';
   if (spec.flying) return 'no crew · ' + spec.capacity.toLocaleString('en-US') + ' L · flies over roads · dips in the harbour';
   if (spec.command) return spec.crew + ' crew · parked, boosts crews within ' + CONFIG.command.range + ' tiles by ' + Math.round(CONFIG.command.aura * 100) + '%';
+  if (spec.hydrantOnly) return spec.crew + ' crew · no pump or tank · hooks to a hydrant · hose ' + spec.hoseRange + ' · chainsaw, cutter, diving gear';
   return spec.crew + ' crew · ' + spec.capacity.toLocaleString('en-US') + ' L · hose ' + spec.hoseRange;
 };
 
@@ -8581,7 +8856,7 @@ function fleetTab(state) {
         ? Math.round((engine.water / engine.capacity) * 100) + '% water'
         : 'no tank';
     return '<div class="station__engine">' +
-      '<span class="station__num">' + (index + 1) + '</span>' +
+      '<span class="station__num">' + (engine.hotkey ? esc(engine.hotkey.toUpperCase()) : '–') + '</span>' +
       '<div class="station__text"><b>' + esc(engine.name) + '</b>' +
       '<span>' + esc(SHORT_STATUS[engine.status] ?? engine.status) + ' · ' + load + ' · ' + aboard + '/' + crew.length + ' aboard · ' + esc(stationName(engine)) + '</span></div>' +
       '<button type="button" class="station__sell" data-action="sell-vehicle" data-engine="' + engine.id + '">Sell $' + refund.toLocaleString('en-US') + '</button>' +
@@ -8594,13 +8869,13 @@ function fleetTab(state) {
     ? '<div class="station__chooser"><span>Deliver new vehicles to</span>' +
       state.city.stations.map((st, i) => st.sea ? '' : '<button type="button" class="btn btn--small' + (buyStation === i ? ' is-active' : '') + '" data-action="deliver-to" data-station="' + i + '">' + esc(st.name) + '</button>').join('') +
       '</div>'
-    : '<div class="station__expand"><div><b>' + esc(two.name) + ' · Civic Quarter</b><span>Eight more bays and a second helipad, deep in the city. Calls start coming from its district too.</span></div>' +
+    : '<div class="station__expand"><div><b>' + esc(two.name) + ' · Civic Quarter</b><span>Sixteen more bays and a second helipad, deep in the city. Calls start coming from its district too.</span></div>' +
       '<button type="button" class="btn btn--small btn--primary" data-action="buy-station"' + (state.credits < CONFIG.economy.stationPrice ? ' disabled' : '') + '>Open $' + CONFIG.economy.stationPrice.toLocaleString('en-US') + '</button></div>';
 
   const dock = state.city.stations[2];
   const dockBox = dockOpen
     ? '<div class="station__chooser"><span>' + esc(dock.name) + ' · ' + state.engines.filter((e) => e.spec.boat).length + '/' + totalBerths(state) + ' berths</span></div>'
-    : '<div class="station__expand"><div><b>' + esc(dock.name) + '</b><span>Eight berths on the harbour. Needed for fireboats and rescue boats, which can sail the river and the bay.</span></div>' +
+    : '<div class="station__expand"><div><b>' + esc(dock.name) + '</b><span>Sixteen berths on the harbour. Needed for fireboats and rescue boats, which can sail the river and the bay.</span></div>' +
       '<button type="button" class="btn btn--small btn--primary" data-action="buy-dock"' + (state.credits < CONFIG.economy.dockPrice ? ' disabled' : '') + '>Open $' + CONFIG.economy.dockPrice.toLocaleString('en-US') + '</button></div>';
 
   const buys = Object.entries(CONFIG.vehicles).map(([type, spec]) => {
@@ -8614,7 +8889,7 @@ function fleetTab(state) {
 
   return '<div class="station__balance">$' + state.credits.toLocaleString('en-US') + '<span>credits · ' + landCount + '/' + bays + ' bays</span></div>' +
     '<div class="station__list">' + engines + '</div>' +
-    (maxed ? '<p class="station__full">Every bay you own is full' + (open2 ? '.' : ' — open Station 2 for eight more.') + '</p>' : '') +
+    (maxed ? '<p class="station__full">Every bay you own is full' + (open2 ? '.' : ' — open Station 2 for sixteen more.') + '</p>' : '') +
     stationBox + dockBox +
     '<div class="station__buys">' + buys + '</div>';
 }
@@ -8705,7 +8980,7 @@ function updateStation(state) {
     '<button type="button" class="btn btn--small" data-action="load-game">Load</button>' +
     '<button type="button" class="btn btn--small" data-action="new-shift">New shift</button></div>' +
     '<p class="station__saved">' + (state.saveStatus ? 'Saved at ' + state.saveStatus : 'Autosaves every 30 seconds') + '</p>' +
-    '<p class="station__keys"><kbd>B</kbd> headquarters · <kbd>D</kbd> dispatch · <kbd>E</kbd> deploy · <kbd>R</kbd> pack up · <kbd>G</kbd> hydrant · <kbd>P</kbd> pharmacy · <kbd>K</kbd> hospital · <kbd>Tab</kbd> next incident · <kbd>M</kbd> sound · <kbd>F1</kbd> controls</p>';
+    '<p class="station__keys"><kbd>B</kbd> headquarters · <kbd>D</kbd> dispatch · <kbd>A</kbd> dispatch all · <kbd>E</kbd> deploy · <kbd>R</kbd> pack up · <kbd>G</kbd> hydrant · <kbd>P</kbd> pharmacy · <kbd>K</kbd> hospital · <kbd>Tab</kbd> next incident · <kbd>M</kbd> sound · <kbd>F1</kbd> controls</p>';
 
   const html = '<p class="menu__eyebrow">Headquarters</p>' + tabs + body + footer;
   // Rebuilding the DOM under the pointer swallows clicks, so only touch it on a change.
@@ -9036,6 +9311,224 @@ function explode(state, building) {
 }
 
 return { pickRoadSpot, trafficAccident, pileUp, updateChains, explode };
+})();
+
+// ---- src/systems/dispatch.js ----
+__m["src/systems/dispatch.js"] = (function () {
+const { TILE } = __m["src/core/config.js"];
+const { dist } = __m["src/core/math.js"];
+const { addEvent } = __m["src/systems/events.js"];
+const { activeFires } = __m["src/systems/fire.js"];
+const { findPatient, isMedical } = __m["src/systems/medical.js"];
+const { boatCanReach, canDive, crewOf, isFirefighter, orderAmbulanceToPatient, orderEngine, orderEngineToBlockade, orderEngineToVictim, orderEngineToWildfire, sendToHospital, toolCount, toolsFree } = __m["src/systems/units.js"];
+// "Dispatch all": look at every open incident and every free vehicle and give
+// each vehicle its own job, so a big night does not send the whole fleet to one
+// fire. Each incident gets one suitable vehicle first (nearest pairs first); any
+// vehicles left over go to the biggest fires, a few more each round.
+
+
+
+
+
+
+
+
+/** Is anyone from this vehicle on the ground and busy (spraying, rescuing, cutting, diving, treating)? */
+function crewBusy(state, engine) {
+  return crewOf(state, engine).some((c) => !c.riding && (
+    c.spraying || c.rescueId || c.wildfireId || c.cut || c.victimId || c.fetch || c.patientId
+    || c.treatTimer > 0 || c.tool === 'cutter' || c.tool === 'diving'
+  ));
+}
+
+/** A vehicle with nothing to do: not driving, not packing up, not tied to a job. */
+function isFree(state, engine) {
+  return engine.path.length === 0 && engine.packTimer === 0
+    && !engine.targetId && !engine.wildfireId && !engine.blockadeId && !engine.victimId
+    && !engine.patientId && !crewBusy(state, engine);
+}
+
+/** Every open incident, most urgent first, with how many vehicles it should get. */
+function openJobs(state) {
+  const jobs = [];
+  const covered = (pred) => state.engines.filter(pred).length;
+  for (const b of activeFires(state)) {
+    const area = b.w * b.h;
+    const want = Math.max(1, Math.min(4, 1 + Math.floor(b.fire * 2) + (area >= 70 ? 1 : 0) + (b.big ? 1 : 0)));
+    jobs.push({
+      key: b.id, kind: 'fire', tier: 0, want, ref: b,
+      x: (b.x + b.w / 2) * TILE, y: (b.y + b.h / 2) * TILE,
+      urgency: 600 + b.fire * 100 + (b.trapped ?? 0) * 40,
+      have: covered((e) => e.targetId === b.id),
+    });
+  }
+  for (const b of state.buildings) {
+    if ((b.trapped ?? 0) <= 0 || b.state === 'burning' || b.state === 'rubble') continue;
+    jobs.push({
+      key: b.id, kind: 'fire', tier: 0, want: 1, ref: b,
+      x: (b.x + b.w / 2) * TILE, y: (b.y + b.h / 2) * TILE,
+      urgency: 700,
+      have: covered((e) => e.targetId === b.id),
+    });
+  }
+  for (const w of state.wildfires ?? []) {
+    jobs.push({
+      key: w.id, kind: 'wildfire', tier: 0, want: Math.max(1, Math.min(4, Math.round(w.radius / (TILE * 6)))), ref: w,
+      x: w.x, y: w.y, urgency: 650 + w.intensity * 100,
+      // A vehicle counts while it drives there, and again once its crew are out on it.
+      have: new Set([
+        ...state.engines.filter((e) => e.wildfireId === w.id).map((e) => e.id),
+        ...state.crew.filter((c) => !c.riding && c.wildfireId === w.id).map((c) => c.engineId),
+      ]).size,
+    });
+  }
+  for (const v of state.victims ?? []) {
+    jobs.push({
+      key: v.id, kind: 'victim', tier: 0, want: 1, ref: v, x: v.x, y: v.y,
+      urgency: 1000 - v.life,
+      have: v.diverId || covered((e) => e.victimId === v.id) ? 1 : 0,
+    });
+  }
+  for (const p of state.patients ?? []) {
+    if (p.treated) continue;
+    jobs.push({
+      key: p.id, kind: 'patient', tier: 0, want: 1, ref: p, x: p.x, y: p.y,
+      urgency: 500 - p.life + (p.critical ? 80 : 0),
+      have: p.claimedBy && findPatient(state, p.id) ? 1 : 0,
+    });
+  }
+  for (const w of state.blockades ?? []) {
+    jobs.push({
+      key: w.id, kind: 'blockade', tier: 1, want: 1, ref: w, x: w.x, y: w.y,
+      urgency: 300 + (w.big ? 50 : 0),
+      have: covered((e) => e.blockadeId === w.id),
+    });
+  }
+  jobs.sort((a, b) => b.urgency - a.urgency);
+  return jobs;
+}
+
+/** How well a vehicle suits a job: lower is better, Infinity if it cannot do it. */
+function cost(state, engine, job) {
+  const d = dist(engine.x, engine.y, job.x, job.y);
+  switch (job.kind) {
+    case 'fire': {
+      if (!isFirefighter(engine)) return Infinity;
+      if (engine.spec.boat && !boatCanReach(state, engine, job.x, job.y, Math.max(job.ref.w, job.ref.h) / 2)) return Infinity;
+      return d * (engine.spec.hydrantOnly ? 1.6 : 1);
+    }
+    case 'wildfire': {
+      if (!isFirefighter(engine) || engine.spec.hydrantOnly) return Infinity;
+      if (engine.spec.boat && !boatCanReach(state, engine, job.x, job.y, job.ref.radius / TILE)) return Infinity;
+      return d * (engine.spec.flying ? 0.45 : 1);
+    }
+    case 'patient':
+      return isMedical(engine) && (engine.kits ?? 0) >= 1 ? d : Infinity;
+    case 'victim':
+      if (!canDive(engine) || (!engine.spec.diver && toolsFree(state, engine, 'diving') <= 0)) return Infinity;
+      return d * (engine.spec.boat ? 0.7 : 1);
+    case 'blockade':
+      if (!isFirefighter(engine) || engine.spec.flying || engine.spec.boat) return Infinity;
+      return d * (toolCount(engine, 'cutter') > 0 ? 0.6 : 1);
+    default:
+      return Infinity;
+  }
+}
+
+function order(state, engine, job) {
+  switch (job.kind) {
+    case 'fire':
+      return orderEngine(state, engine, job.x, job.y, job.ref.id);
+    case 'wildfire':
+      return orderEngineToWildfire(state, engine, job.ref);
+    case 'patient':
+      return orderAmbulanceToPatient(state, engine, job.ref);
+    case 'victim':
+      return orderEngineToVictim(state, engine, job.ref);
+    case 'blockade':
+      return orderEngineToBlockade(state, engine, job.ref);
+    default:
+      return false;
+  }
+}
+
+/**
+ * Send every free vehicle where it is needed. Returns what happened:
+ * `{ sent, jobs, uncovered, hospital }`.
+ */
+function dispatchAll(state) {
+  const result = { sent: 0, jobs: 0, uncovered: 0, hospital: 0 };
+
+  // Ambulances with patients aboard go to the hospital before anything else.
+  for (const engine of state.engines) {
+    if (!isMedical(engine) || engine.path.length > 0 || (engine.cargo?.length ?? 0) === 0) continue;
+    if (sendToHospital(state, engine)) result.hospital++;
+  }
+
+  const jobs = openJobs(state);
+  result.jobs = jobs.length;
+  if (jobs.length === 0) {
+    if (result.hospital === 0) addEvent(state, 'Nothing to dispatch — the district is quiet', 'info');
+    return result;
+  }
+
+  const free = new Set(state.engines.filter((e) => isFree(state, e) && !((e.cargo?.length ?? 0) > 0)));
+  const failed = new Set();
+
+  // Round 1 gives every incident one vehicle (life and fire before wrecks); the
+  // later rounds put more on the big fires, up to what each one asks for.
+  // After that, if vehicles are still free, they go to the fires too (at most
+  // four to a scene), the least-covered fire first: "all" means all.
+  const rounds = [
+    { tier: 0, goal: 1 }, { tier: 1, goal: 1 },
+    { tier: 0, goal: 2 }, { tier: 0, goal: 3 }, { tier: 0, goal: 4 },
+    { tier: 0, goal: 2, spare: true }, { tier: 0, goal: 3, spare: true }, { tier: 0, goal: 4, spare: true },
+  ];
+  for (const { tier, goal, spare } of rounds) {
+    for (;;) {
+      let best = null;
+      let bestCost = Infinity;
+      for (const job of jobs) {
+        if (job.tier !== tier || job.have >= (spare ? goal : Math.min(job.want, goal))) continue;
+        if (spare && job.kind !== 'fire' && job.kind !== 'wildfire') continue;
+        for (const engine of free) {
+          if (failed.has(job.key + '|' + engine.id)) continue;
+          const c = cost(state, engine, job);
+          if (c < bestCost) {
+            bestCost = c;
+            best = { job, engine };
+          }
+        }
+      }
+      if (!best) break;
+      if (order(state, best.engine, best.job)) {
+        free.delete(best.engine);
+        best.job.have++;
+        result.sent++;
+      } else {
+        failed.add(best.job.key + '|' + best.engine.id);
+      }
+    }
+  }
+
+  result.uncovered = jobs.filter((j) => j.have === 0).length;
+  if (result.sent > 0) {
+    addEvent(
+      state,
+      `Dispatched ${result.sent} unit${result.sent === 1 ? '' : 's'} to ${jobs.length - result.uncovered} incident${jobs.length - result.uncovered === 1 ? '' : 's'}`,
+      'good',
+    );
+  }
+  if (result.uncovered > 0) {
+    addEvent(state, `${result.uncovered} incident${result.uncovered === 1 ? ' has' : 's have'} no free unit — buy more vehicles or wait for one to clear`, 'warn');
+  } else if (result.sent === 0 && result.hospital === 0) {
+    addEvent(state, 'Every incident already has a unit on it', 'info');
+  }
+  return result;
+}
+
+
+return { isFree, openJobs, dispatchAll };
 })();
 
 // ---- src/systems/wildfire.js ----
@@ -9441,6 +9934,8 @@ const { repayLoan, takeLoan, toggleInsurance, trainCrew } = __m["src/systems/eco
 const { acceptContract, createContracts, restoreContracts, updateContracts } = __m["src/systems/contracts.js"];
 const { createTraffic, findBlockade, restoreBlockades, updateTraffic } = __m["src/systems/blockades.js"];
 const { explode, updateChains } = __m["src/systems/chains.js"];
+const { dispatchAll } = __m["src/systems/dispatch.js"];
+const { bindHotkey, engineByKey } = __m["src/core/hotkeys.js"];
 const { createWind, updateWind } = __m["src/systems/wind.js"];
 const { createLedger, spend, updateEconomy } = __m["src/systems/economy.js"];
 const { findPatient, isMedical, nearestPatient, restorePatients, updatePatients } = __m["src/systems/medical.js"];
@@ -9453,6 +9948,8 @@ const { restoreWildfires, updateWildfires } = __m["src/systems/wildfire.js"];
 // The shift: one city, one engine, one crew, and a district that keeps catching
 // fire. This module owns the tick order (alarms, units, fire, effects), the
 // rating, and the small vocabulary of orders the UI can give.
+
+
 
 
 
@@ -9709,7 +10206,7 @@ function closestIdleEngine(state, x, y, radiusTiles = 0) {
   let near = null;
   let nearD = Infinity;
   for (const engine of state.engines) {
-    if (!isFirefighter(engine)) continue;
+    if (!isFirefighter(engine) || engine.spec.hydrantOnly) continue;
     // A fireboat only helps where there is water in reach of the fire.
     if (engine.spec.boat && !boatCanReach(state, engine, x, y, radiusTiles)) continue;
     // Aircraft are the right tool for a forest fire, wherever they are parked.
@@ -9893,12 +10390,45 @@ function commandDispatch(state, buildingId = null) {
     const wreck = state.blockades[0];
     if (wreck) return commandDispatchBlockade(state, wreck.id);
   }
-  const chosen = dispatchEngine(state, engine, target?.id ?? null);
+  // The selected engine already has a job and no particular fire was named: call
+  // the next free vehicle instead, so pressing D again reinforces a different
+  // scene rather than shuffling the same engine about.
+  let sending = engine;
+  if (engine && !target && isFirefighter(engine) && (engine.targetId || engine.wildfireId || engine.path.length > 0)) {
+    const spare = state.engines.some((e) => e !== engine && isFirefighter(e) && !e.spec.boat
+      && !e.targetId && !e.wildfireId && e.path.length === 0 && e.packTimer === 0);
+    if (spare) sending = null;
+  }
+  const chosen = dispatchEngine(state, sending, target?.id ?? null);
   if (chosen) {
     selectUnit(state, chosen.id);
     return true;
   }
   return false;
+}
+
+/**
+ * Dispatch everything: every free vehicle goes to an incident of its own (fires,
+ * forest fires, injured people, people in the water, wrecks), the nearest ones
+ * first, and spare vehicles reinforce the biggest fires.
+ */
+function commandDispatchAll(state) {
+  const result = dispatchAll(state);
+  return result.sent + result.hospital > 0 ? result : false;
+}
+
+/** Select the vehicle bound to a key. Returns true if there is one. */
+function selectUnitByKey(state, key) {
+  const engine = engineByKey(state, key);
+  if (!engine) return false;
+  selectUnit(state, engine.id);
+  return true;
+}
+
+/** Rebind a vehicle's selection key (a key a unit may use; '' clears it). */
+function commandBindKey(state, id, key) {
+  const engine = state.engines.find((e) => e.id === id);
+  return bindHotkey(state, engine, key);
 }
 
 function commandDeploy(state) {
@@ -9985,7 +10515,7 @@ function commandBuyStation(state, index = 1) {
   state.ownedStations[index] = true;
   addEvent(
     state,
-    index === 2 ? 'The Harbour Dock is open — eight berths for boats' : 'Station 2 is open — eight more bays across the city',
+    index === 2 ? 'The Harbour Dock is open — sixteen berths for boats' : 'Station 2 is open — sixteen more bays across the city',
     'good',
   );
   return true;
@@ -10046,6 +10576,7 @@ function serialize(state) {
       number: e.number,
       name: e.name,
       bayIndex: e.bayIndex,
+      hotkey: e.hotkey ?? '',
       x: e.x,
       y: e.y,
       angle: e.angle,
@@ -10146,7 +10677,7 @@ function loadState(data) {
   return state;
 }
 
-return { createGame, startShift, shiftTime, update, getSelected, selectWildfire, selectVictim, selectBlockade, selectPatient, selectUnit, selectBuilding, pickAt, commandMove, commandDispatchWildfire, commandDispatchPatient, commandDispatchVictim, commandDispatchBlockade, commandHospital, commandPharmacy, commandDispatch, commandDeploy, commandRecall, commandReturnHome, commandEquip, commandHydrant, commandBuyVehicle, commandBuyStation, commandLoan, commandRepay, commandInsurance, commandTrain, commandAcceptContract, commandBuyEngine, commandSellVehicle, serialize, loadState, orderEngine, orderCrew };
+return { createGame, startShift, shiftTime, update, getSelected, selectWildfire, selectVictim, selectBlockade, selectPatient, selectUnit, selectBuilding, pickAt, commandMove, commandDispatchWildfire, commandDispatchPatient, commandDispatchVictim, commandDispatchBlockade, commandHospital, commandPharmacy, commandDispatch, commandDispatchAll, selectUnitByKey, commandBindKey, commandDeploy, commandRecall, commandReturnHome, commandEquip, commandHydrant, commandBuyVehicle, commandBuyStation, commandLoan, commandRepay, commandInsurance, commandTrain, commandAcceptContract, commandBuyEngine, commandSellVehicle, serialize, loadState, orderEngine, orderCrew };
 })();
 
 // ---- src/systems/audio.js ----
@@ -11211,11 +11742,13 @@ function drawWater(ctx, state, b, z) {
   const dock = city.stations?.[2];
   if (dock && z >= 0.3 && b.y1 >= SEA_Y - 2) {
     ctx.fillStyle = '#8a6a45';
-    for (const berth of dock.bays) {
-      ctx.fillRect(berth.x + 1.3 * TILE, SEA_Y * TILE, 7, 3.2 * TILE);
+    const front = dock.bays.filter((berth) => !berth.extra);
+    const deep = dock.bays.some((berth) => berth.extra);
+    for (const berth of front) {
+      ctx.fillRect(berth.x + 1.3 * TILE, SEA_Y * TILE, 7, (deep ? 6.6 : 3.2) * TILE);
     }
     ctx.fillStyle = '#7a5d3b';
-    ctx.fillRect(dock.bays[0].x - 1.2 * TILE, SEA_Y * TILE, (dock.bays.length * 3 + 0.4) * TILE, 5);
+    ctx.fillRect(front[0].x - 1.2 * TILE, SEA_Y * TILE, (front.length * 3 + 0.4) * TILE, 5);
   }
 }
 
@@ -12771,7 +13304,7 @@ function lightBar(ctx, x, busy, now, colors = ['#ff3b30', '#2f8cff']) {
 
 function drawEngine(ctx, e, now) {
   const type = e.type ?? 'engine';
-  const label = `${(e.spec?.label ?? 'Engine')[0]}${e.number}`;
+  const label = `${e.spec?.tag ?? (e.spec?.label ?? 'Engine')[0]}${e.number}`;
   const busy = e.status === 'responding' || e.pumping;
 
   ctx.save();
@@ -12791,6 +13324,7 @@ function drawEngine(ctx, e, now) {
 
   // Small and large relatives of the ambulance reuse its art, scaled.
   if (type === 'medcar') ctx.scale(0.62, 0.78);
+  else if (type === 'rapid') ctx.scale(0.68, 0.8);
   else if (type === 'ambubus') ctx.scale(1.38, 1.04);
 
   if (type === 'command') {
@@ -12846,6 +13380,27 @@ function drawEngine(ctx, e, now) {
     ctx.lineTo(-26, 16);
     ctx.stroke();
     cab(ctx, 15, 27, '#eceae3');
+    lightBar(ctx, 21, busy, now);
+    chevrons(ctx, -41, 3);
+  } else if (type === 'rapid') {
+    // A small red utility car: tool lockers behind the cab, a hose reel on the roof.
+    paint(ctx, -41, -17, 58, 34, 7, '#c4281f');
+    ctx.fillStyle = '#efe9d6';
+    ctx.fillRect(-41, -17, 58, 2.2);
+    ctx.fillRect(-41, 14.8, 58, 2.2);
+    lockers(ctx, -39, 13);
+    ctx.fillStyle = '#2f3438';
+    ctx.beginPath();
+    ctx.arc(-17, 0, 9, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#e4e6e8';
+    ctx.lineWidth = 1.6;
+    for (const r of [3, 5.5, 8]) {
+      ctx.beginPath();
+      ctx.arc(-17, 0, r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    cab(ctx, 15, 27, '#a8221b');
     lightBar(ctx, 21, busy, now);
     chevrons(ctx, -41, 3);
   } else if (type === 'rescue') {
@@ -14210,7 +14765,7 @@ const hud = __m["src/ui/hud.js"];
 const { CONFIG, TILE } = __m["src/core/config.js"];
 const { clamp, formatClock } = __m["src/core/math.js"];
 const { createLoop } = __m["src/core/loop.js"];
-const { createGame, startShift, update, pickAt, selectUnit, selectBuilding, commandMove, commandDispatch, commandDeploy, commandRecall, commandReturnHome, commandBuyVehicle, commandSellVehicle, commandHydrant, commandDispatchWildfire, commandDispatchPatient, commandDispatchBlockade, commandPharmacy, commandHospital, selectPatient, selectBlockade, selectVictim, commandDispatchVictim, commandBuyStation, commandLoan, commandRepay, commandInsurance, commandTrain, commandAcceptContract, commandEquip, selectWildfire, getSelected, serialize, loadState } = __m["src/systems/game.js"];
+const { createGame, startShift, update, pickAt, selectUnit, selectBuilding, commandMove, commandDispatch, commandDeploy, commandRecall, commandReturnHome, commandBuyVehicle, commandSellVehicle, commandHydrant, commandDispatchWildfire, commandDispatchPatient, commandDispatchBlockade, commandPharmacy, commandHospital, selectPatient, selectBlockade, selectVictim, commandDispatchVictim, commandBuyStation, commandLoan, commandRepay, commandInsurance, commandTrain, commandAcceptContract, commandEquip, commandDispatchAll, selectUnitByKey, commandBindKey, selectWildfire, getSelected, serialize, loadState } = __m["src/systems/game.js"];
 const { createAudio } = __m["src/systems/audio.js"];
 const { spawnPatient } = __m["src/systems/medical.js"];
 const { trafficAccident, pileUp } = __m["src/systems/chains.js"];
@@ -14218,12 +14773,14 @@ const { drowningCall } = __m["src/systems/water.js"];
 const { activeFires } = __m["src/systems/fire.js"];
 const { addEvent } = __m["src/systems/events.js"];
 const { engineForUnit } = __m["src/systems/units.js"];
+const { isUnitKey } = __m["src/core/hotkeys.js"];
 const { startWildfire } = __m["src/systems/wildfire.js"];
 const { ignite } = __m["src/systems/fire.js"];
 const { render, createCamera, clampCamera, screenToWorld } = __m["src/render/render.js"];
 const { startPinch, pinchCamera, isCompact, startZoomFor } = __m["src/ui/gestures.js"];
 // Wiring: canvas, camera, pointer and keyboard, and the bridge between the
 // simulation and the DOM HUD. No game rules live here.
+
 
 
 
@@ -14382,6 +14939,23 @@ function setOrderMode(on) {
   stage.classList.toggle('order-mode', on);
   document.getElementById('btn-order')?.classList.toggle('is-active', on);
   document.getElementById('order-hint').hidden = !on;
+}
+
+// Rebinding a unit's shortcut: the next key pressed becomes it.
+let rebindId = null;
+
+function setRebind(id) {
+  rebindId = id;
+  state.ui.rebinding = id;
+  const hint = document.getElementById('order-hint');
+  if (id) {
+    const engine = state.engines.find((e) => e.id === id);
+    hint.textContent = 'Press a key for ' + (engine?.name ?? 'this unit') + ' · Backspace clears it · Esc cancels';
+    hint.hidden = false;
+  } else {
+    hint.textContent = 'Tap the map to send the selected unit there';
+    hint.hidden = !orderMode;
+  }
 }
 
 function toggleOrderMode() {
@@ -14709,6 +15283,12 @@ function onAction(action, data = {}) {
     case 'pharmacy': commandPharmacy(state); break;
     case 'hospital': commandHospital(state); break;
     case 'dispatch': commandDispatch(state); break;
+    case 'dispatch-all': if (commandDispatchAll(state)) audio.play('radio'); break;
+    case 'rebind-key': {
+      const engine = engineForUnit(state, getSelected(state));
+      if (engine) setRebind(rebindId === engine.id ? null : engine.id);
+      break;
+    }
     case 'deploy': commandDeploy(state); break;
     case 'recall': commandRecall(state); break;
     case 'home': commandReturnHome(state); break;
@@ -14904,6 +15484,30 @@ window.addEventListener('keydown', (ev) => {
   if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
   const key = keyOf(ev);
 
+  // Waiting for a key to give a unit as its shortcut.
+  if (rebindId) {
+    ev.preventDefault();
+    if (key === 'escape') {
+      setRebind(null);
+      return;
+    }
+    const engine = state.engines.find((e) => e.id === rebindId);
+    if (key === 'backspace' || key === 'delete') {
+      if (engine) commandBindKey(state, engine.id, '');
+      setRebind(null);
+      return;
+    }
+    if (!engine || ev.repeat) return;
+    if (!isUnitKey(key)) {
+      addEvent(state, 'That key is already used by the game — pick a digit or one of Q W S Z I J L N O Y', 'warn');
+      return;
+    }
+    commandBindKey(state, engine.id, key);
+    addEvent(state, engine.name + ' is now on key ' + key.toUpperCase(), 'info');
+    setRebind(null);
+    return;
+  }
+
   if (key === 'f1' || ev.key === '?') {
     ev.preventDefault();
     toggleHelp();
@@ -14955,14 +15559,11 @@ window.addEventListener('keydown', (ev) => {
     return;
   }
 
-  if (key >= '1' && key <= '9') {
-    const engine = state.engines[Number(key) - 1];
-    if (engine) selectUnit(state, engine.id);
-    return;
-  }
+  if (isUnitKey(key) && selectUnitByKey(state, key)) return;
 
   switch (key) {
     case 'd': commandDispatch(state); break;
+    case 'a': if (commandDispatchAll(state)) audio.play('radio'); break;
     case 'e': commandDeploy(state); break;
     case 'r': commandRecall(state); break;
     case 'h': commandReturnHome(state); break;

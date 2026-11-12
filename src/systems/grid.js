@@ -85,6 +85,25 @@ export function lineClear(nav, mode, ax, ay, bx, by) {
   return false;
 }
 
+/**
+ * Like `lineClear`, but for something with a body: the line and two parallel
+ * lines `half` pixels to each side must all stay on `mode` ground. A road is only
+ * two tiles wide, so this is what stops a long vehicle cutting a corner across
+ * the pavement (and the building behind it).
+ */
+export function corridorClear(nav, mode, ax, ay, bx, by, half) {
+  if (!lineClear(nav, mode, ax, ay, bx, by)) return false;
+  if (!(half > 0)) return true;
+  const dx = bx - ax;
+  const dy = by - ay;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-6) return true;
+  const nx = (-dy / len) * half;
+  const ny = (dx / len) * half;
+  return lineClear(nav, mode, ax + nx, ay + ny, bx + nx, by + ny)
+    && lineClear(nav, mode, ax - nx, ay - ny, bx - nx, by - ny);
+}
+
 class MinHeap {
   constructor() {
     this.items = [];
@@ -235,8 +254,12 @@ export function findPath(nav, mode, from, to) {
   return null;
 }
 
-/** Drop waypoints that a straight line already clears, so units do not zigzag. */
-export function smoothPath(nav, mode, startPx, tiles) {
+/**
+ * Drop waypoints that a straight line already clears, so units do not zigzag.
+ * With `half` (a body's half-width in pixels) a shortcut is only taken if the
+ * whole body fits along it.
+ */
+export function smoothPath(nav, mode, startPx, tiles, half = 0) {
   if (!tiles.length) return [];
   const points = tiles.map((t) => tileCenter(t.x, t.y));
   const out = [];
@@ -244,7 +267,7 @@ export function smoothPath(nav, mode, startPx, tiles) {
   let i = 0;
   while (i < points.length) {
     let j = points.length - 1;
-    while (j > i && !lineClear(nav, mode, anchor.x, anchor.y, points[j].x, points[j].y)) j--;
+    while (j > i && !corridorClear(nav, mode, anchor.x, anchor.y, points[j].x, points[j].y, half)) j--;
     out.push(points[j]);
     anchor = points[j];
     i = j + 1;

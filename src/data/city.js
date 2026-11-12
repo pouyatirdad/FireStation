@@ -41,6 +41,11 @@ const BAYS = [
   { x: 59.2, y: 56.6 },
 ];
 
+// Eight more bays squeezed into the gaps between those, so a station holds
+// sixteen. They come after every original bay in `city.bays`, which keeps the
+// bay numbers in old saves valid.
+const EXTRA_BAYS = [52.6, 56.6].flatMap((y) => [51.7, 54.7, 57.7, 60.7].map((x) => ({ x, y })));
+
 const SPEC = {
   house: { floors: [1, 2], hp: [60, 85], risk: 0.9 },
   apartment: { floors: [3, 4], hp: [80, 110], risk: 0.8 },
@@ -851,10 +856,19 @@ export function createCity(seed = 7) {
     y: (b.y - APRON.y0 + apron2.y0) * TILE,
     station: 1,
   }));
+  const extra1 = EXTRA_BAYS.map((b) => ({ x: b.x * TILE, y: b.y * TILE, station: 0, extra: true }));
+  const extra2 = EXTRA_BAYS.map((b) => ({
+    x: (b.x - APRON.x0 + apron2.x0) * TILE,
+    y: (b.y - APRON.y0 + apron2.y0) * TILE,
+    station: 1,
+    extra: true,
+  }));
+  // A second row of berths, a boat's length further out on the water.
+  const extraBerths = berths.map((b) => ({ ...b, y: (SEA_Y + 5.8) * TILE, extra: true }));
   const stations = [
-    { id: 'station', name: 'Station 1', building: station, apron: { ...APRON }, bays: bays1 },
-    { id: 'station2', name: 'Station 2', building: station2, apron: apron2, bays: bays2 },
-    { id: 'dock', name: 'Harbour Dock', building: dockBuilding, apron: apronD, bays: berths, sea: true },
+    { id: 'station', name: 'Station 1', building: station, apron: { ...APRON }, bays: [...bays1, ...extra1] },
+    { id: 'station2', name: 'Station 2', building: station2, apron: apron2, bays: [...bays2, ...extra2] },
+    { id: 'dock', name: 'Harbour Dock', building: dockBuilding, apron: apronD, bays: [...berths, ...extraBerths], sea: true },
   ];
 
   return {
@@ -879,8 +893,9 @@ export function createCity(seed = 7) {
     parks,
     cars,
     lot: stationLot,
-    // Every bay of every station, Station 1's first so existing indexes hold.
-    bays: [...bays1, ...bays2, ...berths],
+    // Every bay of every station. The original twenty-four keep their numbers
+    // (Station 1, Station 2, the dock); the extra bays follow in the same order.
+    bays: [...bays1, ...bays2, ...berths, ...extra1, ...extra2, ...extraBerths],
     stations,
     districts,
     pharmacies: buildings.filter((b) => b.type === 'pharmacy'),
