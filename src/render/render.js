@@ -9,6 +9,7 @@ import { buildingRect } from '../systems/fire.js';
 import {
   V_ROADS, H_ROADS, APRON, SEA_Y, RIVER_HALF_WIDTH, riverCentre,
 } from '../data/city.js';
+import { pointAt, trainsAt } from '../data/transit.js';
 
 // What the ground of each kind of block looks like, painted over the pavement:
 // lawns round the houses, dark yards in industry, pale paving downtown.
@@ -202,6 +203,7 @@ export function render(ctx, state, cam, view, opts = {}) {
   drawBuildingShadows(ctx, state, bounds);
   drawHoses(ctx, state, now);
   drawEntities(ctx, state, bounds, now, z);
+  drawRail(ctx, state, bounds, z);
   drawWildfires(ctx, state, now, z);
   if (currentDark > 0.12) {
     ctx.globalCompositeOperation = 'lighter';
@@ -638,6 +640,7 @@ function drawGround(ctx, state, b, z) {
   drawTracks(ctx, state, b, z);
 
   drawAirfields(ctx, city, b, z);
+  drawMetro(ctx, state, b, z);
 
   // The station apron and its parking bays.
   for (const st of city.stations ?? [{ apron: APRON }]) {
@@ -750,6 +753,144 @@ let seaGradient = null;
 
 // Bridges, drawn after the roads: concrete parapets along both sides of the
 // deck and the deck's shadow on the water downstream.
+// ------------------------------------------------------- rail and metro ---
+
+const lineInView = (line, b) => {
+  let x0 = Infinity; let y0 = Infinity; let x1 = -Infinity; let y1 = -Infinity;
+  for (const p of line.pts) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); }
+  return !(x1 + 3 < b.x0 || x0 - 3 > b.x1 || y1 + 3 < b.y0 || y0 - 3 > b.y1);
+};
+
+const tracePolyline = (ctx, line) => {
+  ctx.beginPath();
+  line.pts.forEach((p, i) => (i === 0 ? ctx.moveTo((p.x + 0.5) * TILE, (p.y + 0.5) * TILE) : ctx.lineTo((p.x + 0.5) * TILE, (p.y + 0.5) * TILE)));
+};
+
+/** One rounded car of a train, centred on (x, y) tiles and pointing along `angle`. */
+function drawTrainCar(ctx, car, color, length, width, head) {
+  ctx.save();
+  ctx.translate(car.x * TILE, car.y * TILE);
+  ctx.rotate(car.angle);
+  const l = length * TILE;
+  const w = width * TILE;
+  ctx.fillStyle = head ? '#e9edf0' : '#dfe4e8';
+  rr(ctx, -l / 2, -w / 2, l, w, 4);
+  ctx.fill();
+  ctx.fillStyle = color;
+  ctx.fillRect(-l / 2 + 3, -w / 2 + 3, l - 6, 3);
+  ctx.fillStyle = 'rgba(30,40,55,0.8)';
+  ctx.fillRect(-l / 2 + 4, -1, l - 8, 2);
+  if (head) {
+    ctx.fillStyle = '#ffe9a8';
+    ctx.fillRect(l / 2 - 3, -w / 2 + 2, 2, 3);
+    ctx.fillRect(l / 2 - 3, w / 2 - 5, 2, 3);
+  }
+  ctx.restore();
+}
+
+/** The metro: a tunnel under the street, seen as a faint dashed line with its trains running through it. */
+function drawMetro(ctx, state, b, z) {
+  const lines = (state.city.transit?.lines ?? []).filter((l) => l.kind === 'metro');
+  if (lines.length === 0 || z < 0.2) return;
+  ctx.save();
+  ctx.lineJoin = 'round';
+  for (const line of lines) {
+    if (!lineInView(line, b)) continue;
+    ctx.strokeStyle = line.color;
+    ctx.globalAlpha = 0.4;
+    ctx.lineWidth = 5;
+    ctx.setLineDash([16, 12]);
+    tracePolyline(ctx, line);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+    for (const stop of line.stops) {
+      if (stop.x < b.x0 - 2 || stop.x > b.x1 + 2 || stop.y < b.y0 - 2 || stop.y > b.y1 + 2) continue;
+      ctx.fillStyle = '#f4f1ea';
+      ctx.strokeStyle = line.color;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc((stop.x + 0.5) * TILE, (stop.y + 0.5) * TILE, 9, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+    if (z < 0.3) continue;
+    // Trains under the pavement: a little translucent.
+    ctx.globalAlpha = 0.65;
+    for (const train of trainsAt(line, state.time)) {
+      train.cars.forEach((car, i) => drawTrainCar(ctx, car, line.color, 1.35, 0.5, i === 0));
+    }
+    ctx.globalAlpha = 1;
+  }
+  ctx.restore();
+}
+
+/** The railway: a viaduct over the street, on pillars, with the trains on top. */
+function drawRail(ctx, state, b, z) {
+  const lines = (state.city.transit?.lines ?? []).filter((l) => l.kind === 'rail');
+  if (lines.length === 0) return;
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'butt';
+  for (const line of lines) {
+    if (!lineInView(line, b)) continue;
+    // Its shadow on the street below.
+    ctx.strokeStyle = 'rgba(0,0,0,0.28)';
+    ctx.lineWidth = 26;
+    ctx.save();
+    ctx.translate(7, 12);
+    tracePolyline(ctx, line);
+    ctx.stroke();
+    ctx.restore();
+    // Pillars, every few tiles.
+    if (z >= 0.3) {
+      ctx.fillStyle = '#4c5259';
+      for (let d = 0; d <= line.length; d += 5) {
+        const p = pointAt(line, d);
+        if (p.x < b.x0 - 1 || p.x > b.x1 + 1 || p.y < b.y0 - 1 || p.y > b.y1 + 1) continue;
+        ctx.fillRect(p.x * TILE - 4, p.y * TILE - 4 + 6, 8, 8);
+      }
+    }
+    // The deck, lifted a little off the ground.
+    ctx.save();
+    ctx.translate(0, -8);
+    ctx.strokeStyle = '#4a4f56';
+    ctx.lineWidth = 26;
+    tracePolyline(ctx, line);
+    ctx.stroke();
+    ctx.strokeStyle = '#8b9199';
+    ctx.lineWidth = 22;
+    tracePolyline(ctx, line);
+    ctx.stroke();
+    // Two rails with the ballast between.
+    ctx.strokeStyle = '#cfd3d8';
+    ctx.lineWidth = 12;
+    tracePolyline(ctx, line);
+    ctx.stroke();
+    ctx.strokeStyle = '#5b5f66';
+    ctx.lineWidth = 8;
+    tracePolyline(ctx, line);
+    ctx.stroke();
+    // Stations: a platform canopy over the track.
+    for (const stop of line.stops) {
+      if (stop.x < b.x0 - 3 || stop.x > b.x1 + 3 || stop.y < b.y0 - 3 || stop.y > b.y1 + 3) continue;
+      ctx.fillStyle = 'rgba(150,190,215,0.85)';
+      rr(ctx, (stop.x - 1.6) * TILE + 16, (stop.y - 1.6) * TILE + 16, 3.2 * TILE, 3.2 * TILE, 6);
+      ctx.fill();
+      ctx.strokeStyle = '#2f6fa8';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+    }
+    if (z >= 0.2) {
+      for (const train of trainsAt(line, state.time)) {
+        train.cars.forEach((car, i) => drawTrainCar(ctx, car, line.color, 1.6, 0.62, i === 0));
+      }
+    }
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
 // ----------------------------------------------------------- airfields ---
 
 const inView = (r, b) => !(r.x1 < b.x0 - 1 || r.x0 > b.x1 + 1 || r.y1 < b.y0 - 1 || r.y0 > b.y1 + 1);
@@ -3946,6 +4087,15 @@ function miniStatic(state, mw, mh) {
   for (const r of runsInView(city, 'h', H_ROADS, 0, city.w)) {
     g.fillRect(r.a * TILE * sx, r.line * TILE * sy, (r.b - r.a + 1) * TILE * sx, Math.max(1, 2 * TILE * sy));
   }
+  g.lineWidth = 1.4;
+  for (const line of city.transit?.lines ?? []) {
+    g.strokeStyle = line.kind === 'rail' ? '#d8d2c2' : line.color;
+    g.globalAlpha = line.kind === 'rail' ? 0.95 : 0.8;
+    g.beginPath();
+    line.pts.forEach((p, i) => (i === 0 ? g.moveTo((p.x + 0.5) * TILE * sx, (p.y + 0.5) * TILE * sy) : g.lineTo((p.x + 0.5) * TILE * sx, (p.y + 0.5) * TILE * sy)));
+    g.stroke();
+  }
+  g.globalAlpha = 1;
   g.fillStyle = '#3d4f3a';
   for (const f of city.airfields ?? []) g.fillRect(f.x0 * TILE * sx, f.y0 * TILE * sy, (f.x1 - f.x0 + 1) * TILE * sx, (f.y1 - f.y0 + 1) * TILE * sy);
   g.fillStyle = '#b9bec3';

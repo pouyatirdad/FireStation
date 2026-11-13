@@ -1,7 +1,7 @@
 # Fire Station — Harbor City
 
 A top-down emergency-services management game for Windows, in the spirit of **Emergency 4**: a
-520×384 city (ten times the area of the first version) with forests, pharmacies, two airports, a railway, a metro and a waterfront,
+520×384 city (ten times the area of the first version) with forests, pharmacies, an airport, a railway, a metro and a waterfront,
 a fleet of thirteen kinds of apparatus you buy and sell — engines, ladders, tankers, rescue units,
 paramedic cars, ambulances and ambulance buses, rescue boats, fireboats, a helicopter, an air tanker and
 **ambulances** — small calls and major incidents, injured civilians, forest fires, a loans-and-insurance economy,
@@ -267,14 +267,17 @@ simulation knows about the DOM, and nothing in the renderer changes the simulati
   banks, parks, a big pine forest and several woods, pharmacies in a quarter of the blocks, and the
   original Station 1 quarter in the north-west where it always was. The sea is the southern shore and
   the river runs south through the east of the city under a bridge at every street.
-- **Airports:** the *Harbor City International Airport* in the east and the *Northgate Regional Airfield*
-  each take a box of blocks (the streets inside are taken out): a runway, a taxiway, an apron with
+- **The airport:** *Harbor City International Airport* in the east takes a box of blocks (the streets inside are taken out): a runway, a taxiway, an apron with
   parked airliners, a glass-roofed **terminal**, **hangars**, a **control tower**, a **fuel farm** and an
   airport fire station of their own. The paved airside counts as road, so engines can drive onto it.
 - **Railway and metro:** big **railway stations** (vaulted roofs over the tracks) and **metro**
-  entrances (red roundels) stand in the business districts, along with a good many **malls**.
+  entrances (red roundels) stand in the business districts, along with a good many **malls**. The
+  stations are joined by real lines (`src/data/transit.js`): the *Harbor Line* railway is an elevated
+  viaduct over the streets with passenger trains running end to end and back, and the *Red* and *Blue*
+  metro lines run in tunnels under them (dashed, with the trains showing through the pavement). Both
+  are on the minimap. Where a train is depends only on the game clock.
 - **Fire stations across the map:** Station 1 is yours; Station 2, the Harbour Dock, six regional
-  stations (`$12,000`) and the two airport stations (`$18,000`) are for sale in Headquarters. Each has
+  stations (`$12,000`) and the airport station (`$18,000`) are for sale in Headquarters. Each has
   sixteen bays and a base hospital, and calls come from the district round every station you own.
 - **Long drives:** a trip of more than about a hundred tiles is planned along the street lattice first
   (a few thousand junctions) and filled in leg by leg, so an engine crossing the whole map costs a few
@@ -363,7 +366,7 @@ needs editing.
 ?wildfire       start a forest fire (the nearest wood to Station 1)
 ?scene=cladding play one incident scene by id (see src/systems/scenes.js)
 ?allstations    open every station
-?goto=airport1  move the camera: airport1, airport2, station3, station4 ...
+?goto=airport1  move the camera: airport1, rail, metro, station3, station4 ...
 ?zoom=0.8       set the opening zoom
 ?select=b7      select a building by id
 ?help           open the controls overlay

@@ -93,7 +93,7 @@ test('the incident generator draws on the scenes', () => {
     update(state, 1);
     for (const b of state.buildings) {
       if (b.incidentLabel) labels.add(b.incidentLabel);
-      if (b.state === 'burning' && t % 20 === 0) b.state = 'out'; // keep the map from filling with fires
+      if (b.state === 'burning' && t % 20 === 0) { b.state = 'out'; b.trapped = 0; } // keep the map from filling with fires
     }
     if (labels.size >= 12) break;
   }

@@ -14,8 +14,8 @@ test('the map keeps its 520x384 size', () => {
   assert.equal(city.road.length, CITY_W * CITY_H);
 });
 
-test('there are airports with a runway, a terminal, hangars, a control tower and a fuel farm', () => {
-  assert.equal(city.airfields.length, 2);
+test('there is one airport, with a runway, a terminal, hangars and a control tower', () => {
+  assert.equal(city.airfields.length, 1);
   for (const f of city.airfields) {
     const r = f.runway;
     assert.ok(r.x1 - r.x0 >= 60, `${f.name} has a short runway`);

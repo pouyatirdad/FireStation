@@ -9,6 +9,7 @@
 
 import { TILE } from '../core/config.js';
 import { Rng, clamp } from '../core/math.js';
+import { buildTransit } from './transit.js';
 
 export const CITY_W = 520;
 export const CITY_NAME = 'Harbor City';
@@ -330,11 +331,10 @@ const DOWNTOWNS = [
 const BIG_FOREST_BOXES = [
   { col0: 13, col1: 17, row0: 10, row1: 14 }, // SOUTHEAST FOREST: east of the river
 ];
-// The airports: each is a box of blocks merged into one (the streets inside are
-// taken out). Both are in the east, beyond the river.
+// The airport: a box of blocks merged into one (the streets inside are taken
+// out), in the east beyond the river.
 const AIRPORT_BOXES = [
   { col0: 13, col1: 16, row0: 0, row1: 2, name: 'Harbor City International Airport', short: 'International' },
-  { col0: 13, col1: 16, row0: 5, row1: 7, name: 'Northgate Regional Airfield', short: 'Regional' },
 ];
 const inAirport = (col, row, pad = 0) => AIRPORT_BOXES.some((b) => col >= b.col0 - pad && col <= b.col1 + pad && row >= b.row0 - pad && row <= b.row1 + pad);
 
@@ -1218,7 +1218,7 @@ function generateCity(seed = 7) {
         const r = TYPE_RULES[type];
         const fit = Math.min(1, (Math.min(lw, r.maxW) * Math.min(lh, r.maxH)) / Math.max(12, big));
         // The quay is where the fuel is kept: the few lots that reach it favour tank farms.
-        return [type, weight * (0.3 + fit) * (type === 'tankfarm' ? 4 : 1)];
+        return [type, weight * (0.3 + fit) * (type === 'tankfarm' ? 10 : 1)];
       });
       const type = weightedPick(rng, options);
       if (type === 'pharmacy') wantsPharmacy = false;
@@ -1611,6 +1611,7 @@ function generateCity(seed = 7) {
 
   ensureAccess({ w, h, road, apron, blocked, water, woods, buildings });
   rebalanceSizes(buildings);
+  const transit = buildTransit({ roadRuns, buildings });
 
   const bays1 = BAYS.map((b) => ({ x: b.x * TILE, y: b.y * TILE, station: 0 }));
   const bays2 = BAYS.map((b) => ({
@@ -1666,6 +1667,7 @@ function generateCity(seed = 7) {
     blocks: blocks.map((b) => ({ col: b.col, row: b.row, x0: b.x0, y0: b.y0, x1: b.x1, y1: b.y1, kind: b.kind, zone: ZONE_OF[b.kind] ?? null, merged: Boolean(b.merged) })),
     hospitals: [hospital1, hospital2, ...regional.map((r) => r.hospital)],
     airfields,
+    transit,
     spawn: { x: BAYS[0].x * TILE, y: BAYS[0].y * TILE, angle: Math.PI / 2 },
     startHour: START_HOUR,
   };

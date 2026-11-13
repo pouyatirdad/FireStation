@@ -37,7 +37,7 @@ export function buildNav(city) {
 // The avenues and streets form a lattice. Long drives are planned on it first
 // (a few thousand junctions), then each leg between two junctions is searched
 // tile by tile. That keeps a trip across the whole map to a few milliseconds.
-function buildLattice(city) {
+export function buildLattice(city) {
   const runs = city.roadRuns;
   if (!runs?.v?.length || !runs?.h?.length) return null;
   const vs = runs.v.map((r) => r.line);
@@ -257,7 +257,7 @@ function junctionsAround(lat, x, y) {
  * Plan a long drive on the avenue/street lattice: the junctions to pass through,
  * or null if the lattice offers no route (a street cut by a wreck or by woods).
  */
-function latticeRoute(nav, from, to) {
+export function latticeRoute(nav, from, to) {
   const lat = nav.lattice;
   if (!lat) return null;
   const node = (vi, hi) => hi * lat.nv + vi;
