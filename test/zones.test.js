@@ -1,3 +1,4 @@
+import { CONFIG } from '../src/core/config.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -117,8 +118,8 @@ test('the very large building types exist, each in its own district', () => {
   assert.ok(towers.length >= 10 && towers.every((b) => b.zone === 'company' && b.floors >= 12), 'towers');
   assert.ok(of('mall').length >= 2 && of('mall').every((b) => b.w >= 14 && b.h >= 10), 'malls');
   assert.ok(of('factory').length >= 5 && of('factory').every((b) => b.zone === 'industrial'), 'factories');
-  const farms = of('tankfarm').filter((b) => !/Fuel Farm/.test(b.name)); // the airports keep fuel of their own
-  assert.ok(farms.length >= 3 && farms.every((b) => b.zone === 'industrial' && b.waterfront && b.hazmat), 'tank farms by the sea');
+  const farms = of('tankfarm').filter((b) => !/(International|Regional) Fuel Farm/.test(b.name)); // the airports keep fuel of their own
+  assert.ok(farms.length >= 2 && farms.every((b) => b.zone === 'industrial' && b.waterfront && b.hazmat), 'tank farms by the sea');
   // Towers are the tallest things in the city.
   const tallest = Math.max(...city.buildings.map((b) => b.floors));
   assert.ok(tallest >= 20);
@@ -153,6 +154,18 @@ test('blocks differ in size and buildings differ in size', () => {
 
 /** Run the incident generator over and over and see which stories come up. */
 function stories({ big = false, runs = 500, seed = 7 } = {}) {
+  // The basic calls only: the scenes have their own tests.
+  const saved = [CONFIG.incidents.sceneCall, CONFIG.incidents.sceneBigCall];
+  CONFIG.incidents.sceneCall = 0;
+  CONFIG.incidents.sceneBigCall = 0;
+  try {
+    return storiesOf({ big, runs, seed });
+  } finally {
+    [CONFIG.incidents.sceneCall, CONFIG.incidents.sceneBigCall] = saved;
+  }
+}
+
+function storiesOf({ big, runs, seed }) {
   const state = createGame(seed);
   startShift(state);
   state.ownedStations = [true, true, true];

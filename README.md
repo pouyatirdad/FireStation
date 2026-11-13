@@ -1,7 +1,7 @@
 # Fire Station — Harbor City
 
 A top-down emergency-services management game for Windows, in the spirit of **Emergency 4**: a
-1660×1176 city (ten times the area of the 520×384 city before it) with forests, pharmacies, two airports, a railway, a metro and a waterfront,
+520×384 city (ten times the area of the first version) with forests, pharmacies, two airports, a railway, a metro and a waterfront,
 a fleet of thirteen kinds of apparatus you buy and sell — engines, ladders, tankers, rescue units,
 paramedic cars, ambulances and ambulance buses, rescue boats, fireboats, a helicopter, an air tanker and
 **ambulances** — small calls and major incidents, injured civilians, forest fires, a loans-and-insurance economy,
@@ -261,20 +261,19 @@ Hydrant, pharmacy, hospital and equipment actions are buttons on the selection c
 The game is a fixed 60 Hz simulation (`src/core/loop.js`) drawn to one canvas. Nothing in the
 simulation knows about the DOM, and nothing in the renderer changes the simulation.
 
-- **The city** (`src/data/city.js`) is generated from a seed: a 1660×1176 tile grid of blocks between 55
-  avenues and 48 streets (not evenly spaced: the gaps are drawn from a seeded stream between fixed
-  anchors), some thirty commercial centres, housing, shopping streets, industry on the quay, the river
-  banks and in parks on the edge of town, parks, twenty-four woods and eight big pine forests, pharmacies
-  in a quarter of the blocks, and the original Station 1 quarter in the north-west where it always was.
-  The sea is the whole southern shore and the river runs the full height of the map under a bridge at
-  every street.
+- **The city** (`src/data/city.js`) is generated from a seed: a 520×384 tile grid of blocks between 17
+  avenues and 15 streets (not evenly spaced: the gaps are drawn from a seeded stream between fixed
+  anchors), seven commercial centres, housing, shopping streets, industry on the quay and the river
+  banks, parks, a big pine forest and several woods, pharmacies in a quarter of the blocks, and the
+  original Station 1 quarter in the north-west where it always was. The sea is the southern shore and
+  the river runs south through the east of the city under a bridge at every street.
 - **Airports:** the *Harbor City International Airport* in the east and the *Northgate Regional Airfield*
   each take a box of blocks (the streets inside are taken out): a runway, a taxiway, an apron with
   parked airliners, a glass-roofed **terminal**, **hangars**, a **control tower**, a **fuel farm** and an
   airport fire station of their own. The paved airside counts as road, so engines can drive onto it.
 - **Railway and metro:** big **railway stations** (vaulted roofs over the tracks) and **metro**
   entrances (red roundels) stand in the business districts, along with a good many **malls**.
-- **Fire stations across the map:** Station 1 is yours; Station 2, the Harbour Dock, eleven regional
+- **Fire stations across the map:** Station 1 is yours; Station 2, the Harbour Dock, six regional
   stations (`$12,000`) and the two airport stations (`$18,000`) are for sale in Headquarters. Each has
   sixteen bays and a base hospital, and calls come from the district round every station you own.
 - **Long drives:** a trip of more than about a hundred tiles is planned along the street lattice first

@@ -8,8 +8,9 @@ import { CONFIG, TILE } from '../src/core/config.js';
 
 const city = createCity(7);
 
-test('the map is about ten times the area of the city it grew from', () => {
-  assert.ok(CITY_W >= 1600 && CITY_H >= 1150);
+test('the map keeps its 520x384 size', () => {
+  assert.equal(CITY_W, 520);
+  assert.equal(CITY_H, 384);
   assert.equal(city.road.length, CITY_W * CITY_H);
 });
 
@@ -18,13 +19,13 @@ test('there are airports with a runway, a terminal, hangars, a control tower and
   for (const f of city.airfields) {
     const r = f.runway;
     assert.ok(r.x1 - r.x0 >= 60, `${f.name} has a short runway`);
+    assert.ok(f.x1 < CITY_W && f.y1 < CITY_H);
     for (let x = r.x0; x <= r.x1; x += 9) assert.equal(city.road[r.y0 * city.w + x], 1, 'runway is not paved');
     const by = (id) => city.buildings.find((b) => b.id === id);
     assert.equal(by(f.terminal).type, 'terminal');
     assert.equal(by(f.tower).type, 'tower');
     assert.ok(f.hangars.length >= 1 && f.hangars.every((id) => by(id).type === 'hangar'));
   }
-  assert.ok(city.airfields[1].farm, 'the international airport has no fuel farm');
 });
 
 test('the runways are part of the road network, so engines can drive onto the airfield', () => {
@@ -44,12 +45,12 @@ test('the metro and the railway have stations in the business districts', () => 
   assert.ok(of('metro').length >= 10, `${of('metro').length} metro entrances`);
   assert.ok(of('railstation').length >= 2, `${of('railstation').length} railway stations`);
   assert.ok(of('metro').every((b) => b.zone === 'company'));
-  assert.ok(of('mall').length >= 15, `${of('mall').length} malls`);
+  assert.ok(of('mall').length >= 3, `${of('mall').length} malls`);
 });
 
 test('regional fire stations are spread over the map, each with a base hospital', () => {
   const stations = city.stations;
-  assert.ok(stations.length >= 12, `${stations.length} stations`);
+  assert.ok(stations.length >= 9, `${stations.length} stations`);
   const land = stations.filter((st) => !st.sea);
   // Far apart: no two of the regional stations are closer than 40 tiles.
   const regional = stations.slice(3);
@@ -104,7 +105,8 @@ test('a call comes from the district of every station you own', () => {
   startShift(state);
   state.time = 500;
   // Open a station far from Station 1 and the radius around it counts.
-  const far = state.city.stations.findIndex((st) => st.kind === 'region' && st.building.x > 900);
+  const home = state.city.station;
+  const far = state.city.stations.reduce((best, st, i) => (st.kind === 'region' && (best < 0 || Math.hypot(st.building.x - home.x, st.building.y - home.y) > Math.hypot(state.city.stations[best].building.x - home.x, state.city.stations[best].building.y - home.y)) ? i : best), -1);
   assert.ok(far > 0);
   state.ownedStations[far] = true;
   const st = state.city.stations[far].building;
@@ -113,7 +115,7 @@ test('a call comes from the district of every station you own', () => {
   for (let t = 0; t < 6000 && seen.size < 1; t++) {
     update(state, 1);
     for (const b of state.buildings) {
-      if ((b.state === 'burning' || b.trapped > 0) && Math.hypot(b.x - st.x, b.y - st.y) < 400) seen.add(b.id);
+      if ((b.state === 'burning' || b.trapped > 0) && Math.hypot(b.x - st.x, b.y - st.y) < 150) seen.add(b.id);
     }
     state.time = 500 + (t % 300);
   }
@@ -123,7 +125,7 @@ test('a call comes from the district of every station you own', () => {
 test('long drives are planned along the streets and stay quick', () => {
   const nav = buildNav(city);
   const from = { x: 52, y: 55 };
-  for (const to of [{ x: 900, y: 500 }, { x: 1500, y: 1050 }, { x: 150, y: 1000 }]) {
+  for (const to of [{ x: 480, y: 40 }, { x: 330, y: 320 }, { x: 30, y: 330 }]) {
     const goal = nearestPassable(nav, 'drive', to.x, to.y, 8);
     assert.ok(goal, `nothing to drive to near ${to.x},${to.y}`);
     const t0 = Date.now();

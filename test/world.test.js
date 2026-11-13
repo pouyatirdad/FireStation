@@ -10,21 +10,21 @@ import { CONFIG } from '../src/core/config.js';
 
 const city = createCity(7);
 
-test('the map is ten times the area of the 520x384 city it grew from', () => {
-  const ratio = (CITY_W * CITY_H) / (520 * 384);
-  assert.ok(ratio >= 9.5 && ratio < 11, `area ratio ${ratio.toFixed(2)}`);
+test('the map is ten times the area of the original 160x120 town', () => {
+  const ratio = (CITY_W * CITY_H) / (160 * 120);
+  assert.ok(ratio >= 10 && ratio < 11, `area ratio ${ratio.toFixed(2)}`);
   assert.equal(city.w, CITY_W);
   assert.equal(city.h, CITY_H);
-  assert.equal(V_ROADS.length, 55);
-  assert.equal(H_ROADS.length, 48);
+  assert.equal(V_ROADS.length, 17);
+  assert.equal(H_ROADS.length, 15);
 });
 
 test('the big city has the buildings, hydrants, forests and pharmacies to fill it', () => {
-  assert.ok(city.buildings.length >= 1000, `${city.buildings.length} buildings`);
-  assert.ok(city.hydrants.length >= 400, `${city.hydrants.length} hydrants`);
+  assert.ok(city.buildings.length >= 900, `${city.buildings.length} buildings`);
+  assert.ok(city.hydrants.length >= 350, `${city.hydrants.length} hydrants`);
   assert.ok(city.forestTiles.length >= 8000, `${city.forestTiles.length} forest tiles`);
   assert.ok(city.forestAreas.length >= 8, `${city.forestAreas.length} forest blocks`);
-  assert.ok(city.pharmacies.length >= 40, `${city.pharmacies.length} pharmacies`);
+  assert.ok(city.pharmacies.length >= 25, `${city.pharmacies.length} pharmacies`);
   assert.ok(city.pharmacies.every((b) => b.type === 'pharmacy'));
   assert.ok(city.districts.length >= 12);
 });

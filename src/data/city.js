@@ -1,7 +1,6 @@
-// Harbor City: a 1660×1176 tile grid (about a hundred times the area of the
-// original 160×120 town, ten times the 520×384 city it grew from) of districts
-// between 55 avenues and 48 streets, with a dozen forests, parks and a
-// waterfront on the southern shore. Generated from a seed, so every shift is the
+// Harbor City: a 520×384 tile grid (about ten times the area of the original
+// 160×120 town) of districts between 17 avenues and 15 streets, with several
+// forests, parks, two airports, a railway, a metro and a waterfront. Generated from a seed, so every shift is the
 // same city and the tests can point at a named building. The original town sits
 // in the north-west corner with Station 1 where it always was.
 //
@@ -11,7 +10,7 @@
 import { TILE } from '../core/config.js';
 import { Rng, clamp } from '../core/math.js';
 
-export const CITY_W = 1660;
+export const CITY_W = 520;
 export const CITY_NAME = 'Harbor City';
 
 // Avenues run north–south, streets east–west. Each is two tiles wide. They are
@@ -53,10 +52,8 @@ function spacedLines(count, start, step, pins, min, max, seed) {
   return lines;
 }
 
-// The first 17 avenues and 15 streets are the original city, pinned where they
-// always were; the rest carry on east and south with random gaps.
-export const V_ROADS = spacedLines(55, 12, 30, [0, 1, 2, 7, 8, 9, 11, 12, 16, 54], 22, 42, 4711);
-export const H_ROADS = spacedLines(48, 12, 24, [0, 1, 2, 5, 6, 13, 14, 47], 20, 34, 1993);
+export const V_ROADS = spacedLines(17, 12, 30, [0, 1, 2, 7, 8, 9, 11, 12, 16], 22, 42, 4711);
+export const H_ROADS = spacedLines(15, 12, 24, [0, 1, 2, 5, 6, 13, 14], 20, 34, 1993);
 
 // The sea fills everything south of the last street (the harbour quay). A river
 // meanders down through the east of the city inside one column of blocks, so it
@@ -147,7 +144,7 @@ const KIND_TYPES = {
   villa: [['villa', 8], ['house', 0.8], ['school', 0.15], ['apartment', 0.15]],
   suburb: [['house', 8], ['apartment', 1.6], ['school', 0.12], ['shop', 0.3]],
   flats: [['apartment', 5], ['house', 1.5], ['school', 0.4], ['shop', 0.4]],
-  downtown: [['office', 3.2], ['tower', 3], ['hotel', 1.8], ['mall', 4], ['apartment', 0.7], ['shop', 0.6], ['metro', 1.6], ['railstation', 1.4]],
+  downtown: [['office', 3.2], ['tower', 3], ['hotel', 1.8], ['mall', 7], ['apartment', 0.7], ['shop', 0.6], ['metro', 3.5], ['railstation', 9]],
   industry: [['warehouse', 4], ['factory', 3.5], ['tankfarm', 1.6], ['office', 0.4]],
   market: [['shop', 4], ['apartment', 2.6], ['house', 0.6], ['hotel', 0.25], ['mall', 0.5]],
 };
@@ -329,60 +326,25 @@ const DOWNTOWNS = [
   { col: 7, row: 14, name: 'SOUTH BANK' },
 ];
 
-const MORE_DOWNTOWN_NAMES = [
-  'AIRPORT CITY', 'CENTRAL STATION', 'CASTLE HILL', 'WESTGATE', 'LAKESIDE', 'BRIDGEPORT', 'MARKET CROSS', 'PARKSIDE',
-  'NEW TOWN', 'ROYAL MILE', 'TECH QUARTER', 'KINGS CROSS', 'ST. MARY', 'FAIRWAY', 'HIGHBURY', 'STONEBRIDGE',
-  'OAKLANDS', 'PORTSMOUTH', 'THE EXCHANGE', 'MILL ROW', 'SUNDERLAND', 'CRESCENT', 'RIVERGATE', 'VICTORIA',
-  'ALBION', 'ELM CROSS', 'ASTORIA', 'GRAND CENTRAL', 'NORTH HARBOR', 'COLLEGE GREEN', 'SPRINGFIELD', 'LINCOLN PARK',
-  'MONTROSE', 'ARDEN', 'BELMONT', 'CARLTON', 'DEVONPORT', 'EASTBURY', 'FOXHALL', 'GLENMORE',
-];
-
-// Big pine forests (blocks): the original one in the south-east of the old city,
-// and a few more in the new country. Each is one named zone.
+// The big pine forest (blocks): in the south-east, east of the river.
 const BIG_FOREST_BOXES = [
   { col0: 13, col1: 17, row0: 10, row1: 14 }, // SOUTHEAST FOREST: east of the river
-  { col0: 27, col1: 33, row0: 3, row1: 8 },
-  { col0: 40, col1: 46, row0: 15, row1: 21 },
-  { col0: 21, col1: 26, row0: 26, row1: 32 },
-  { col0: 3, col1: 9, row0: 34, row1: 40 },
-  { col0: 36, col1: 42, row0: 32, row1: 38 },
-  { col0: 47, col1: 53, row0: 4, row1: 9 },
-  { col0: 49, col1: 54, row0: 33, row1: 39 },
 ];
 // The airports: each is a box of blocks merged into one (the streets inside are
-// taken out). The first is the international airport in the east.
+// taken out). Both are in the east, beyond the river.
 const AIRPORT_BOXES = [
-  { col0: 44, col1: 48, row0: 23, row1: 25, name: 'Harbor City International Airport', short: 'International' },
-  { col0: 16, col1: 19, row0: 20, row1: 22, name: 'Northgate Regional Airfield', short: 'Regional' },
+  { col0: 13, col1: 16, row0: 0, row1: 2, name: 'Harbor City International Airport', short: 'International' },
+  { col0: 13, col1: 16, row0: 5, row1: 7, name: 'Northgate Regional Airfield', short: 'Regional' },
 ];
 const inAirport = (col, row, pad = 0) => AIRPORT_BOXES.some((b) => col >= b.col0 - pad && col <= b.col1 + pad && row >= b.row0 - pad && row <= b.row1 + pad);
 
 // Where the regional fire stations are (as block coordinates): the nearest block
 // big enough for a station, its apron and a hospital is used.
 const BASE_TARGETS = [
-  [22, 3], [36, 6], [50, 3], [22, 13], [34, 14], [47, 12], [10, 24], [28, 24], [37, 28], [14, 34], [30, 38], [46, 40],
+  [1, 7], [4, 10], [8, 2], [10, 9], [5, 13], [15, 9],
 ];
 
 const inBigForest = (col, row, pad = 0) => BIG_FOREST_BOXES.some((b) => col >= b.col0 - pad && col <= b.col1 + pad && row >= b.row0 - pad && row <= b.row1 + pad);
-
-// More commercial centres across the new country, on a loose grid, clear of the
-// river, the big forests and each other.
-{
-  const r = new Rng(8675);
-  let n = 0;
-  for (let row = 4; row <= 44; row += 7) {
-    for (let col = 3; col <= 51; col += 8) {
-      const c = col + r.int(-2, 2);
-      const rw = row + r.int(-2, 2);
-      if (c <= 17 && rw <= 15) continue; // the original city
-      if (c > 53 || rw > 44) continue;
-      if (c >= 10 && c <= 14) continue; // the river banks
-      if (inBigForest(c, rw, 1) || inAirport(c, rw, 1)) continue;
-      if (DOWNTOWNS.some((d) => Math.max(Math.abs(d.col - c), Math.abs(d.row - rw)) < 4)) continue;
-      DOWNTOWNS.push({ col: c, row: rw, name: MORE_DOWNTOWN_NAMES[n++ % MORE_DOWNTOWN_NAMES.length] });
-    }
-  }
-}
 
 const FOREST_NAMES = [
   'NORTH WOODS', 'PINE RIDGE', 'GREEN HOLLOW', 'EASTWOOD', 'BIRCH FOREST', 'OLD GROWTH', 'FERN VALLEY', 'MOSSY DELL',
@@ -535,9 +497,9 @@ function buildBlocks(seed = 7) {
     }
   });
   // More woods in the outskirts, each two blocks by two, clear of the old town.
-  for (let zone = 1, tries = 0; zone < FIRST_BIG_ZONE && tries < 8000; tries++) {
+  for (let zone = 1, tries = 0; zone < 7 && tries < 400; tries++) {
     const col = rng.int(0, xs.length - 2);
-    const row = rng.int(0, lastRow - 5); // never on the industrial waterfront
+    const row = rng.int(1, lastRow - 5); // never on the industrial waterfront, nor the thin top row
     if (col < 6 && row < 6) continue; // the original quarter and its own woods
     const cells = [[col, row], [col + 1, row], [col, row + 1], [col + 1, row + 1]];
     if (cells.some(([c, r]) => forestBlocks.has(`${c},${r}`))) continue;
@@ -1563,7 +1525,8 @@ function generateCity(seed = 7) {
     const index = 3 + n;
     const ox = rq.apronX0 - APRON.x0;
     const oy = rq.apronY1 - APRON.y1;
-    const name = rq.name ?? `Station ${index} · ${rq.district}`;
+    const seen = requests.slice(0, n).filter((q) => q.district === rq.district).length;
+    const name = rq.name ?? `Station ${index} · ${rq.district}${seen ? [' North', ' East', ' South', ' West'][seen - 1] ?? ` ${seen + 1}` : ''}`;
     const baseStation = addBuilding(STATION.x + ox, STATION.y + oy, STATION.w, STATION.h, 'station', { id: `base${index}`, name, floors: 2 });
     baseStation.stationIndex = index;
     const baseHospital = addBuilding(63 + ox, 51 + oy, 7, 8, 'hospital', { name: rq.hospital ?? `${rq.district} Base Hospital`, floors: 3 });
