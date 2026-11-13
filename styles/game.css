@@ -1266,8 +1266,11 @@ button { font-family: inherit; }
   font-size: 12px;
 }
 .station__expand div { display: flex; flex-direction: column; gap: 2px; }
+.station__more { display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow-y: auto; }
 .station__expand span { color: var(--muted); font-size: 11px; }
-.station__chooser span { color: var(--muted); margin-right: auto; }
+.station__chooser { flex-wrap: wrap; justify-content: flex-start; }
+.station__chooser span { color: var(--muted); margin-right: auto; flex-basis: 100%; }
+.station__more .station__expand { margin: 0; }
 
 .contract {
   position: relative;

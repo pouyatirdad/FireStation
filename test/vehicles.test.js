@@ -108,7 +108,8 @@ test('a helicopter has no crew and flies straight to a fire, ignoring roads', ()
 test('a helicopter fights a forest fire from the air and refills in the harbour', () => {
   const state = shift();
   const heli = commandBuyVehicle(state, 'helicopter');
-  const tile = state.city.forestTiles[Math.floor(state.city.forestTiles.length / 2)];
+  const st = state.city.station;
+  const tile = state.city.forestTiles.reduce((best, t) => (Math.hypot(t.x - st.x, t.y - st.y) < Math.hypot(best.x - st.x, best.y - st.y) ? t : best));
   const wf = startWildfire(state, (tile.x + 0.5) * TILE, (tile.y + 0.5) * TILE, 2200);
   const start = wf.intensity;
   assert.equal(commandDispatchWildfire(state, wf.id), true);
@@ -245,6 +246,7 @@ test('finance state survives a save', () => {
   const loaded = loadState(JSON.parse(JSON.stringify(serialize(state))));
   assert.equal(loaded.loan, CONFIG.economy.loan.step);
   assert.equal(loaded.insured, true);
-  assert.deepEqual(loaded.ownedStations, [true, true, false]);
+  assert.deepEqual(loaded.ownedStations.slice(0, 3), [true, true, false]);
+  assert.equal(loaded.ownedStations.length, loaded.city.stations.length);
   assert.equal(loaded.contracts.offers.length, 1);
 });

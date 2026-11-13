@@ -63,7 +63,7 @@ export function createGame(seed = CONFIG.city.seed) {
     credits: CONFIG.economy.start,
     stats: { saved: 0, lost: 0, alarms: 0, rescued: 0, casualties: 0, escaped: 0, treated: 0 },
     ledger: createLedger(),
-    ownedStations: [true, false, false],
+    ownedStations: city.stations.map((_, i) => i === 0),
     victims: [],
     loan: 0,
     insured: false,
@@ -574,7 +574,7 @@ export function commandBuyVehicle(state, type = 'engine', station = null) {
   return engine;
 }
 
-/** Open Station 2 (index 1) or the Harbour Dock (index 2). */
+/** Open Station 2 (index 1), the Harbour Dock (index 2) or one of the regional and airport stations (3 and up). */
 export function commandBuyStation(state, index = 1) {
   const station = state.city.stations[index];
   if (!station || index === 0) return false;
@@ -582,7 +582,10 @@ export function commandBuyStation(state, index = 1) {
     addEvent(state, `${station.name} is already open`, 'info');
     return false;
   }
-  const price = index === 2 ? CONFIG.economy.dockPrice : CONFIG.economy.stationPrice;
+  const price = index === 2 ? CONFIG.economy.dockPrice
+    : station.kind === 'airport' ? CONFIG.economy.airportStationPrice
+      : station.kind === 'region' ? CONFIG.economy.regionStationPrice
+        : CONFIG.economy.stationPrice;
   if (state.credits < price) {
     addEvent(state, `Not enough credits — $${price.toLocaleString('en-US')} for ${station.name}`, 'warn');
     return false;
@@ -591,7 +594,9 @@ export function commandBuyStation(state, index = 1) {
   state.ownedStations[index] = true;
   addEvent(
     state,
-    index === 2 ? 'The Harbour Dock is open — sixteen berths for boats' : 'Station 2 is open — sixteen more bays across the city',
+    index === 2 ? 'The Harbour Dock is open — sixteen berths for boats'
+      : index === 1 ? 'Station 2 is open — sixteen more bays across the city'
+        : `${station.name} is open — sixteen more bays and calls from its district`,
     'good',
   );
   return true;
@@ -621,7 +626,7 @@ export { orderEngine, orderCrew };
 
 export function serialize(state) {
   return {
-    version: 10,
+    version: 11,
     seed: state.seed,
     time: state.time,
     clock: state.clock,
@@ -740,7 +745,7 @@ export function loadState(data) {
     b.big = Boolean(saved.big);
   }
 
-  state.ownedStations = [...(data.ownedStations ?? [true, false]), false, false].slice(0, 3);
+  state.ownedStations = state.city.stations.map((_, i) => Boolean(data.ownedStations?.[i] ?? i === 0));
   restoreVictims(state, data.victims ?? []);
   state.loan = data.loan ?? 0;
   state.insured = Boolean(data.insured);

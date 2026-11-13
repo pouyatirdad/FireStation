@@ -972,14 +972,24 @@ function fleetTab(state) {
       '</div>';
   }).join('');
 
-  const two = state.city.stations[1];
-  const open2 = ownsStation(state, 1);
-  const stationBox = open2
+  const landStations = state.city.stations.map((st, i) => ({ st, i })).filter(({ st }) => !st.sea);
+  const ownedLand = landStations.filter(({ i }) => ownsStation(state, i));
+  const price = (st, i) => (i === 1 ? CONFIG.economy.stationPrice : st.kind === 'airport' ? CONFIG.economy.airportStationPrice : CONFIG.economy.regionStationPrice);
+  const stationBox = (ownedLand.length > 1
     ? '<div class="station__chooser"><span>Deliver new vehicles to</span>' +
-      state.city.stations.map((st, i) => st.sea ? '' : '<button type="button" class="btn btn--small' + (buyStation === i ? ' is-active' : '') + '" data-action="deliver-to" data-station="' + i + '">' + esc(st.name) + '</button>').join('') +
+      ownedLand.map(({ st, i }) => '<button type="button" class="btn btn--small' + (buyStation === i ? ' is-active' : '') + '" data-action="deliver-to" data-station="' + i + '">' + esc(st.name) + '</button>').join('') +
       '</div>'
-    : '<div class="station__expand"><div><b>' + esc(two.name) + ' · Civic Quarter</b><span>Sixteen more bays and a second helipad, deep in the city. Calls start coming from its district too.</span></div>' +
-      '<button type="button" class="btn btn--small btn--primary" data-action="buy-station"' + (state.credits < CONFIG.economy.stationPrice ? ' disabled' : '') + '>Open $' + CONFIG.economy.stationPrice.toLocaleString('en-US') + '</button></div>';
+    : '') +
+    '<div class="station__more">' +
+    landStations.filter(({ i }) => i > 0 && !ownsStation(state, i)).map(({ st, i }) => {
+      const cost = price(st, i);
+      const blurb = i === 1 ? 'Sixteen more bays and a second helipad, deep in the city. Calls start coming from its district too.'
+        : st.kind === 'airport' ? 'The airport fire station: sixteen bays beside the runway and its own medical centre. Calls start coming from the airfield and its district.'
+          : 'A regional station with sixteen bays and a base hospital. Calls start coming from its district.';
+      return '<div class="station__expand"><div><b>' + esc(st.name) + '</b><span>' + blurb + '</span></div>' +
+        '<button type="button" class="btn btn--small btn--primary" data-action="buy-station" data-station="' + i + '"' + (state.credits < cost ? ' disabled' : '') + '>Open $' + cost.toLocaleString('en-US') + '</button></div>';
+    }).join('') +
+    '</div>';
 
   const dock = state.city.stations[2];
   const dockBox = dockOpen
@@ -997,7 +1007,7 @@ function fleetTab(state) {
 
   return '<div class="station__balance">$' + state.credits.toLocaleString('en-US') + '<span>credits · ' + landCount + '/' + bays + ' bays</span></div>' +
     '<div class="station__list">' + engines + '</div>' +
-    (maxed ? '<p class="station__full">Every bay you own is full' + (open2 ? '.' : ' — open Station 2 for sixteen more.') + '</p>' : '') +
+    (maxed ? '<p class="station__full">Every bay you own is full' + (ownedLand.length > 1 ? '.' : ' — open another station for sixteen more bays.') + '</p>' : '') +
     stationBox + dockBox +
     '<div class="station__buys">' + buys + '</div>';
 }

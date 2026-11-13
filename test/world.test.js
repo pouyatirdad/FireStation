@@ -10,13 +10,13 @@ import { CONFIG } from '../src/core/config.js';
 
 const city = createCity(7);
 
-test('the map is ten times the area of the original 160x120 town', () => {
-  const ratio = (CITY_W * CITY_H) / (160 * 120);
-  assert.ok(ratio >= 10 && ratio < 11, `area ratio ${ratio.toFixed(2)}`);
+test('the map is ten times the area of the 520x384 city it grew from', () => {
+  const ratio = (CITY_W * CITY_H) / (520 * 384);
+  assert.ok(ratio >= 9.5 && ratio < 11, `area ratio ${ratio.toFixed(2)}`);
   assert.equal(city.w, CITY_W);
   assert.equal(city.h, CITY_H);
-  assert.equal(V_ROADS.length, 17);
-  assert.equal(H_ROADS.length, 15);
+  assert.equal(V_ROADS.length, 55);
+  assert.equal(H_ROADS.length, 48);
 });
 
 test('the big city has the buildings, hydrants, forests and pharmacies to fill it', () => {

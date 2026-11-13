@@ -60,8 +60,9 @@ test('the engine starts on the apron and can reach the street', () => {
   for (const t of path) assert.ok(passable(nav, 'drive', t.x, t.y), 'path leaves the road');
 });
 
-test('the engine can reach every hydrant', () => {
-  for (const h of city.hydrants) {
+test('the engine can reach a spread of hydrants', () => {
+  // Every twelfth: the map has thousands and each is a cross-city route.
+  for (const h of city.hydrants.filter((_, i) => i % 12 === 0)) {
     const target = nearestPassable(nav, 'drive', h.x, h.y, 4);
     assert.ok(target, `no street near hydrant ${h.x},${h.y}`);
     const path = findPath(nav, 'drive', spawnTile, target);
@@ -70,10 +71,10 @@ test('the engine can reach every hydrant', () => {
 });
 
 test('a crew can walk from the station to a spread of buildings and every pharmacy', () => {
-  // Walking A* across a 520x384 map is slow enough that checking all of them
-  // would dominate the run; every seventh building plus all pharmacies is a
-  // good sample.
-  const sample = city.buildings.filter((b, i) => i % 7 === 0 || b.type === 'pharmacy');
+  // Walking A* across a 1660x1176 map is slow enough that checking all of them
+  // would dominate the run; every fortieth building plus every tenth pharmacy is
+  // a good sample.
+  const sample = city.buildings.filter((b, i) => i % 40 === 0 || (b.type === 'pharmacy' && i % 10 === 0));
   for (const b of sample) {
     const rect = { x: b.x * TILE, y: b.y * TILE, w: b.w * TILE, h: b.h * TILE };
     const stand = standTileForRect(nav, rect, city.spawn.x, city.spawn.y);

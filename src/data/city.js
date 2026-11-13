@@ -1,6 +1,7 @@
-// Harbor City: a 520×384 tile grid (about ten times the area of the original
-// 160×120 town) of districts between 17 avenues and 16 streets, with several
-// forests, parks and a waterfront. Generated from a seed, so every shift is the
+// Harbor City: a 1660×1176 tile grid (about a hundred times the area of the
+// original 160×120 town, ten times the 520×384 city it grew from) of districts
+// between 55 avenues and 48 streets, with a dozen forests, parks and a
+// waterfront on the southern shore. Generated from a seed, so every shift is the
 // same city and the tests can point at a named building. The original town sits
 // in the north-west corner with Station 1 where it always was.
 //
@@ -10,8 +11,7 @@
 import { TILE } from '../core/config.js';
 import { Rng, clamp } from '../core/math.js';
 
-export const CITY_W = 520;
-export const CITY_H = 384;
+export const CITY_W = 1660;
 export const CITY_NAME = 'Harbor City';
 
 // Avenues run north–south, streets east–west. Each is two tiles wide. They are
@@ -53,13 +53,16 @@ function spacedLines(count, start, step, pins, min, max, seed) {
   return lines;
 }
 
-export const V_ROADS = spacedLines(17, 12, 30, [0, 1, 2, 7, 8, 9, 11, 12, 16], 22, 42, 4711);
-export const H_ROADS = spacedLines(15, 12, 24, [0, 1, 2, 5, 6, 13, 14], 20, 34, 1993);
+// The first 17 avenues and 15 streets are the original city, pinned where they
+// always were; the rest carry on east and south with random gaps.
+export const V_ROADS = spacedLines(55, 12, 30, [0, 1, 2, 7, 8, 9, 11, 12, 16, 54], 22, 42, 4711);
+export const H_ROADS = spacedLines(48, 12, 24, [0, 1, 2, 5, 6, 13, 14, 47], 20, 34, 1993);
 
 // The sea fills everything south of the last street (the harbour quay). A river
 // meanders down through the east of the city inside one column of blocks, so it
 // only ever crosses the streets (as bridges) and never a street's length.
-export const SEA_Y = 350;
+export const SEA_Y = H_ROADS[H_ROADS.length - 1] + 2;
+export const CITY_H = SEA_Y + 34;
 export const RIVER_HALF_WIDTH = 3.5;
 export const riverCentre = (y) => 357 + 8 * Math.sin(y / 55);
 
@@ -101,6 +104,11 @@ const SPEC = {
   factory: { floors: [1, 3], hp: [140, 180], risk: 1.25 },
   school: { floors: [2, 3], hp: [110, 140], risk: 0.7 },
   tankfarm: { floors: [1, 1], hp: [160, 210], risk: 1.45 },
+  // Transport: the airport, the railway and the metro.
+  terminal: { floors: [2, 3], hp: [170, 210], risk: 0.6 },
+  hangar: { floors: [1, 1], hp: [120, 160], risk: 1.2 },
+  railstation: { floors: [2, 3], hp: [150, 190], risk: 0.6 },
+  metro: { floors: [1, 2], hp: [100, 130], risk: 0.55 },
 };
 
 // Size classes by building mass (footprint x floors, the measure the fire logic
@@ -126,6 +134,10 @@ const ROOFS = {
   factory: ['#6c7276', '#797d79', '#5f676b'],
   school: ['#8f6a52', '#9b7658', '#84624d'],
   tankfarm: ['#8a8f93', '#7b8286', '#969b9e'],
+  terminal: ['#8d949b', '#7f8a93', '#98a0a6'],
+  hangar: ['#6d7479', '#7a8085', '#646b70'],
+  railstation: ['#6f7c86', '#5f6c76', '#7b8790'],
+  metro: ['#4a5a68', '#56606b', '#3f4f5c'],
 };
 
 // What is built in each kind of block (by lot style), with weights. The big
@@ -135,9 +147,9 @@ const KIND_TYPES = {
   villa: [['villa', 8], ['house', 0.8], ['school', 0.15], ['apartment', 0.15]],
   suburb: [['house', 8], ['apartment', 1.6], ['school', 0.12], ['shop', 0.3]],
   flats: [['apartment', 5], ['house', 1.5], ['school', 0.4], ['shop', 0.4]],
-  downtown: [['office', 3.2], ['tower', 3], ['hotel', 1.8], ['mall', 1.8], ['apartment', 0.7], ['shop', 0.6]],
+  downtown: [['office', 3.2], ['tower', 3], ['hotel', 1.8], ['mall', 4], ['apartment', 0.7], ['shop', 0.6], ['metro', 1.6], ['railstation', 1.4]],
   industry: [['warehouse', 4], ['factory', 3.5], ['tankfarm', 1.6], ['office', 0.4]],
-  market: [['shop', 4], ['apartment', 2.6], ['house', 0.6], ['hotel', 0.25]],
+  market: [['shop', 4], ['apartment', 2.6], ['house', 0.6], ['hotel', 0.25], ['mall', 0.5]],
 };
 
 // How many people are inside at 07:00. Homes are nearly empty in the morning;
@@ -158,6 +170,10 @@ const OCCUPANTS = {
   factory: [12, 40],
   school: [40, 120],
   tankfarm: [1, 4],
+  terminal: [80, 200],
+  hangar: [2, 10],
+  railstation: [40, 120],
+  metro: [20, 70],
 };
 
 const NAMES = {
@@ -229,6 +245,17 @@ const NAMES = {
     'Lincoln High School', 'St. Clair Academy', 'Maple Grove School', 'Westfield Primary', 'Riverside College',
     'Holloway Secondary', 'Elmgrove School', 'Fairmount Academy',
   ],
+  metro: [
+    'Central Metro', 'Union Square Metro', 'Harbor Line Metro', 'Northgate Metro', 'City Hall Metro', 'Market Street Metro',
+    'University Metro', 'Riverside Metro', 'Cathedral Metro', 'Exchange Metro', 'Stadium Metro', 'Park Lane Metro',
+    'Kings Cross Metro', 'Mill Road Metro', 'Docks Metro', 'Old Town Metro', 'Victoria Metro', 'Albion Metro',
+  ],
+  railstation: [
+    'Harbor Central Station', 'Northgate Rail Station', 'Eastside Junction', 'Union Terminus', 'Riverside Rail Station',
+    'Midtown Station', 'Kings Cross Station', 'Grand Central Terminal', 'Southern Cross Station', 'Westgate Station',
+  ],
+  terminal: ['Airport Terminal'],
+  hangar: ['Aircraft Hangar'],
   tankfarm: [
     'Tidewater Fuel Terminal', 'South Quay Oil Depot', 'Harbor Bulk Storage', 'Dockside Fuel Farm',
     'Ironbridge Tank Park', 'Freight Yard Fuel Depot',
@@ -302,11 +329,73 @@ const DOWNTOWNS = [
   { col: 7, row: 14, name: 'SOUTH BANK' },
 ];
 
-const FOREST_NAMES = ['NORTH WOODS', 'PINE RIDGE', 'GREEN HOLLOW', 'EASTWOOD', 'BIRCH FOREST', 'OLD GROWTH', 'FERN VALLEY', 'SOUTHEAST FOREST'];
+const MORE_DOWNTOWN_NAMES = [
+  'AIRPORT CITY', 'CENTRAL STATION', 'CASTLE HILL', 'WESTGATE', 'LAKESIDE', 'BRIDGEPORT', 'MARKET CROSS', 'PARKSIDE',
+  'NEW TOWN', 'ROYAL MILE', 'TECH QUARTER', 'KINGS CROSS', 'ST. MARY', 'FAIRWAY', 'HIGHBURY', 'STONEBRIDGE',
+  'OAKLANDS', 'PORTSMOUTH', 'THE EXCHANGE', 'MILL ROW', 'SUNDERLAND', 'CRESCENT', 'RIVERGATE', 'VICTORIA',
+  'ALBION', 'ELM CROSS', 'ASTORIA', 'GRAND CENTRAL', 'NORTH HARBOR', 'COLLEGE GREEN', 'SPRINGFIELD', 'LINCOLN PARK',
+  'MONTROSE', 'ARDEN', 'BELMONT', 'CARLTON', 'DEVONPORT', 'EASTBURY', 'FOXHALL', 'GLENMORE',
+];
 
-// The big pine forest in the south-east: every block east of the river from the
-// Eastside district down to the quay (columns 13–17, rows 10–14).
-const BIG_FOREST = { col0: 13, col1: 17, row0: 10, row1: 14, zone: FOREST_NAMES.length - 1 };
+// Big pine forests (blocks): the original one in the south-east of the old city,
+// and a few more in the new country. Each is one named zone.
+const BIG_FOREST_BOXES = [
+  { col0: 13, col1: 17, row0: 10, row1: 14 }, // SOUTHEAST FOREST: east of the river
+  { col0: 27, col1: 33, row0: 3, row1: 8 },
+  { col0: 40, col1: 46, row0: 15, row1: 21 },
+  { col0: 21, col1: 26, row0: 26, row1: 32 },
+  { col0: 3, col1: 9, row0: 34, row1: 40 },
+  { col0: 36, col1: 42, row0: 32, row1: 38 },
+  { col0: 47, col1: 53, row0: 4, row1: 9 },
+  { col0: 49, col1: 54, row0: 33, row1: 39 },
+];
+// The airports: each is a box of blocks merged into one (the streets inside are
+// taken out). The first is the international airport in the east.
+const AIRPORT_BOXES = [
+  { col0: 44, col1: 48, row0: 23, row1: 25, name: 'Harbor City International Airport', short: 'International' },
+  { col0: 16, col1: 19, row0: 20, row1: 22, name: 'Northgate Regional Airfield', short: 'Regional' },
+];
+const inAirport = (col, row, pad = 0) => AIRPORT_BOXES.some((b) => col >= b.col0 - pad && col <= b.col1 + pad && row >= b.row0 - pad && row <= b.row1 + pad);
+
+// Where the regional fire stations are (as block coordinates): the nearest block
+// big enough for a station, its apron and a hospital is used.
+const BASE_TARGETS = [
+  [22, 3], [36, 6], [50, 3], [22, 13], [34, 14], [47, 12], [10, 24], [28, 24], [37, 28], [14, 34], [30, 38], [46, 40],
+];
+
+const inBigForest = (col, row, pad = 0) => BIG_FOREST_BOXES.some((b) => col >= b.col0 - pad && col <= b.col1 + pad && row >= b.row0 - pad && row <= b.row1 + pad);
+
+// More commercial centres across the new country, on a loose grid, clear of the
+// river, the big forests and each other.
+{
+  const r = new Rng(8675);
+  let n = 0;
+  for (let row = 4; row <= 44; row += 7) {
+    for (let col = 3; col <= 51; col += 8) {
+      const c = col + r.int(-2, 2);
+      const rw = row + r.int(-2, 2);
+      if (c <= 17 && rw <= 15) continue; // the original city
+      if (c > 53 || rw > 44) continue;
+      if (c >= 10 && c <= 14) continue; // the river banks
+      if (inBigForest(c, rw, 1) || inAirport(c, rw, 1)) continue;
+      if (DOWNTOWNS.some((d) => Math.max(Math.abs(d.col - c), Math.abs(d.row - rw)) < 4)) continue;
+      DOWNTOWNS.push({ col: c, row: rw, name: MORE_DOWNTOWN_NAMES[n++ % MORE_DOWNTOWN_NAMES.length] });
+    }
+  }
+}
+
+const FOREST_NAMES = [
+  'NORTH WOODS', 'PINE RIDGE', 'GREEN HOLLOW', 'EASTWOOD', 'BIRCH FOREST', 'OLD GROWTH', 'FERN VALLEY', 'MOSSY DELL',
+  'HAWTHORN WOOD', 'CEDAR BROOK', 'WOLF RUN', 'SILVER BIRCH', 'THE CHASE', 'BRACKEN HILL', 'ASHDOWN', 'DEEP HOLLOW',
+  'KESTREL WOOD', 'LONG COPSE', 'HOLLY WOOD', 'STAG FOREST', 'ELDER GROVE', 'TIMBERLAND', 'MARSH WOOD', 'RAVEN WOOD',
+  // The big pine forests, one name each.
+  'SOUTHEAST FOREST', 'HIGHLAND FOREST', 'GREAT PINE FOREST', 'BLACK FOREST', 'KINGSWOOD', 'SHERWOOD', 'ARDEN FOREST', 'WILDERNESS',
+];
+const FIRST_BIG_ZONE = 24;
+
+// Every block of a big forest is pine; its zone is its index in BIG_FOREST_BOXES
+// past FIRST_BIG_ZONE.
+const isBigZone = (zone) => zone >= FIRST_BIG_ZONE;
 
 // A stable per-tile hash for decoration (tree species, forest edges), so the
 // city's random stream, and with it every building, is not disturbed.
@@ -348,6 +437,10 @@ const TYPE_RULES = {
   factory: { minW: 12, minH: 9, maxW: 24, maxH: 14 },
   school: { minW: 10, minH: 8, maxW: 16, maxH: 11 },
   tankfarm: { minW: 12, minH: 10, maxW: 20, maxH: 14 },
+  terminal: { minW: 24, minH: 9, maxW: 32, maxH: 12 },
+  hangar: { minW: 14, minH: 9, maxW: 20, maxH: 12 },
+  railstation: { minW: 16, minH: 10, maxW: 26, maxH: 14 },
+  metro: { minW: 4, minH: 4, maxW: 6, maxH: 5 },
 };
 
 // How each kind of block is cut into lots: lot sizes, the lane between lots, how
@@ -388,8 +481,14 @@ function subdivide(rng, x0, y0, x1, y1, p, out) {
 }
 
 // A few made-up neighbourhood names for the housing districts and industrial areas.
-const HOUSING_NAMES = ['MAPLE HEIGHTS', 'WESTFIELD', 'LINDEN PARK', 'ORCHARD HILL', 'KINGSLEY', 'ASHFORD', 'BRIARWOOD', 'ST. CLAIR', 'ELMGROVE', 'HOLLOWAY', 'FAIRMOUNT', 'THORNBURY'];
-const INDUSTRY_NAMES = ['HARBOUR WORKS', 'DOCKLANDS', 'FREIGHT YARD', 'SOUTH QUAY', 'TIDEWATER ESTATE', 'IRONBRIDGE WORKS'];
+const HOUSING_NAMES = [
+  'ROSEHILL', 'GREENFIELD', 'WILLOW BEND', 'CEDAR PARK', 'MEADOWBROOK', 'SUNNYSIDE', 'HAZELWOOD', 'PINE GROVE', 'BRIGHTON PARK', 'CHERRY LANE',
+  'FOXGLOVE', 'HIGHFIELD', 'ISLINGTON', 'JUNIPER HILL', 'KENSINGTON', 'LARKSPUR', 'MAPLE GLEN', 'NEWTON', 'OAK RIDGE', 'PRIMROSE HILL',
+  'QUEENSWAY', 'REDWOOD', 'STRATFORD', 'TANGLEWOOD', 'UPLANDS', 'VINE STREET', 'WINDSOR', 'YARROW', 'ZENITH PARK', 'AMBERLEY',
+  'BELLEVUE', 'CLIFTON', 'DALTON', 'EDGEWATER', 'FERNDALE', 'GRANGE HILL','MAPLE HEIGHTS', 'WESTFIELD', 'LINDEN PARK', 'ORCHARD HILL', 'KINGSLEY', 'ASHFORD', 'BRIARWOOD', 'ST. CLAIR', 'ELMGROVE', 'HOLLOWAY', 'FAIRMOUNT', 'THORNBURY'];
+const INDUSTRY_NAMES = [
+  'RAIL YARDS', 'FOUNDRY ROW', 'WAREHOUSE DISTRICT', 'CHEMICAL MILE', 'COLD STORAGE ROW', 'STEEL WORKS', 'GASWORKS', 'SALT FLATS', 'TANNERY ROW',
+'HARBOUR WORKS', 'DOCKLANDS', 'FREIGHT YARD', 'SOUTH QUAY', 'TIDEWATER ESTATE', 'IRONBRIDGE WORKS'];
 
 // What each kind of block is for. Housing, business ("company"), industry and
 // shopping streets are separate districts, the way a real city zones them.
@@ -430,18 +529,20 @@ function buildBlocks(seed = 7) {
   forestBlocks.set('5,0', 0);
   forestBlocks.set('4,1', 0);
   forestBlocks.set('5,1', 0);
-  for (let c = BIG_FOREST.col0; c <= BIG_FOREST.col1; c++) {
-    for (let r = BIG_FOREST.row0; r <= BIG_FOREST.row1; r++) forestBlocks.set(`${c},${r}`, BIG_FOREST.zone);
-  }
+  BIG_FOREST_BOXES.forEach((box, i) => {
+    for (let c = box.col0; c <= box.col1; c++) {
+      for (let r = box.row0; r <= box.row1; r++) forestBlocks.set(`${c},${r}`, FIRST_BIG_ZONE + i);
+    }
+  });
   // More woods in the outskirts, each two blocks by two, clear of the old town.
-  for (let zone = 1, tries = 0; zone < BIG_FOREST.zone && tries < 200; tries++) {
+  for (let zone = 1, tries = 0; zone < FIRST_BIG_ZONE && tries < 8000; tries++) {
     const col = rng.int(0, xs.length - 2);
     const row = rng.int(0, lastRow - 5); // never on the industrial waterfront
     if (col < 6 && row < 6) continue; // the original quarter and its own woods
     const cells = [[col, row], [col + 1, row], [col, row + 1], [col + 1, row + 1]];
     if (cells.some(([c, r]) => forestBlocks.has(`${c},${r}`))) continue;
     // Keep a block of town between the small woods and the big forest.
-    if (cells.some(([c, r]) => c >= BIG_FOREST.col0 - 1 && r >= BIG_FOREST.row0 - 1)) continue;
+    if (cells.some(([c, r]) => inBigForest(c, r, 1) || inAirport(c, r, 1))) continue;
     if (cells.some(([c, r]) => DOWNTOWNS.some((d) => Math.abs(d.col - c) <= 1 && Math.abs(d.row - r) <= 1))) continue;
     // Nor on the river banks, where the works are.
     if (cells.some(([c]) => c >= RIVER_COLS[0] - 1 && c <= RIVER_COLS[1] + 1)) continue;
@@ -470,18 +571,20 @@ function buildBlocks(seed = 7) {
         kind = 'forest';
         zone = forestBlocks.get(key);
       } else if (parks.has(key)) kind = 'park';
+      else if (inAirport(col, row)) kind = 'airport';
       else if ((col === 2 && row === 2) || (col === 8 && row === 6)) kind = 'station';
-      else if (col === 9 && row === 14) kind = 'dock';
+      else if (col === 9 && row === lastRow - 1) kind = 'dock';
       else if (near === 0) kind = roll < 0.03 ? 'park' : 'downtown';
       else if (near === 1 && !waterfront) kind = roll < 0.55 ? 'downtown' : 'market';
       else if (waterfront) kind = near === 1 ? 'downtown' : 'industry';
       else if (riverBank) kind = roll < 0.5 ? 'downtown' : 'market';
       else if (roll < 0.06) kind = 'park';
       else if (near === 2) kind = roll < 0.55 ? 'market' : 'houses';
+      else if (near >= 4 && roll < 0.3) kind = 'industry'; // industrial parks out on the edge of town
       else kind = roll < 0.12 ? 'market' : 'houses';
-      const woods = kind === 'forest' ? (zone === BIG_FOREST.zone ? 'pine' : 'mixed') : undefined;
+      const woods = kind === 'forest' ? (isBigZone(zone) ? 'pine' : 'mixed') : undefined;
       // Housing west of the river is apartment blocks, east of it villas.
-      const side = col <= RIVER_COLS[0] - 1 && col >= RIVER_COLS[0] - 5 ? 'west' : col >= RIVER_COLS[1] ? 'east' : null;
+      const side = col <= RIVER_COLS[0] - 1 && col >= RIVER_COLS[0] - 5 ? 'west' : col >= RIVER_COLS[1] && col <= 17 ? 'east' : null;
       grid.push({ col, row, x0, y0, x1, y1, kind, zone, woods, waterfront, riverSide: side, style: Math.floor(tileHash(col, row, 31) * 3) });
     }
   }
@@ -489,6 +592,33 @@ function buildBlocks(seed = 7) {
   // Merge some neighbouring pairs into one big block.
   const cols = xs.length;
   const at = (c, r) => grid[r * cols + c];
+
+  // Regional fire stations: the block nearest each target that is big enough.
+  let baseCount = 0;
+  for (const [tc, tr] of BASE_TARGETS) {
+    let best = null;
+    let bestD = Infinity;
+    for (let dr = -4; dr <= 4; dr++) {
+      for (let dc = -4; dc <= 4; dc++) {
+        const c = tc + dc;
+        const r = tr + dr;
+        if (c < 0 || r < 0 || c >= cols || r >= ys.length) continue;
+        const b = at(c, r);
+        if (!['houses', 'market', 'downtown', 'industry'].includes(b.kind)) continue;
+        if (b.x1 - b.x0 + 1 < 24 || b.y1 - b.y0 + 1 < 17) continue;
+        if (c >= RIVER_COLS[0] - 1 && c <= RIVER_COLS[1] + 1) continue;
+        const d = Math.hypot(dc, dr);
+        if (d < bestD) {
+          bestD = d;
+          best = b;
+        }
+      }
+    }
+    if (best) {
+      best.kind = 'base';
+      best.baseIndex = baseCount++;
+    }
+  }
   const mergeable = (b) => ['houses', 'market', 'industry'].includes(b.kind)
     && !(b.col < 4 && b.row < 4) // the original quarter keeps its streets
     && !(b.col >= 6 && b.col <= 10 && b.row >= 4 && b.row <= 7) // round Station 2
@@ -518,6 +648,19 @@ function buildBlocks(seed = 7) {
     b.merged = true;
     b.green = b.kind !== 'industry'; // a green or a square in the middle
     other.gone = true;
+  }
+  // The airports: one box of blocks each, merged into a single block.
+  for (const box of AIRPORT_BOXES) {
+    const first = at(box.col0, box.row0);
+    const last = at(box.col1, box.row1);
+    removed.push({ x0: first.x0, y0: first.y0, x1: last.x1, y1: last.y1 });
+    for (let r = box.row0; r <= box.row1; r++) {
+      for (let c = box.col0; c <= box.col1; c++) if (at(c, r) !== first) at(c, r).gone = true;
+    }
+    first.x1 = last.x1;
+    first.y1 = last.y1;
+    first.merged = true;
+    first.airport = box;
   }
   return { blocks: grid.filter((b) => !b.gone), removed };
 }
@@ -652,7 +795,36 @@ function rebalanceSizes(buildings) {
   }
 }
 
+// Generating the city takes a couple of seconds. Under Node (the tests) every
+// call after the first for a seed shares the first result's map arrays, trees
+// and so on (nothing at run time writes to them) and gets its own copy of the
+// buildings, the only part of the city a game changes. In the browser the city
+// is made once per page and nothing is kept.
+const cityCache = new Map();
 export function createCity(seed = 7) {
+  if (!globalThis.process?.versions?.node) return generateCity(seed);
+  if (!cityCache.has(seed)) cityCache.set(seed, generateCity(seed));
+  const c = cityCache.get(seed);
+  // Everything that points at a building goes through one structuredClone so the
+  // copies still point at each other.
+  const mine = structuredClone({
+    buildings: c.buildings,
+    station: c.station,
+    hospitals: c.hospitals,
+    pharmacies: c.pharmacies,
+    bases: c.stations.map((st) => st.building),
+  });
+  return {
+    ...c,
+    buildings: mine.buildings,
+    station: mine.station,
+    hospitals: mine.hospitals,
+    pharmacies: mine.pharmacies,
+    stations: c.stations.map((st, i) => ({ ...st, building: mine.bases[i] })),
+  };
+}
+
+function generateCity(seed = 7) {
   const rng = new Rng(seed);
   const w = CITY_W;
   const h = CITY_H;
@@ -917,6 +1089,65 @@ export function createCity(seed = 7) {
     }
   }
 
+  // --- the airports ----------------------------------------------------------
+  // A runway along the top, a taxiway and an apron below it, the terminal, the
+  // hangars, the control tower and a fuel farm in a row, and a fire station of
+  // its own in the corner. Paved ground counts as road (cheap to drive, no
+  // trees); the renderer draws it from `airfields`.
+  const airfields = [];
+  const baseRequests = [];
+  const pave = (x0, y0, x1, y1) => {
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) if (inb(x, y) && !blocked[at(x, y)] && !water[at(x, y)]) road[at(x, y)] = 1;
+    }
+  };
+  function buildAirport(block) {
+    const box = block.airport;
+    const { x0: bx0, y0: by0, x1: bx1, y1: by1 } = block;
+    const W = bx1 - bx0 + 1;
+    const H = by1 - by0 + 1;
+    if (W < 60 || H < 52) return;
+    const ry0 = by0 + 6;
+    const runway = { x0: bx0 + 8, y0: ry0, x1: bx1 - 8, y1: ry0 + 3 };
+    const ty0 = ry0 + 8;
+    const taxi = { x0: bx0 + 14, y0: ty0, x1: bx1 - 14, y1: ty0 + 1 };
+    const connectors = [bx0 + 14, Math.floor((bx0 + bx1) / 2), bx1 - 15].map((x) => ({ x0: x, y0: ry0 + 4, x1: x + 1, y1: ty0 - 1 }));
+    const buildY = ty0 + 9;
+    const apronRect = { x0: bx0 + 24, y0: ty0 + 2, x1: bx1 - 24, y1: buildY - 1 };
+    const forecourt = { x0: bx0 + 24, y0: buildY + 12, x1: bx1 - 24, y1: buildY + 13 };
+    // The row of buildings, west to east.
+    const tower = addBuilding(bx0 + 26, buildY + 2, 6, 6, 'tower', { name: `${box.short} Control Tower`, floors: 7, zone: 'civic' });
+    const termX = bx0 + 36;
+    const terminal = addBuilding(termX, buildY, 30, 10, 'terminal', { name: `${box.short} Terminal`, floors: 3, zone: 'civic' });
+    let x = termX + 30 + 3;
+    const hangars = [];
+    for (let k = 0; k < 3 && x + 18 <= bx1 - 6; k++) {
+      hangars.push(addBuilding(x, buildY, 18, 10, 'hangar', { name: `${box.short} Hangar ${k + 1}`, floors: 1, zone: 'industrial' }));
+      x += 21;
+    }
+    let farm = null;
+    if (x + 16 <= bx1 - 6) farm = addBuilding(x, buildY, 16, 10, 'tankfarm', { name: `${box.short} Fuel Farm`, floors: 1, zone: 'industrial' });
+    pave(runway.x0, runway.y0, runway.x1, runway.y1);
+    pave(taxi.x0, taxi.y0, taxi.x1, taxi.y1);
+    for (const c of connectors) pave(c.x0, c.y0, c.x1, c.y1);
+    pave(apronRect.x0, apronRect.y0, apronRect.x1, apronRect.y1);
+    pave(forecourt.x0, forecourt.y0, forecourt.x1, forecourt.y1);
+    // The way in: from the forecourt down to the street below the airport.
+    const gate = { x0: termX + 13, y0: forecourt.y1 + 1, x1: termX + 14, y1: by1 + 1 };
+    pave(gate.x0, gate.y0, gate.x1, gate.y1);
+    // And a service road through the gap between the control tower and the
+    // terminal, so the airside and the landside are one piece of road.
+    const service = { x0: bx0 + 32, y0: buildY, x1: bx0 + 33, y1: forecourt.y0 };
+    pave(service.x0, service.y0, service.x1, service.y1);
+    // A fire station of its own, bottom left.
+    baseRequests.push({ kind: 'airport', name: `${box.short} Airport Fire Station`, hospital: `${box.short} Airport Medical Centre`, apronX0: bx0 + 3, apronY1: by1 });
+    airfields.push({
+      name: box.name, x0: bx0, y0: by0, x1: bx1, y1: by1,
+      runway, taxi, connectors, apron: apronRect, forecourt, gate, service,
+      terminal: terminal.id, tower: tower.id, hangars: hangars.map((hg) => hg.id), farm: farm?.id ?? null,
+    });
+  }
+
   function fillBlock(block) {
     const { x0, y0, x1, y1, kind } = block;
     if (kind === 'forest') {
@@ -966,11 +1197,15 @@ export function createCity(seed = 7) {
       scatterTrees(x0, y0, x1, y1);
       return;
     }
-    if (kind === 'station' || kind === 'dock' || kind === 'sea') return;
+    if (kind === 'station' || kind === 'dock' || kind === 'sea' || kind === 'base') return;
+    if (kind === 'airport') {
+      buildAirport(block);
+      return;
+    }
 
     const zone = ZONE_OF[kind];
     const variant = kind === 'houses'
-      ? (block.riverSide === 'east' ? 'villa' : block.riverSide === 'west' || block.style === 2 ? 'flats' : 'suburb')
+      ? (block.riverSide === 'east' ? 'villa' : block.riverSide === 'west' ? 'flats' : block.col <= 17 && block.row <= 14 ? (block.style === 2 ? 'flats' : 'suburb') : ['suburb', 'flats', block.col >= RIVER_COLS[1] ? 'villa' : 'flats'][block.style])
       : kind;
     const p = LOT_PARAMS[variant];
     // The pavement round the block: a different width on each side.
@@ -1250,7 +1485,7 @@ export function createCity(seed = 7) {
   const nearCrossAvenue = (x) => V_ROADS.some((vx) => Math.abs(x - vx) < 2);
 
   const tryCar = (tx, ty, x, y, angle) => {
-    if (cars.length >= 1100) return;
+    if (cars.length >= 6000) return;
     if (!inb(tx, ty) || blocked[at(tx, ty)] || road[at(tx, ty)] || apron[at(tx, ty)] || park[at(tx, ty)] || water[at(tx, ty)] || woods[at(tx, ty)]) return;
     cars.push({ x, y, angle: rng.chance(0.5) ? angle : angle + Math.PI, color: rng.pick(CAR_COLORS) });
   };
@@ -1285,7 +1520,7 @@ export function createCity(seed = 7) {
   }
 
   // --- the harbour dock: a base on the quay with berths on the water -----------
-  const bd = blocks.find((b) => b.col === 9 && b.row === 14);
+  const bd = blocks.find((b) => b.kind === 'dock');
   const dockBuilding = addBuilding(bd.x0 + 12, bd.y0 + 6, 8, 5, 'station', {
     id: 'dock',
     name: 'Harbour Dock',
@@ -1302,6 +1537,54 @@ export function createCity(seed = 7) {
     station: 2,
     sea: true,
   }));
+
+  // --- the regional fire stations and the airports' own ---------------------
+  // The same layout as Station 1, bottom-aligned in its block so the apron meets
+  // the street. Each has a base hospital beside it. They are for sale.
+  const regional = [];
+  const baseBlocks = blocks.filter((b) => b.kind === 'base').sort((a, c) => a.baseIndex - c.baseIndex);
+  const districtOf = (col, row) => {
+    let best = DOWNTOWNS[0];
+    let bestD = Infinity;
+    for (const d of DOWNTOWNS) {
+      const dd = Math.hypot(d.col - col, d.row - row);
+      if (dd < bestD) {
+        bestD = dd;
+        best = d;
+      }
+    }
+    return best.name.toLowerCase().split(' ').map((wd) => wd[0].toUpperCase() + wd.slice(1)).join(' ');
+  };
+  const requests = [
+    ...baseBlocks.map((b) => ({ kind: 'region', apronX0: b.x0 + 1, apronY1: b.y1, district: districtOf(b.col, b.row) })),
+    ...baseRequests,
+  ];
+  requests.forEach((rq, n) => {
+    const index = 3 + n;
+    const ox = rq.apronX0 - APRON.x0;
+    const oy = rq.apronY1 - APRON.y1;
+    const name = rq.name ?? `Station ${index} · ${rq.district}`;
+    const baseStation = addBuilding(STATION.x + ox, STATION.y + oy, STATION.w, STATION.h, 'station', { id: `base${index}`, name, floors: 2 });
+    baseStation.stationIndex = index;
+    const baseHospital = addBuilding(63 + ox, 51 + oy, 7, 8, 'hospital', { name: rq.hospital ?? `${rq.district} Base Hospital`, floors: 3 });
+    baseHospital.base = index;
+    const apronR = { x0: APRON.x0 + ox, y0: APRON.y0 + oy, x1: APRON.x1 + ox, y1: APRON.y1 + oy };
+    for (let ty = apronR.y0; ty <= apronR.y1; ty++) {
+      for (let tx = apronR.x0; tx <= apronR.x1; tx++) {
+        if (!inb(tx, ty)) continue;
+        apron[at(tx, ty)] = 1;
+        road[at(tx, ty)] = 0;
+      }
+    }
+    const shift = (b, extra) => ({ x: (b.x + ox) * TILE, y: (b.y + oy) * TILE, station: index, ...(extra ? { extra: true } : {}) });
+    regional.push({
+      id: `base${index}`, name, kind: rq.kind, building: baseStation, apron: apronR, hospital: baseHospital,
+      bays: [...BAYS.map((b) => shift(b, false)), ...EXTRA_BAYS.map((b) => shift(b, true))],
+    });
+  });
+  station.stationIndex = 0;
+  station2.stationIndex = 1;
+  dockBuilding.stationIndex = 2;
 
   // Map labels: one per commercial centre, forest, and the harbour belts.
   const blockCentre = (col, row) => {
@@ -1385,6 +1668,7 @@ export function createCity(seed = 7) {
     { id: 'station', name: 'Station 1', building: station, apron: { ...APRON }, bays: [...bays1, ...extra1] },
     { id: 'station2', name: 'Station 2', building: station2, apron: apron2, bays: [...bays2, ...extra2] },
     { id: 'dock', name: 'Harbour Dock', building: dockBuilding, apron: apronD, bays: [...berths, ...extraBerths], sea: true },
+    ...regional.map((r) => ({ id: r.id, name: r.name, kind: r.kind, building: r.building, apron: r.apron, bays: r.bays })),
   ];
 
   return {
@@ -1411,13 +1695,14 @@ export function createCity(seed = 7) {
     lot: stationLot,
     // Every bay of every station. The original twenty-four keep their numbers
     // (Station 1, Station 2, the dock); the extra bays follow in the same order.
-    bays: [...bays1, ...bays2, ...berths, ...extra1, ...extra2, ...extraBerths],
+    bays: [...bays1, ...bays2, ...berths, ...extra1, ...extra2, ...extraBerths, ...regional.flatMap((r) => r.bays)],
     stations,
     districts,
     curves,
     pharmacies: buildings.filter((b) => b.type === 'pharmacy'),
     blocks: blocks.map((b) => ({ col: b.col, row: b.row, x0: b.x0, y0: b.y0, x1: b.x1, y1: b.y1, kind: b.kind, zone: ZONE_OF[b.kind] ?? null, merged: Boolean(b.merged) })),
-    hospitals: [hospital1, hospital2],
+    hospitals: [hospital1, hospital2, ...regional.map((r) => r.hospital)],
+    airfields,
     spawn: { x: BAYS[0].x * TILE, y: BAYS[0].y * TILE, angle: Math.PI / 2 },
     startHour: START_HOUR,
   };

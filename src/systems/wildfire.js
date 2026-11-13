@@ -12,11 +12,11 @@ import { alignment } from './wind.js';
 
 let seq = 1;
 
-export function startWildfire(state, x, y, reward = 2200) {
+export function startWildfire(state, x, y, reward = 2200, opts = {}) {
   const wildfire = {
     id: `wildfire${seq++}`,
     kind: 'wildfire',
-    name: 'Forest fire',
+    name: opts.name ?? 'Forest fire',
     x,
     y,
     radius: 2.5 * TILE,
@@ -28,7 +28,7 @@ export function startWildfire(state, x, y, reward = 2200) {
     big: true,
   };
   state.wildfires.push(wildfire);
-  addEvent(state, `MAJOR INCIDENT — forest fire in ${placeNear(state, x, y)}`, 'big');
+  addEvent(state, opts.text ?? `MAJOR INCIDENT — forest fire in ${placeNear(state, x, y)}`, 'big');
   return wildfire;
 }
 

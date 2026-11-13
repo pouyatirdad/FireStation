@@ -83,8 +83,11 @@ test('a fire with an incident reward pays when it is knocked down', () => {
 
 // A forest tile a street reaches: the middle one of those within eight tiles of a road.
 function forestTileByRoad(state) {
-  const near = state.city.forestTiles.filter((t) => nearestPassable(state.nav, 'drive', t.x, t.y, 8));
-  return near[Math.floor(near.length / 2)];
+  const st = state.city.station;
+  const near = state.city.forestTiles
+    .filter((t) => nearestPassable(state.nav, 'drive', t.x, t.y, 8))
+    .sort((a, b) => Math.hypot(a.x - st.x, a.y - st.y) - Math.hypot(b.x - st.x, b.y - st.y));
+  return near[0];
 }
 
 test('a crew can be sent to a forest fire and put it out', () => {

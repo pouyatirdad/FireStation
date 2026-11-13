@@ -24,6 +24,7 @@ import { addEvent } from './systems/events.js';
 import { engineForUnit } from './systems/units.js';
 import { isUnitKey } from './core/hotkeys.js';
 import { startWildfire } from './systems/wildfire.js';
+import { playScene } from './systems/incidents.js';
 import { ignite } from './systems/fire.js';
 import { render, createCamera, clampCamera, screenToWorld } from './render/render.js';
 import * as hud from './ui/hud.js';
@@ -553,7 +554,7 @@ function onAction(action, data = {}) {
     case 'buy-vehicle': buyApparatus(data.type ?? 'engine'); break;
     case 'station-tab': hud.setStationTab(data.tab ?? 'fleet'); break;
     case 'deliver-to': hud.setBuyStation(Number(data.station ?? 0)); break;
-    case 'buy-station': commandBuyStation(state, 1); break;
+    case 'buy-station': commandBuyStation(state, Number(data.station ?? 1)); break;
     case 'buy-dock': commandBuyStation(state, 2); break;
     case 'take-loan': commandLoan(state); break;
     case 'repay-loan': commandRepay(state); break;
@@ -627,7 +628,7 @@ function sellApparatus(id) {
 
 // ------------------------------------------------------------------- save ---
 
-const SAVE_KEY = 'firestation.save.v10';
+const SAVE_KEY = 'firestation.save.v11';
 
 function hasSave() {
   try {
@@ -982,11 +983,46 @@ if (fleet) {
 if (params.has('wildfire')) {
   const tiles = state.city.forestTiles;
   if (tiles.length > 0) {
-    const tile = tiles[Math.floor(tiles.length / 2)];
+    // The forest tile nearest the station: the map is big.
+    const st = state.city.station;
+    const tile = tiles.reduce((best, t) => (Math.hypot(t.x - st.x, t.y - st.y) < Math.hypot(best.x - st.x, best.y - st.y) ? t : best));
     const wf = startWildfire(state, (tile.x + 0.5) * TILE, (tile.y + 0.5) * TILE, 2200);
     cam.x = wf.x;
     cam.y = wf.y;
     cam.zoom = 0.8;
+    clampCamera(cam, state, view);
+  }
+}
+// ?allstations opens every station; ?scene=<id> plays one incident scene (see
+// scenes.js); ?goto=airport|airport2|station3 (and so on) moves the camera there.
+if (params.has('allstations')) state.ownedStations.fill(true);
+const sceneParam = params.get('scene');
+if (sceneParam) {
+  startGame();
+  const made = playScene(state, sceneParam);
+  if (made && typeof made === 'object') {
+    const px = made.kind ? made.x : (made.x + made.w / 2) * TILE;
+    const py = made.kind ? made.y : (made.y + made.h / 2) * TILE;
+    cam.x = px;
+    cam.y = py;
+    cam.zoom = 0.7;
+    clampCamera(cam, state, view);
+  }
+}
+const gotoParam = params.get('goto');
+if (gotoParam) {
+  let spot = null;
+  if (gotoParam.startsWith('airport')) {
+    const f = state.city.airfields[Number(gotoParam.slice(7) || 1) - 1];
+    if (f) spot = { x: ((f.x0 + f.x1) / 2) * TILE, y: (f.y0 + 30) * TILE, zoom: 0.3 };
+  } else if (gotoParam.startsWith('station')) {
+    const st = state.city.stations[Number(gotoParam.slice(7)) - 1];
+    if (st) spot = { x: (st.building.x + 4) * TILE, y: (st.building.y + 8) * TILE, zoom: 0.8 };
+  }
+  if (spot) {
+    cam.x = spot.x;
+    cam.y = spot.y;
+    cam.zoom = spot.zoom;
     clampCamera(cam, state, view);
   }
 }

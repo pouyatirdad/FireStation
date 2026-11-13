@@ -637,6 +637,8 @@ function drawGround(ctx, state, b, z) {
   if (z >= 0.3) drawVerges(ctx, city, forests, z);
   drawTracks(ctx, state, b, z);
 
+  drawAirfields(ctx, city, b, z);
+
   // The station apron and its parking bays.
   for (const st of city.stations ?? [{ apron: APRON }]) {
     const a = st.apron;
@@ -748,6 +750,99 @@ let seaGradient = null;
 
 // Bridges, drawn after the roads: concrete parapets along both sides of the
 // deck and the deck's shadow on the water downstream.
+// ----------------------------------------------------------- airfields ---
+
+const inView = (r, b) => !(r.x1 < b.x0 - 1 || r.x0 > b.x1 + 1 || r.y1 < b.y0 - 1 || r.y0 > b.y1 + 1);
+const tileRect = (r) => [r.x0 * TILE, r.y0 * TILE, (r.x1 - r.x0 + 1) * TILE, (r.y1 - r.y0 + 1) * TILE];
+
+/** Runways, taxiways and aprons: flat ground, drawn under the buildings. */
+function drawAirfields(ctx, city, b, z) {
+  for (const f of city.airfields ?? []) {
+    if (!inView(f, b)) continue;
+    // The airside is a lighter concrete than the streets, with grass between.
+    ctx.fillStyle = '#3d4f3a';
+    ctx.fillRect(...tileRect({ x0: f.x0, y0: f.y0, x1: f.x1, y1: f.y1 }));
+    ctx.fillStyle = '#4b5258';
+    ctx.fillRect(...tileRect(f.apron));
+    ctx.fillRect(...tileRect(f.forecourt));
+    ctx.fillRect(...tileRect(f.gate));
+    ctx.fillRect(...tileRect(f.service));
+    ctx.fillStyle = '#383d42';
+    ctx.fillRect(...tileRect(f.taxi));
+    for (const c of f.connectors) ctx.fillRect(...tileRect(c));
+    ctx.fillStyle = '#2b2f33';
+    ctx.fillRect(...tileRect(f.runway));
+    if (z < 0.2) continue;
+    // Markings: yellow taxi lines, white runway edges, centre dashes, thresholds.
+    ctx.strokeStyle = '#d8b83a';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(f.taxi.x0 * TILE, (f.taxi.y0 + 1) * TILE);
+    ctx.lineTo((f.taxi.x1 + 1) * TILE, (f.taxi.y0 + 1) * TILE);
+    for (const c of f.connectors) {
+      ctx.moveTo((c.x0 + 1) * TILE, c.y0 * TILE);
+      ctx.lineTo((c.x0 + 1) * TILE, (c.y1 + 1) * TILE);
+    }
+    ctx.stroke();
+    const r = f.runway;
+    ctx.strokeStyle = 'rgba(240,240,235,0.85)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(r.x0 * TILE + 6, r.y0 * TILE + 3, (r.x1 - r.x0 + 1) * TILE - 12, (r.y1 - r.y0 + 1) * TILE - 6);
+    ctx.setLineDash([26, 22]);
+    ctx.beginPath();
+    ctx.moveTo((r.x0 + 4) * TILE, (r.y0 + 2) * TILE);
+    ctx.lineTo((r.x1 - 3) * TILE, (r.y0 + 2) * TILE);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(240,240,235,0.85)';
+    for (const end of [r.x0 + 1, r.x1 - 2]) {
+      for (let k = 0; k < 4; k++) ctx.fillRect(end * TILE, (r.y0 + 0.4 + k * 0.9) * TILE, TILE * 1.3, TILE * 0.5);
+    }
+    // Aircraft stands on the apron.
+    ctx.strokeStyle = 'rgba(216,184,58,0.55)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    for (let x = f.apron.x0 + 4; x < f.apron.x1 - 2; x += 10) {
+      ctx.moveTo(x * TILE, f.apron.y0 * TILE + 6);
+      ctx.lineTo(x * TILE, (f.apron.y1 + 1) * TILE - 6);
+    }
+    ctx.stroke();
+    // A parked airliner or two, for scale.
+    if (z >= 0.35) {
+      for (let x = f.apron.x0 + 9; x < f.apron.x1 - 8; x += 20) drawAirliner(ctx, x * TILE, (f.apron.y0 + 3.4) * TILE);
+    }
+  }
+}
+
+/** A parked airliner seen from above, nose to the south. */
+function drawAirliner(ctx, cx, cy) {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.fillStyle = 'rgba(0,0,0,0.25)';
+  ctx.beginPath();
+  ctx.ellipse(5, 7, 14, 38, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#e4e7ea';
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 8, 38, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // Wings and tailplane.
+  ctx.fillStyle = '#cfd4d8';
+  ctx.beginPath();
+  ctx.moveTo(-6, -4); ctx.lineTo(-44, 14); ctx.lineTo(-44, 20); ctx.lineTo(-6, 12); ctx.closePath();
+  ctx.moveTo(6, -4); ctx.lineTo(44, 14); ctx.lineTo(44, 20); ctx.lineTo(6, 12); ctx.closePath();
+  ctx.moveTo(-3, -30); ctx.lineTo(-16, -38); ctx.lineTo(-16, -34); ctx.lineTo(-3, -26); ctx.closePath();
+  ctx.moveTo(3, -30); ctx.lineTo(16, -38); ctx.lineTo(16, -34); ctx.lineTo(3, -26); ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#2f6fa8';
+  ctx.fillRect(-1.5, -36, 3, 10);
+  ctx.fillStyle = '#5a6770';
+  ctx.beginPath();
+  ctx.ellipse(0, 31, 4, 5, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
 function drawBridges(ctx, b, z) {
   if (z < 0.3) return;
   for (const hy of H_ROADS) {
@@ -1470,11 +1565,15 @@ function drawBuilding(ctx, state, b, now, z) {
   if (b.type === 'factory') drawStacks(ctx, b, x, y - e, w, h, e);
   if (b.type === 'tower') drawMast(ctx, b, x, y - e, w, h);
   if (detailed) drawRoofDetails(ctx, b, x, y - e, w, h);
+  if (b.type === 'terminal') drawTerminalRoof(ctx, x, y - e, w, h);
+  if (b.type === 'hangar') drawHangarRoof(ctx, x, y - e, w, h);
+  if (b.type === 'railstation') drawRailRoof(ctx, x, y - e, w, h);
+  if (b.type === 'metro') drawMetroMark(ctx, x, y - e, w, h);
   if (b.type === 'pharmacy') drawPharmacyMark(ctx, x, y - e, w, h);
   if (b.type === 'hospital') drawHospitalMark(ctx, x, y - e, w, h, detailed);
   if (detailed && b.type === 'station') drawStationFace(
     ctx, b, x, facadeTop, w, e, z,
-    (b.id === 'station2' && !state.ownedStations?.[1]) || (b.id === 'dock' && !state.ownedStations?.[2]),
+    b.stationIndex > 0 && !state.ownedStations?.[b.stationIndex],
   );
 
   if (b.state === 'burning') {
@@ -1505,6 +1604,10 @@ const WALLS = {
   factory: ['#8a8f92', '#9b9d98', '#7b8286'],
   school: ['#a56a4c', '#b57a58', '#9a6248'],
   tankfarm: ['#9aa0a4'],
+  terminal: ['#b8c2c9', '#aab6be'],
+  hangar: ['#8d9498', '#80878c'],
+  railstation: ['#a89a86', '#9d8f7b'],
+  metro: ['#6f7b86', '#65717c'],
   pharmacy: ['#e3e6e2'],
   hospital: ['#e6e8e6'],
   station: ['#a2503f'],
@@ -1662,6 +1765,61 @@ function drawTrapped(ctx, b, x, y, w, h, now) {
     ctx.lineTo(px + 4 + wave, py - 2.5);
     ctx.stroke();
   }
+}
+
+// A glass-roofed terminal: long skylights, and a pale sign.
+function drawTerminalRoof(ctx, x, y, w, h) {
+  ctx.fillStyle = 'rgba(150,190,215,0.55)';
+  const n = Math.max(3, Math.floor(w / 36));
+  for (let i = 0; i < n; i++) ctx.fillRect(x + 8 + (i * (w - 16)) / n, y + 8, (w - 16) / n - 6, h - 16);
+  ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x + 6.5, y + 6.5, w - 13, h - 13);
+}
+
+// An aircraft hangar: a barrel roof, ribbed across.
+function drawHangarRoof(ctx, x, y, w, h) {
+  ctx.fillStyle = 'rgba(255,255,255,0.10)';
+  ctx.fillRect(x, y, w, h / 2);
+  ctx.fillStyle = 'rgba(0,0,0,0.12)';
+  ctx.fillRect(x, y + h / 2, w, h / 2);
+  ctx.strokeStyle = 'rgba(0,0,0,0.22)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let xx = x + 10; xx < x + w; xx += 10) { ctx.moveTo(xx, y); ctx.lineTo(xx, y + h); }
+  ctx.stroke();
+}
+
+// A railway terminus: a vaulted shed over the platforms, with the tracks showing
+// through the glass.
+function drawRailRoof(ctx, x, y, w, h) {
+  ctx.fillStyle = 'rgba(190,200,205,0.28)';
+  ctx.fillRect(x + 6, y + 6, w - 12, h - 12);
+  ctx.strokeStyle = 'rgba(60,66,72,0.75)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  const lanes = Math.max(3, Math.floor(h / 24));
+  for (let i = 0; i < lanes; i++) {
+    const yy = y + 12 + (i * (h - 24)) / Math.max(1, lanes - 1);
+    ctx.moveTo(x + 8, yy); ctx.lineTo(x + w - 8, yy);
+    ctx.moveTo(x + 8, yy + 4); ctx.lineTo(x + w - 8, yy + 4);
+  }
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+  ctx.beginPath();
+  for (let xx = x + 18; xx < x + w - 10; xx += 18) { ctx.moveTo(xx, y + 4); ctx.lineTo(xx, y + h - 4); }
+  ctx.stroke();
+}
+
+// The metro roundel on a station entrance.
+function drawMetroMark(ctx, x, y, w, h) {
+  const r = Math.min(w, h) * 0.3;
+  ctx.fillStyle = '#d6362f';
+  ctx.beginPath();
+  ctx.arc(x + w / 2, y + h / 2, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#f4f1ea';
+  ctx.fillRect(x + w / 2 - r - 3, y + h / 2 - 2, r * 2 + 6, 4);
 }
 
 function drawPharmacyMark(ctx, x, y, w, h) {
@@ -3787,6 +3945,12 @@ function miniStatic(state, mw, mh) {
   }
   for (const r of runsInView(city, 'h', H_ROADS, 0, city.w)) {
     g.fillRect(r.a * TILE * sx, r.line * TILE * sy, (r.b - r.a + 1) * TILE * sx, Math.max(1, 2 * TILE * sy));
+  }
+  g.fillStyle = '#3d4f3a';
+  for (const f of city.airfields ?? []) g.fillRect(f.x0 * TILE * sx, f.y0 * TILE * sy, (f.x1 - f.x0 + 1) * TILE * sx, (f.y1 - f.y0 + 1) * TILE * sy);
+  g.fillStyle = '#b9bec3';
+  for (const f of city.airfields ?? []) {
+    g.fillRect(f.runway.x0 * TILE * sx, f.runway.y0 * TILE * sy, (f.runway.x1 - f.runway.x0 + 1) * TILE * sx, Math.max(1.5, 4 * TILE * sy));
   }
   for (const b of state.buildings) {
     g.fillStyle = b.state === 'rubble' ? '#4d4a44' : b.type === 'pharmacy' ? '#7fcf9c' : b.type === 'hospital' ? '#ff8f8f' : '#7d848d';

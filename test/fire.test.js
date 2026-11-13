@@ -84,7 +84,10 @@ test('dispatch sends the engine, deploys the crew and puts the fire out', () => 
   const state = createGame(7);
   startShift(state);
   state.incidentsEnabled = false;
-  const target = state.buildings.find((b) => b.type === 'house' && b.y > 20);
+  const st = state.city.station;
+  const target = state.buildings
+    .filter((b) => b.type === 'house' && b.y > 20)
+    .sort((a, b) => Math.hypot(a.x - st.x, a.y - st.y) - Math.hypot(b.x - st.x, b.y - st.y))[0];
   ignite(state, target, 'test');
 
   assert.equal(commandDispatch(state, target.id), true);

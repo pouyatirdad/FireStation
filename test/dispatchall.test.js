@@ -293,5 +293,8 @@ test('each station has sixteen bays and the original bay numbers are unchanged',
   assert.deepEqual(bays.slice(8, 16).map((b) => b.station), Array(8).fill(1));
   assert.deepEqual(bays.slice(16, 24).map((b) => b.station), Array(8).fill(2));
   assert.ok(bays.slice(0, 24).every((b) => !b.extra));
-  assert.ok(bays.slice(24).every((b) => b.extra));
+  assert.ok(bays.slice(24, 48).every((b) => b.extra));
+  // The regional and airport stations come after them, sixteen bays each.
+  for (const st of stations.slice(3)) assert.equal(st.bays.length, 16, st.name);
+  assert.ok(bays.slice(48).every((b) => b.station >= 3));
 });

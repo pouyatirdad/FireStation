@@ -183,7 +183,9 @@ test('a wreck left alone sets a nearby building alight', () => {
 
 test('clearing the wreck in time pays a bonus and the fuel never catches', () => {
   const state = shift();
-  const wreck = trafficAccident(state, () => true);
+  // Near the station: the map is big and the fuse on a wreck is short.
+  const st = state.city.station;
+  const wreck = trafficAccident(state, (x, y) => Math.hypot(x - st.x, y - st.y) < 70);
   const credits = state.credits;
   // A crew clears it: feed the clear time in directly through the same call the crews use.
   const engine = state.engines[0];
@@ -239,13 +241,16 @@ test('a hot warehouse fire eventually triggers the explosion by itself', () => {
 test('the hospitals stand in the bases, not scattered round the city', () => {
   const state = shift();
   const hospitals = state.city.hospitals;
-  assert.equal(hospitals.length, 2);
-  assert.equal(state.buildings.filter((b) => b.type === 'hospital').length, 2, 'a hospital outside a base');
-  hospitals.forEach((h, i) => {
-    const st = state.city.stations[i].building;
-    assert.ok(Math.hypot(h.x - st.x, h.y - st.y) < 25, `hospital ${i} is not at its station`);
-    assert.equal(h.base, i);
+  const stations = state.city.stations;
+  // Every base on land has one hospital (the dock has none).
+  assert.equal(hospitals.length, stations.filter((st) => !st.sea).length);
+  assert.equal(state.buildings.filter((b) => b.type === 'hospital').length, hospitals.length, 'a hospital outside a base');
+  hospitals.forEach((h) => {
+    const st = stations[h.base].building;
+    assert.ok(Math.hypot(h.x - st.x, h.y - st.y) < 25, `hospital ${h.name} is not at its station`);
   });
+  assert.equal(hospitals[0].base, 0);
+  assert.equal(hospitals[1].base, 1);
 });
 
 test('a critical patient is stabilised, carried to a hospital, and paid for', () => {

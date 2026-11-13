@@ -1279,8 +1279,11 @@ button { font-family: inherit; }
   font-size: 12px;
 }
 .station__expand div { display: flex; flex-direction: column; gap: 2px; }
+.station__more { display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow-y: auto; }
 .station__expand span { color: var(--muted); font-size: 11px; }
-.station__chooser span { color: var(--muted); margin-right: auto; }
+.station__chooser { flex-wrap: wrap; justify-content: flex-start; }
+.station__chooser span { color: var(--muted); margin-right: auto; flex-basis: 100%; }
+.station__more .station__expand { margin: 0; }
 
 .contract {
   position: relative;
@@ -2205,6 +2208,8 @@ const CONFIG = {
     insurance: { premium: 70, lossShare: 0.4 }, // per game hour; share of a building loss you still pay
     contracts: { every: [300, 480], maxOffers: 3, maxActive: 2, failPenalty: 0.25 },
     stationPrice: 9000, // buying Station 2
+    regionStationPrice: 12000, // buying one of the regional stations out in the country
+    airportStationPrice: 18000, // buying an airport's own fire station
     dockPrice: 6500, // buying the Harbour Dock (berths for boats)
   },
 
@@ -2420,6 +2425,8 @@ const CONFIG = {
       kitchen: 330, gas: 460, apartment: 560, office: 650, hotel: 720, lift: 380, shopRow: 760,
       chemical: 1400, dockFuel: 1550, tower: 2400, trapped: 400, mall: 900, school: 700,
     },
+    sceneCall: 0.6, // share of small calls that are one of the scenes (see scenes.js)
+    sceneBigCall: 0.5, // share of major incidents that are a scene
     crashCall: 0.16, // share of small calls that are a traffic accident
     drownCall: 0.1, // share of small calls that are someone in the water
   },
@@ -2548,9 +2555,10 @@ return { TAU, clamp, lerp, dist, dist2, angleTo, angleDelta, approachAngle, dist
 __m["src/data/city.js"] = (function () {
 const { TILE } = __m["src/core/config.js"];
 const { Rng, clamp } = __m["src/core/math.js"];
-// Harbor City: a 520×384 tile grid (about ten times the area of the original
-// 160×120 town) of districts between 17 avenues and 16 streets, with several
-// forests, parks and a waterfront. Generated from a seed, so every shift is the
+// Harbor City: a 1660×1176 tile grid (about a hundred times the area of the
+// original 160×120 town, ten times the 520×384 city it grew from) of districts
+// between 55 avenues and 48 streets, with a dozen forests, parks and a
+// waterfront on the southern shore. Generated from a seed, so every shift is the
 // same city and the tests can point at a named building. The original town sits
 // in the north-west corner with Station 1 where it always was.
 //
@@ -2560,8 +2568,7 @@ const { Rng, clamp } = __m["src/core/math.js"];
 
 
 
-const CITY_W = 520;
-const CITY_H = 384;
+const CITY_W = 1660;
 const CITY_NAME = 'Harbor City';
 
 // Avenues run north–south, streets east–west. Each is two tiles wide. They are
@@ -2603,13 +2610,16 @@ function spacedLines(count, start, step, pins, min, max, seed) {
   return lines;
 }
 
-const V_ROADS = spacedLines(17, 12, 30, [0, 1, 2, 7, 8, 9, 11, 12, 16], 22, 42, 4711);
-const H_ROADS = spacedLines(15, 12, 24, [0, 1, 2, 5, 6, 13, 14], 20, 34, 1993);
+// The first 17 avenues and 15 streets are the original city, pinned where they
+// always were; the rest carry on east and south with random gaps.
+const V_ROADS = spacedLines(55, 12, 30, [0, 1, 2, 7, 8, 9, 11, 12, 16, 54], 22, 42, 4711);
+const H_ROADS = spacedLines(48, 12, 24, [0, 1, 2, 5, 6, 13, 14, 47], 20, 34, 1993);
 
 // The sea fills everything south of the last street (the harbour quay). A river
 // meanders down through the east of the city inside one column of blocks, so it
 // only ever crosses the streets (as bridges) and never a street's length.
-const SEA_Y = 350;
+const SEA_Y = H_ROADS[H_ROADS.length - 1] + 2;
+const CITY_H = SEA_Y + 34;
 const RIVER_HALF_WIDTH = 3.5;
 const riverCentre = (y) => 357 + 8 * Math.sin(y / 55);
 
@@ -2651,6 +2661,11 @@ const SPEC = {
   factory: { floors: [1, 3], hp: [140, 180], risk: 1.25 },
   school: { floors: [2, 3], hp: [110, 140], risk: 0.7 },
   tankfarm: { floors: [1, 1], hp: [160, 210], risk: 1.45 },
+  // Transport: the airport, the railway and the metro.
+  terminal: { floors: [2, 3], hp: [170, 210], risk: 0.6 },
+  hangar: { floors: [1, 1], hp: [120, 160], risk: 1.2 },
+  railstation: { floors: [2, 3], hp: [150, 190], risk: 0.6 },
+  metro: { floors: [1, 2], hp: [100, 130], risk: 0.55 },
 };
 
 // Size classes by building mass (footprint x floors, the measure the fire logic
@@ -2676,6 +2691,10 @@ const ROOFS = {
   factory: ['#6c7276', '#797d79', '#5f676b'],
   school: ['#8f6a52', '#9b7658', '#84624d'],
   tankfarm: ['#8a8f93', '#7b8286', '#969b9e'],
+  terminal: ['#8d949b', '#7f8a93', '#98a0a6'],
+  hangar: ['#6d7479', '#7a8085', '#646b70'],
+  railstation: ['#6f7c86', '#5f6c76', '#7b8790'],
+  metro: ['#4a5a68', '#56606b', '#3f4f5c'],
 };
 
 // What is built in each kind of block (by lot style), with weights. The big
@@ -2685,9 +2704,9 @@ const KIND_TYPES = {
   villa: [['villa', 8], ['house', 0.8], ['school', 0.15], ['apartment', 0.15]],
   suburb: [['house', 8], ['apartment', 1.6], ['school', 0.12], ['shop', 0.3]],
   flats: [['apartment', 5], ['house', 1.5], ['school', 0.4], ['shop', 0.4]],
-  downtown: [['office', 3.2], ['tower', 3], ['hotel', 1.8], ['mall', 1.8], ['apartment', 0.7], ['shop', 0.6]],
+  downtown: [['office', 3.2], ['tower', 3], ['hotel', 1.8], ['mall', 4], ['apartment', 0.7], ['shop', 0.6], ['metro', 1.6], ['railstation', 1.4]],
   industry: [['warehouse', 4], ['factory', 3.5], ['tankfarm', 1.6], ['office', 0.4]],
-  market: [['shop', 4], ['apartment', 2.6], ['house', 0.6], ['hotel', 0.25]],
+  market: [['shop', 4], ['apartment', 2.6], ['house', 0.6], ['hotel', 0.25], ['mall', 0.5]],
 };
 
 // How many people are inside at 07:00. Homes are nearly empty in the morning;
@@ -2708,6 +2727,10 @@ const OCCUPANTS = {
   factory: [12, 40],
   school: [40, 120],
   tankfarm: [1, 4],
+  terminal: [80, 200],
+  hangar: [2, 10],
+  railstation: [40, 120],
+  metro: [20, 70],
 };
 
 const NAMES = {
@@ -2779,6 +2802,17 @@ const NAMES = {
     'Lincoln High School', 'St. Clair Academy', 'Maple Grove School', 'Westfield Primary', 'Riverside College',
     'Holloway Secondary', 'Elmgrove School', 'Fairmount Academy',
   ],
+  metro: [
+    'Central Metro', 'Union Square Metro', 'Harbor Line Metro', 'Northgate Metro', 'City Hall Metro', 'Market Street Metro',
+    'University Metro', 'Riverside Metro', 'Cathedral Metro', 'Exchange Metro', 'Stadium Metro', 'Park Lane Metro',
+    'Kings Cross Metro', 'Mill Road Metro', 'Docks Metro', 'Old Town Metro', 'Victoria Metro', 'Albion Metro',
+  ],
+  railstation: [
+    'Harbor Central Station', 'Northgate Rail Station', 'Eastside Junction', 'Union Terminus', 'Riverside Rail Station',
+    'Midtown Station', 'Kings Cross Station', 'Grand Central Terminal', 'Southern Cross Station', 'Westgate Station',
+  ],
+  terminal: ['Airport Terminal'],
+  hangar: ['Aircraft Hangar'],
   tankfarm: [
     'Tidewater Fuel Terminal', 'South Quay Oil Depot', 'Harbor Bulk Storage', 'Dockside Fuel Farm',
     'Ironbridge Tank Park', 'Freight Yard Fuel Depot',
@@ -2852,11 +2886,73 @@ const DOWNTOWNS = [
   { col: 7, row: 14, name: 'SOUTH BANK' },
 ];
 
-const FOREST_NAMES = ['NORTH WOODS', 'PINE RIDGE', 'GREEN HOLLOW', 'EASTWOOD', 'BIRCH FOREST', 'OLD GROWTH', 'FERN VALLEY', 'SOUTHEAST FOREST'];
+const MORE_DOWNTOWN_NAMES = [
+  'AIRPORT CITY', 'CENTRAL STATION', 'CASTLE HILL', 'WESTGATE', 'LAKESIDE', 'BRIDGEPORT', 'MARKET CROSS', 'PARKSIDE',
+  'NEW TOWN', 'ROYAL MILE', 'TECH QUARTER', 'KINGS CROSS', 'ST. MARY', 'FAIRWAY', 'HIGHBURY', 'STONEBRIDGE',
+  'OAKLANDS', 'PORTSMOUTH', 'THE EXCHANGE', 'MILL ROW', 'SUNDERLAND', 'CRESCENT', 'RIVERGATE', 'VICTORIA',
+  'ALBION', 'ELM CROSS', 'ASTORIA', 'GRAND CENTRAL', 'NORTH HARBOR', 'COLLEGE GREEN', 'SPRINGFIELD', 'LINCOLN PARK',
+  'MONTROSE', 'ARDEN', 'BELMONT', 'CARLTON', 'DEVONPORT', 'EASTBURY', 'FOXHALL', 'GLENMORE',
+];
 
-// The big pine forest in the south-east: every block east of the river from the
-// Eastside district down to the quay (columns 13–17, rows 10–14).
-const BIG_FOREST = { col0: 13, col1: 17, row0: 10, row1: 14, zone: FOREST_NAMES.length - 1 };
+// Big pine forests (blocks): the original one in the south-east of the old city,
+// and a few more in the new country. Each is one named zone.
+const BIG_FOREST_BOXES = [
+  { col0: 13, col1: 17, row0: 10, row1: 14 }, // SOUTHEAST FOREST: east of the river
+  { col0: 27, col1: 33, row0: 3, row1: 8 },
+  { col0: 40, col1: 46, row0: 15, row1: 21 },
+  { col0: 21, col1: 26, row0: 26, row1: 32 },
+  { col0: 3, col1: 9, row0: 34, row1: 40 },
+  { col0: 36, col1: 42, row0: 32, row1: 38 },
+  { col0: 47, col1: 53, row0: 4, row1: 9 },
+  { col0: 49, col1: 54, row0: 33, row1: 39 },
+];
+// The airports: each is a box of blocks merged into one (the streets inside are
+// taken out). The first is the international airport in the east.
+const AIRPORT_BOXES = [
+  { col0: 44, col1: 48, row0: 23, row1: 25, name: 'Harbor City International Airport', short: 'International' },
+  { col0: 16, col1: 19, row0: 20, row1: 22, name: 'Northgate Regional Airfield', short: 'Regional' },
+];
+const inAirport = (col, row, pad = 0) => AIRPORT_BOXES.some((b) => col >= b.col0 - pad && col <= b.col1 + pad && row >= b.row0 - pad && row <= b.row1 + pad);
+
+// Where the regional fire stations are (as block coordinates): the nearest block
+// big enough for a station, its apron and a hospital is used.
+const BASE_TARGETS = [
+  [22, 3], [36, 6], [50, 3], [22, 13], [34, 14], [47, 12], [10, 24], [28, 24], [37, 28], [14, 34], [30, 38], [46, 40],
+];
+
+const inBigForest = (col, row, pad = 0) => BIG_FOREST_BOXES.some((b) => col >= b.col0 - pad && col <= b.col1 + pad && row >= b.row0 - pad && row <= b.row1 + pad);
+
+// More commercial centres across the new country, on a loose grid, clear of the
+// river, the big forests and each other.
+{
+  const r = new Rng(8675);
+  let n = 0;
+  for (let row = 4; row <= 44; row += 7) {
+    for (let col = 3; col <= 51; col += 8) {
+      const c = col + r.int(-2, 2);
+      const rw = row + r.int(-2, 2);
+      if (c <= 17 && rw <= 15) continue; // the original city
+      if (c > 53 || rw > 44) continue;
+      if (c >= 10 && c <= 14) continue; // the river banks
+      if (inBigForest(c, rw, 1) || inAirport(c, rw, 1)) continue;
+      if (DOWNTOWNS.some((d) => Math.max(Math.abs(d.col - c), Math.abs(d.row - rw)) < 4)) continue;
+      DOWNTOWNS.push({ col: c, row: rw, name: MORE_DOWNTOWN_NAMES[n++ % MORE_DOWNTOWN_NAMES.length] });
+    }
+  }
+}
+
+const FOREST_NAMES = [
+  'NORTH WOODS', 'PINE RIDGE', 'GREEN HOLLOW', 'EASTWOOD', 'BIRCH FOREST', 'OLD GROWTH', 'FERN VALLEY', 'MOSSY DELL',
+  'HAWTHORN WOOD', 'CEDAR BROOK', 'WOLF RUN', 'SILVER BIRCH', 'THE CHASE', 'BRACKEN HILL', 'ASHDOWN', 'DEEP HOLLOW',
+  'KESTREL WOOD', 'LONG COPSE', 'HOLLY WOOD', 'STAG FOREST', 'ELDER GROVE', 'TIMBERLAND', 'MARSH WOOD', 'RAVEN WOOD',
+  // The big pine forests, one name each.
+  'SOUTHEAST FOREST', 'HIGHLAND FOREST', 'GREAT PINE FOREST', 'BLACK FOREST', 'KINGSWOOD', 'SHERWOOD', 'ARDEN FOREST', 'WILDERNESS',
+];
+const FIRST_BIG_ZONE = 24;
+
+// Every block of a big forest is pine; its zone is its index in BIG_FOREST_BOXES
+// past FIRST_BIG_ZONE.
+const isBigZone = (zone) => zone >= FIRST_BIG_ZONE;
 
 // A stable per-tile hash for decoration (tree species, forest edges), so the
 // city's random stream, and with it every building, is not disturbed.
@@ -2898,6 +2994,10 @@ const TYPE_RULES = {
   factory: { minW: 12, minH: 9, maxW: 24, maxH: 14 },
   school: { minW: 10, minH: 8, maxW: 16, maxH: 11 },
   tankfarm: { minW: 12, minH: 10, maxW: 20, maxH: 14 },
+  terminal: { minW: 24, minH: 9, maxW: 32, maxH: 12 },
+  hangar: { minW: 14, minH: 9, maxW: 20, maxH: 12 },
+  railstation: { minW: 16, minH: 10, maxW: 26, maxH: 14 },
+  metro: { minW: 4, minH: 4, maxW: 6, maxH: 5 },
 };
 
 // How each kind of block is cut into lots: lot sizes, the lane between lots, how
@@ -2938,8 +3038,14 @@ function subdivide(rng, x0, y0, x1, y1, p, out) {
 }
 
 // A few made-up neighbourhood names for the housing districts and industrial areas.
-const HOUSING_NAMES = ['MAPLE HEIGHTS', 'WESTFIELD', 'LINDEN PARK', 'ORCHARD HILL', 'KINGSLEY', 'ASHFORD', 'BRIARWOOD', 'ST. CLAIR', 'ELMGROVE', 'HOLLOWAY', 'FAIRMOUNT', 'THORNBURY'];
-const INDUSTRY_NAMES = ['HARBOUR WORKS', 'DOCKLANDS', 'FREIGHT YARD', 'SOUTH QUAY', 'TIDEWATER ESTATE', 'IRONBRIDGE WORKS'];
+const HOUSING_NAMES = [
+  'ROSEHILL', 'GREENFIELD', 'WILLOW BEND', 'CEDAR PARK', 'MEADOWBROOK', 'SUNNYSIDE', 'HAZELWOOD', 'PINE GROVE', 'BRIGHTON PARK', 'CHERRY LANE',
+  'FOXGLOVE', 'HIGHFIELD', 'ISLINGTON', 'JUNIPER HILL', 'KENSINGTON', 'LARKSPUR', 'MAPLE GLEN', 'NEWTON', 'OAK RIDGE', 'PRIMROSE HILL',
+  'QUEENSWAY', 'REDWOOD', 'STRATFORD', 'TANGLEWOOD', 'UPLANDS', 'VINE STREET', 'WINDSOR', 'YARROW', 'ZENITH PARK', 'AMBERLEY',
+  'BELLEVUE', 'CLIFTON', 'DALTON', 'EDGEWATER', 'FERNDALE', 'GRANGE HILL','MAPLE HEIGHTS', 'WESTFIELD', 'LINDEN PARK', 'ORCHARD HILL', 'KINGSLEY', 'ASHFORD', 'BRIARWOOD', 'ST. CLAIR', 'ELMGROVE', 'HOLLOWAY', 'FAIRMOUNT', 'THORNBURY'];
+const INDUSTRY_NAMES = [
+  'RAIL YARDS', 'FOUNDRY ROW', 'WAREHOUSE DISTRICT', 'CHEMICAL MILE', 'COLD STORAGE ROW', 'STEEL WORKS', 'GASWORKS', 'SALT FLATS', 'TANNERY ROW',
+'HARBOUR WORKS', 'DOCKLANDS', 'FREIGHT YARD', 'SOUTH QUAY', 'TIDEWATER ESTATE', 'IRONBRIDGE WORKS'];
 
 // What each kind of block is for. Housing, business ("company"), industry and
 // shopping streets are separate districts, the way a real city zones them.
@@ -2980,18 +3086,20 @@ function buildBlocks(seed = 7) {
   forestBlocks.set('5,0', 0);
   forestBlocks.set('4,1', 0);
   forestBlocks.set('5,1', 0);
-  for (let c = BIG_FOREST.col0; c <= BIG_FOREST.col1; c++) {
-    for (let r = BIG_FOREST.row0; r <= BIG_FOREST.row1; r++) forestBlocks.set(`${c},${r}`, BIG_FOREST.zone);
-  }
+  BIG_FOREST_BOXES.forEach((box, i) => {
+    for (let c = box.col0; c <= box.col1; c++) {
+      for (let r = box.row0; r <= box.row1; r++) forestBlocks.set(`${c},${r}`, FIRST_BIG_ZONE + i);
+    }
+  });
   // More woods in the outskirts, each two blocks by two, clear of the old town.
-  for (let zone = 1, tries = 0; zone < BIG_FOREST.zone && tries < 200; tries++) {
+  for (let zone = 1, tries = 0; zone < FIRST_BIG_ZONE && tries < 8000; tries++) {
     const col = rng.int(0, xs.length - 2);
     const row = rng.int(0, lastRow - 5); // never on the industrial waterfront
     if (col < 6 && row < 6) continue; // the original quarter and its own woods
     const cells = [[col, row], [col + 1, row], [col, row + 1], [col + 1, row + 1]];
     if (cells.some(([c, r]) => forestBlocks.has(`${c},${r}`))) continue;
     // Keep a block of town between the small woods and the big forest.
-    if (cells.some(([c, r]) => c >= BIG_FOREST.col0 - 1 && r >= BIG_FOREST.row0 - 1)) continue;
+    if (cells.some(([c, r]) => inBigForest(c, r, 1) || inAirport(c, r, 1))) continue;
     if (cells.some(([c, r]) => DOWNTOWNS.some((d) => Math.abs(d.col - c) <= 1 && Math.abs(d.row - r) <= 1))) continue;
     // Nor on the river banks, where the works are.
     if (cells.some(([c]) => c >= RIVER_COLS[0] - 1 && c <= RIVER_COLS[1] + 1)) continue;
@@ -3020,18 +3128,20 @@ function buildBlocks(seed = 7) {
         kind = 'forest';
         zone = forestBlocks.get(key);
       } else if (parks.has(key)) kind = 'park';
+      else if (inAirport(col, row)) kind = 'airport';
       else if ((col === 2 && row === 2) || (col === 8 && row === 6)) kind = 'station';
-      else if (col === 9 && row === 14) kind = 'dock';
+      else if (col === 9 && row === lastRow - 1) kind = 'dock';
       else if (near === 0) kind = roll < 0.03 ? 'park' : 'downtown';
       else if (near === 1 && !waterfront) kind = roll < 0.55 ? 'downtown' : 'market';
       else if (waterfront) kind = near === 1 ? 'downtown' : 'industry';
       else if (riverBank) kind = roll < 0.5 ? 'downtown' : 'market';
       else if (roll < 0.06) kind = 'park';
       else if (near === 2) kind = roll < 0.55 ? 'market' : 'houses';
+      else if (near >= 4 && roll < 0.3) kind = 'industry'; // industrial parks out on the edge of town
       else kind = roll < 0.12 ? 'market' : 'houses';
-      const woods = kind === 'forest' ? (zone === BIG_FOREST.zone ? 'pine' : 'mixed') : undefined;
+      const woods = kind === 'forest' ? (isBigZone(zone) ? 'pine' : 'mixed') : undefined;
       // Housing west of the river is apartment blocks, east of it villas.
-      const side = col <= RIVER_COLS[0] - 1 && col >= RIVER_COLS[0] - 5 ? 'west' : col >= RIVER_COLS[1] ? 'east' : null;
+      const side = col <= RIVER_COLS[0] - 1 && col >= RIVER_COLS[0] - 5 ? 'west' : col >= RIVER_COLS[1] && col <= 17 ? 'east' : null;
       grid.push({ col, row, x0, y0, x1, y1, kind, zone, woods, waterfront, riverSide: side, style: Math.floor(tileHash(col, row, 31) * 3) });
     }
   }
@@ -3039,6 +3149,33 @@ function buildBlocks(seed = 7) {
   // Merge some neighbouring pairs into one big block.
   const cols = xs.length;
   const at = (c, r) => grid[r * cols + c];
+
+  // Regional fire stations: the block nearest each target that is big enough.
+  let baseCount = 0;
+  for (const [tc, tr] of BASE_TARGETS) {
+    let best = null;
+    let bestD = Infinity;
+    for (let dr = -4; dr <= 4; dr++) {
+      for (let dc = -4; dc <= 4; dc++) {
+        const c = tc + dc;
+        const r = tr + dr;
+        if (c < 0 || r < 0 || c >= cols || r >= ys.length) continue;
+        const b = at(c, r);
+        if (!['houses', 'market', 'downtown', 'industry'].includes(b.kind)) continue;
+        if (b.x1 - b.x0 + 1 < 24 || b.y1 - b.y0 + 1 < 17) continue;
+        if (c >= RIVER_COLS[0] - 1 && c <= RIVER_COLS[1] + 1) continue;
+        const d = Math.hypot(dc, dr);
+        if (d < bestD) {
+          bestD = d;
+          best = b;
+        }
+      }
+    }
+    if (best) {
+      best.kind = 'base';
+      best.baseIndex = baseCount++;
+    }
+  }
   const mergeable = (b) => ['houses', 'market', 'industry'].includes(b.kind)
     && !(b.col < 4 && b.row < 4) // the original quarter keeps its streets
     && !(b.col >= 6 && b.col <= 10 && b.row >= 4 && b.row <= 7) // round Station 2
@@ -3068,6 +3205,19 @@ function buildBlocks(seed = 7) {
     b.merged = true;
     b.green = b.kind !== 'industry'; // a green or a square in the middle
     other.gone = true;
+  }
+  // The airports: one box of blocks each, merged into a single block.
+  for (const box of AIRPORT_BOXES) {
+    const first = at(box.col0, box.row0);
+    const last = at(box.col1, box.row1);
+    removed.push({ x0: first.x0, y0: first.y0, x1: last.x1, y1: last.y1 });
+    for (let r = box.row0; r <= box.row1; r++) {
+      for (let c = box.col0; c <= box.col1; c++) if (at(c, r) !== first) at(c, r).gone = true;
+    }
+    first.x1 = last.x1;
+    first.y1 = last.y1;
+    first.merged = true;
+    first.airport = box;
   }
   return { blocks: grid.filter((b) => !b.gone), removed };
 }
@@ -3202,7 +3352,36 @@ function rebalanceSizes(buildings) {
   }
 }
 
+// Generating the city takes a couple of seconds. Under Node (the tests) every
+// call after the first for a seed shares the first result's map arrays, trees
+// and so on (nothing at run time writes to them) and gets its own copy of the
+// buildings, the only part of the city a game changes. In the browser the city
+// is made once per page and nothing is kept.
+const cityCache = new Map();
 function createCity(seed = 7) {
+  if (!globalThis.process?.versions?.node) return generateCity(seed);
+  if (!cityCache.has(seed)) cityCache.set(seed, generateCity(seed));
+  const c = cityCache.get(seed);
+  // Everything that points at a building goes through one structuredClone so the
+  // copies still point at each other.
+  const mine = structuredClone({
+    buildings: c.buildings,
+    station: c.station,
+    hospitals: c.hospitals,
+    pharmacies: c.pharmacies,
+    bases: c.stations.map((st) => st.building),
+  });
+  return {
+    ...c,
+    buildings: mine.buildings,
+    station: mine.station,
+    hospitals: mine.hospitals,
+    pharmacies: mine.pharmacies,
+    stations: c.stations.map((st, i) => ({ ...st, building: mine.bases[i] })),
+  };
+}
+
+function generateCity(seed = 7) {
   const rng = new Rng(seed);
   const w = CITY_W;
   const h = CITY_H;
@@ -3467,6 +3646,65 @@ function createCity(seed = 7) {
     }
   }
 
+  // --- the airports ----------------------------------------------------------
+  // A runway along the top, a taxiway and an apron below it, the terminal, the
+  // hangars, the control tower and a fuel farm in a row, and a fire station of
+  // its own in the corner. Paved ground counts as road (cheap to drive, no
+  // trees); the renderer draws it from `airfields`.
+  const airfields = [];
+  const baseRequests = [];
+  const pave = (x0, y0, x1, y1) => {
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) if (inb(x, y) && !blocked[at(x, y)] && !water[at(x, y)]) road[at(x, y)] = 1;
+    }
+  };
+  function buildAirport(block) {
+    const box = block.airport;
+    const { x0: bx0, y0: by0, x1: bx1, y1: by1 } = block;
+    const W = bx1 - bx0 + 1;
+    const H = by1 - by0 + 1;
+    if (W < 60 || H < 52) return;
+    const ry0 = by0 + 6;
+    const runway = { x0: bx0 + 8, y0: ry0, x1: bx1 - 8, y1: ry0 + 3 };
+    const ty0 = ry0 + 8;
+    const taxi = { x0: bx0 + 14, y0: ty0, x1: bx1 - 14, y1: ty0 + 1 };
+    const connectors = [bx0 + 14, Math.floor((bx0 + bx1) / 2), bx1 - 15].map((x) => ({ x0: x, y0: ry0 + 4, x1: x + 1, y1: ty0 - 1 }));
+    const buildY = ty0 + 9;
+    const apronRect = { x0: bx0 + 24, y0: ty0 + 2, x1: bx1 - 24, y1: buildY - 1 };
+    const forecourt = { x0: bx0 + 24, y0: buildY + 12, x1: bx1 - 24, y1: buildY + 13 };
+    // The row of buildings, west to east.
+    const tower = addBuilding(bx0 + 26, buildY + 2, 6, 6, 'tower', { name: `${box.short} Control Tower`, floors: 7, zone: 'civic' });
+    const termX = bx0 + 36;
+    const terminal = addBuilding(termX, buildY, 30, 10, 'terminal', { name: `${box.short} Terminal`, floors: 3, zone: 'civic' });
+    let x = termX + 30 + 3;
+    const hangars = [];
+    for (let k = 0; k < 3 && x + 18 <= bx1 - 6; k++) {
+      hangars.push(addBuilding(x, buildY, 18, 10, 'hangar', { name: `${box.short} Hangar ${k + 1}`, floors: 1, zone: 'industrial' }));
+      x += 21;
+    }
+    let farm = null;
+    if (x + 16 <= bx1 - 6) farm = addBuilding(x, buildY, 16, 10, 'tankfarm', { name: `${box.short} Fuel Farm`, floors: 1, zone: 'industrial' });
+    pave(runway.x0, runway.y0, runway.x1, runway.y1);
+    pave(taxi.x0, taxi.y0, taxi.x1, taxi.y1);
+    for (const c of connectors) pave(c.x0, c.y0, c.x1, c.y1);
+    pave(apronRect.x0, apronRect.y0, apronRect.x1, apronRect.y1);
+    pave(forecourt.x0, forecourt.y0, forecourt.x1, forecourt.y1);
+    // The way in: from the forecourt down to the street below the airport.
+    const gate = { x0: termX + 13, y0: forecourt.y1 + 1, x1: termX + 14, y1: by1 + 1 };
+    pave(gate.x0, gate.y0, gate.x1, gate.y1);
+    // And a service road through the gap between the control tower and the
+    // terminal, so the airside and the landside are one piece of road.
+    const service = { x0: bx0 + 32, y0: buildY, x1: bx0 + 33, y1: forecourt.y0 };
+    pave(service.x0, service.y0, service.x1, service.y1);
+    // A fire station of its own, bottom left.
+    baseRequests.push({ kind: 'airport', name: `${box.short} Airport Fire Station`, hospital: `${box.short} Airport Medical Centre`, apronX0: bx0 + 3, apronY1: by1 });
+    airfields.push({
+      name: box.name, x0: bx0, y0: by0, x1: bx1, y1: by1,
+      runway, taxi, connectors, apron: apronRect, forecourt, gate, service,
+      terminal: terminal.id, tower: tower.id, hangars: hangars.map((hg) => hg.id), farm: farm?.id ?? null,
+    });
+  }
+
   function fillBlock(block) {
     const { x0, y0, x1, y1, kind } = block;
     if (kind === 'forest') {
@@ -3516,11 +3754,15 @@ function createCity(seed = 7) {
       scatterTrees(x0, y0, x1, y1);
       return;
     }
-    if (kind === 'station' || kind === 'dock' || kind === 'sea') return;
+    if (kind === 'station' || kind === 'dock' || kind === 'sea' || kind === 'base') return;
+    if (kind === 'airport') {
+      buildAirport(block);
+      return;
+    }
 
     const zone = ZONE_OF[kind];
     const variant = kind === 'houses'
-      ? (block.riverSide === 'east' ? 'villa' : block.riverSide === 'west' || block.style === 2 ? 'flats' : 'suburb')
+      ? (block.riverSide === 'east' ? 'villa' : block.riverSide === 'west' ? 'flats' : block.col <= 17 && block.row <= 14 ? (block.style === 2 ? 'flats' : 'suburb') : ['suburb', 'flats', block.col >= RIVER_COLS[1] ? 'villa' : 'flats'][block.style])
       : kind;
     const p = LOT_PARAMS[variant];
     // The pavement round the block: a different width on each side.
@@ -3800,7 +4042,7 @@ function createCity(seed = 7) {
   const nearCrossAvenue = (x) => V_ROADS.some((vx) => Math.abs(x - vx) < 2);
 
   const tryCar = (tx, ty, x, y, angle) => {
-    if (cars.length >= 1100) return;
+    if (cars.length >= 6000) return;
     if (!inb(tx, ty) || blocked[at(tx, ty)] || road[at(tx, ty)] || apron[at(tx, ty)] || park[at(tx, ty)] || water[at(tx, ty)] || woods[at(tx, ty)]) return;
     cars.push({ x, y, angle: rng.chance(0.5) ? angle : angle + Math.PI, color: rng.pick(CAR_COLORS) });
   };
@@ -3835,7 +4077,7 @@ function createCity(seed = 7) {
   }
 
   // --- the harbour dock: a base on the quay with berths on the water -----------
-  const bd = blocks.find((b) => b.col === 9 && b.row === 14);
+  const bd = blocks.find((b) => b.kind === 'dock');
   const dockBuilding = addBuilding(bd.x0 + 12, bd.y0 + 6, 8, 5, 'station', {
     id: 'dock',
     name: 'Harbour Dock',
@@ -3852,6 +4094,54 @@ function createCity(seed = 7) {
     station: 2,
     sea: true,
   }));
+
+  // --- the regional fire stations and the airports' own ---------------------
+  // The same layout as Station 1, bottom-aligned in its block so the apron meets
+  // the street. Each has a base hospital beside it. They are for sale.
+  const regional = [];
+  const baseBlocks = blocks.filter((b) => b.kind === 'base').sort((a, c) => a.baseIndex - c.baseIndex);
+  const districtOf = (col, row) => {
+    let best = DOWNTOWNS[0];
+    let bestD = Infinity;
+    for (const d of DOWNTOWNS) {
+      const dd = Math.hypot(d.col - col, d.row - row);
+      if (dd < bestD) {
+        bestD = dd;
+        best = d;
+      }
+    }
+    return best.name.toLowerCase().split(' ').map((wd) => wd[0].toUpperCase() + wd.slice(1)).join(' ');
+  };
+  const requests = [
+    ...baseBlocks.map((b) => ({ kind: 'region', apronX0: b.x0 + 1, apronY1: b.y1, district: districtOf(b.col, b.row) })),
+    ...baseRequests,
+  ];
+  requests.forEach((rq, n) => {
+    const index = 3 + n;
+    const ox = rq.apronX0 - APRON.x0;
+    const oy = rq.apronY1 - APRON.y1;
+    const name = rq.name ?? `Station ${index} · ${rq.district}`;
+    const baseStation = addBuilding(STATION.x + ox, STATION.y + oy, STATION.w, STATION.h, 'station', { id: `base${index}`, name, floors: 2 });
+    baseStation.stationIndex = index;
+    const baseHospital = addBuilding(63 + ox, 51 + oy, 7, 8, 'hospital', { name: rq.hospital ?? `${rq.district} Base Hospital`, floors: 3 });
+    baseHospital.base = index;
+    const apronR = { x0: APRON.x0 + ox, y0: APRON.y0 + oy, x1: APRON.x1 + ox, y1: APRON.y1 + oy };
+    for (let ty = apronR.y0; ty <= apronR.y1; ty++) {
+      for (let tx = apronR.x0; tx <= apronR.x1; tx++) {
+        if (!inb(tx, ty)) continue;
+        apron[at(tx, ty)] = 1;
+        road[at(tx, ty)] = 0;
+      }
+    }
+    const shift = (b, extra) => ({ x: (b.x + ox) * TILE, y: (b.y + oy) * TILE, station: index, ...(extra ? { extra: true } : {}) });
+    regional.push({
+      id: `base${index}`, name, kind: rq.kind, building: baseStation, apron: apronR, hospital: baseHospital,
+      bays: [...BAYS.map((b) => shift(b, false)), ...EXTRA_BAYS.map((b) => shift(b, true))],
+    });
+  });
+  station.stationIndex = 0;
+  station2.stationIndex = 1;
+  dockBuilding.stationIndex = 2;
 
   // Map labels: one per commercial centre, forest, and the harbour belts.
   const blockCentre = (col, row) => {
@@ -3935,6 +4225,7 @@ function createCity(seed = 7) {
     { id: 'station', name: 'Station 1', building: station, apron: { ...APRON }, bays: [...bays1, ...extra1] },
     { id: 'station2', name: 'Station 2', building: station2, apron: apron2, bays: [...bays2, ...extra2] },
     { id: 'dock', name: 'Harbour Dock', building: dockBuilding, apron: apronD, bays: [...berths, ...extraBerths], sea: true },
+    ...regional.map((r) => ({ id: r.id, name: r.name, kind: r.kind, building: r.building, apron: r.apron, bays: r.bays })),
   ];
 
   return {
@@ -3961,19 +4252,20 @@ function createCity(seed = 7) {
     lot: stationLot,
     // Every bay of every station. The original twenty-four keep their numbers
     // (Station 1, Station 2, the dock); the extra bays follow in the same order.
-    bays: [...bays1, ...bays2, ...berths, ...extra1, ...extra2, ...extraBerths],
+    bays: [...bays1, ...bays2, ...berths, ...extra1, ...extra2, ...extraBerths, ...regional.flatMap((r) => r.bays)],
     stations,
     districts,
     curves,
     pharmacies: buildings.filter((b) => b.type === 'pharmacy'),
     blocks: blocks.map((b) => ({ col: b.col, row: b.row, x0: b.x0, y0: b.y0, x1: b.x1, y1: b.y1, kind: b.kind, zone: ZONE_OF[b.kind] ?? null, merged: Boolean(b.merged) })),
-    hospitals: [hospital1, hospital2],
+    hospitals: [hospital1, hospital2, ...regional.map((r) => r.hospital)],
+    airfields,
     spawn: { x: BAYS[0].x * TILE, y: BAYS[0].y * TILE, angle: Math.PI / 2 },
     startHour: START_HOUR,
   };
 }
 
-return { CITY_W, CITY_H, CITY_NAME, V_ROADS, H_ROADS, SEA_Y, RIVER_HALF_WIDTH, riverCentre, APRON, SIZE_CLASSES, buildingMass, sizeClassOf, SIZE_TARGET, createCity };
+return { CITY_W, CITY_NAME, V_ROADS, H_ROADS, SEA_Y, CITY_H, RIVER_HALF_WIDTH, riverCentre, APRON, SIZE_CLASSES, buildingMass, sizeClassOf, SIZE_TARGET, createCity };
 })();
 
 // ---- src/core/hotkeys.js ----
@@ -4079,7 +4371,30 @@ function buildNav(city) {
     sail[i] = water[i] ? 1 : 0;
     swim[i] = blocked[i] ? 0 : 1;
   }
-  return { w, h, walk, drive, driveCost, sail, swim, water };
+  return { w, h, walk, drive, driveCost, sail, swim, water, lattice: buildLattice(city) };
+}
+
+// The avenues and streets form a lattice. Long drives are planned on it first
+// (a few thousand junctions), then each leg between two junctions is searched
+// tile by tile. That keeps a trip across the whole map to a few milliseconds.
+function buildLattice(city) {
+  const runs = city.roadRuns;
+  if (!runs?.v?.length || !runs?.h?.length) return null;
+  const vs = runs.v.map((r) => r.line);
+  const hs = runs.h.map((r) => r.line);
+  const covers = (spans, a, b) => spans.some(([s0, s1]) => s0 <= a && s1 >= b);
+  // hEdge[hi * nv + vi]: street hi is open from avenue vi to avenue vi + 1.
+  const nv = vs.length;
+  const nh = hs.length;
+  const hEdge = new Uint8Array(nh * nv);
+  const vEdge = new Uint8Array(nv * nh);
+  for (let hi = 0; hi < nh; hi++) {
+    for (let vi = 0; vi + 1 < nv; vi++) hEdge[hi * nv + vi] = covers(runs.h[hi].spans, vs[vi], vs[vi + 1] + 1) ? 1 : 0;
+  }
+  for (let vi = 0; vi < nv; vi++) {
+    for (let hi = 0; hi + 1 < nh; hi++) vEdge[vi * nh + hi] = covers(runs.v[vi].spans, hs[hi], hs[hi + 1] + 1) ? 1 : 0;
+  }
+  return { vs, hs, nv, nh, hEdge, vEdge };
 }
 
 const gridOf = (nav, mode) => (mode === 'drive' ? nav.drive : mode === 'sail' ? nav.sail : mode === 'swim' ? nav.swim : nav.walk);
@@ -4160,41 +4475,59 @@ function corridorClear(nav, mode, ax, ay, bx, by, half) {
     && lineClear(nav, mode, ax - nx, ay - ny, bx - nx, by - ny);
 }
 
+// A binary min-heap of tile indices keyed by a float, kept in flat arrays so a
+// long search allocates nothing per node.
 class MinHeap {
   constructor() {
-    this.items = [];
+    this.keys = new Float64Array(1024);
+    this.vals = new Int32Array(1024);
+    this.n = 0;
   }
   get size() {
-    return this.items.length;
+    return this.n;
   }
-  push(node) {
-    const a = this.items;
-    a.push(node);
-    let i = a.length - 1;
+  push(val, key) {
+    if (this.n === this.keys.length) {
+      const keys = new Float64Array(this.n * 2);
+      const vals = new Int32Array(this.n * 2);
+      keys.set(this.keys);
+      vals.set(this.vals);
+      this.keys = keys;
+      this.vals = vals;
+    }
+    const { keys, vals } = this;
+    let i = this.n++;
     while (i > 0) {
       const p = (i - 1) >> 1;
-      if (a[p].f <= a[i].f) break;
-      [a[p], a[i]] = [a[i], a[p]];
+      if (keys[p] <= key) break;
+      keys[i] = keys[p];
+      vals[i] = vals[p];
       i = p;
     }
+    keys[i] = key;
+    vals[i] = val;
   }
+  /** Remove and return the value with the smallest key. */
   pop() {
-    const a = this.items;
-    const top = a[0];
-    const last = a.pop();
-    if (a.length > 0) {
-      a[0] = last;
+    const { keys, vals } = this;
+    const top = vals[0];
+    const n = --this.n;
+    if (n > 0) {
+      const key = keys[n];
+      const val = vals[n];
       let i = 0;
       for (;;) {
         const l = i * 2 + 1;
+        if (l >= n) break;
         const r = l + 1;
-        let small = i;
-        if (l < a.length && a[l].f < a[small].f) small = l;
-        if (r < a.length && a[r].f < a[small].f) small = r;
-        if (small === i) break;
-        [a[small], a[i]] = [a[i], a[small]];
-        i = small;
+        const c = r < n && keys[r] < keys[l] ? r : l;
+        if (keys[c] >= key) break;
+        keys[i] = keys[c];
+        vals[i] = vals[c];
+        i = c;
       }
+      keys[i] = key;
+      vals[i] = val;
     }
     return top;
   }
@@ -4235,8 +4568,118 @@ function nearestPassable(nav, mode, tx, ty, maxR = 8) {
   return null;
 }
 
-/** A* on tile coordinates. Returns tiles after the start, or null. */
-function findPath(nav, mode, from, to) {
+/** The four junctions round a tile, as lattice (vi, hi) pairs. */
+function junctionsAround(lat, x, y) {
+  const bracket = (arr, v) => {
+    let lo = 0;
+    let hi = arr.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (arr[mid] <= v) lo = mid;
+      else hi = mid - 1;
+    }
+    return lo;
+  };
+  const vi = bracket(lat.vs, x);
+  const hi = bracket(lat.hs, y);
+  const out = [];
+  for (const dv of [0, 1]) {
+    for (const dh of [0, 1]) {
+      const a = vi + dv;
+      const b = hi + dh;
+      if (a < lat.nv && b < lat.nh) out.push([a, b]);
+    }
+  }
+  return out;
+}
+
+/**
+ * Plan a long drive on the avenue/street lattice: the junctions to pass through,
+ * or null if the lattice offers no route (a street cut by a wreck or by woods).
+ */
+function latticeRoute(nav, from, to) {
+  const lat = nav.lattice;
+  if (!lat) return null;
+  const node = (vi, hi) => hi * lat.nv + vi;
+  const total = lat.nv * lat.nh;
+  const px = (n) => lat.vs[n % lat.nv] + 0.5;
+  const py = (n) => lat.hs[(n - (n % lat.nv)) / lat.nv] + 0.5;
+  const scratch = nav.latScratch ?? (nav.latScratch = { g: new Float32Array(total + 1), came: new Int32Array(total + 1), done: new Uint8Array(total + 1) });
+  const { g, came, done } = scratch;
+  g.fill(Infinity);
+  came.fill(-1);
+  done.fill(0);
+  const goalNodes = new Map();
+  for (const [vi, hi] of junctionsAround(lat, to.x, to.y)) goalNodes.set(node(vi, hi), true);
+  const heap = new MinHeap();
+  const dist = (a, b, c, d) => Math.hypot(a - c, b - d);
+  for (const [vi, hi] of junctionsAround(lat, from.x, from.y)) {
+    const n = node(vi, hi);
+    g[n] = dist(from.x, from.y, px(n), py(n));
+    heap.push(n, g[n] + dist(px(n), py(n), to.x, to.y));
+  }
+  let end = -1;
+  let endCost = Infinity;
+  while (heap.size > 0) {
+    const n = heap.pop();
+    if (done[n]) continue;
+    done[n] = 1;
+    if (goalNodes.has(n)) {
+      const total2 = g[n] + dist(px(n), py(n), to.x, to.y);
+      if (total2 < endCost) {
+        endCost = total2;
+        end = n;
+      }
+    }
+    // Nothing better than the best goal found can still be queued.
+    if (end >= 0 && g[n] >= endCost) break;
+    const vi = n % lat.nv;
+    const hi = (n - vi) / lat.nv;
+    const next = [];
+    if (vi + 1 < lat.nv && lat.hEdge[hi * lat.nv + vi]) next.push(n + 1);
+    if (vi > 0 && lat.hEdge[hi * lat.nv + vi - 1]) next.push(n - 1);
+    if (hi + 1 < lat.nh && lat.vEdge[vi * lat.nh + hi]) next.push(n + lat.nv);
+    if (hi > 0 && lat.vEdge[vi * lat.nh + hi - 1]) next.push(n - lat.nv);
+    for (const m of next) {
+      if (done[m]) continue;
+      const ng = g[n] + dist(px(n), py(n), px(m), py(m));
+      if (ng < g[m]) {
+        g[m] = ng;
+        came[m] = n;
+        heap.push(m, ng + dist(px(m), py(m), to.x, to.y));
+      }
+    }
+  }
+  if (end < 0) return null;
+  const route = [];
+  for (let n = end; n !== -1; n = came[n]) route.push({ x: Math.round(px(n) - 0.5), y: Math.round(py(n) - 0.5) });
+  return route.reverse();
+}
+
+/**
+ * A* on tile coordinates. Returns tiles after the start, or null. A long drive
+ * is first planned along the street lattice and filled in leg by leg.
+ */
+function findPath(nav, mode, from, to, legOnly = false) {
+  if (mode === 'drive' && !legOnly && nav.lattice
+    && octile(to.x - from.x, to.y - from.y) > 140) {
+    const route = latticeRoute(nav, from, to);
+    if (route && route.length > 0) {
+      const stops = [from, ...route, to];
+      const out = [];
+      let ok = true;
+      for (let i = 0; i + 1 < stops.length && ok; i++) {
+        const leg = findPath(nav, mode, stops[i], stops[i + 1], true);
+        if (leg === null) ok = false;
+        else out.push(...leg);
+      }
+      if (ok) return out;
+    }
+  }
+  return findPathTiles(nav, mode, from, to);
+}
+
+function findPathTiles(nav, mode, from, to) {
   const grid = gridOf(nav, mode);
   const costs = mode === 'drive' ? nav.driveCost : null;
   const start = passable(nav, mode, from.x, from.y)
@@ -4270,13 +4713,19 @@ function findPath(nav, mode, from, to) {
   stamp[startIdx] = gen;
   gBuf[startIdx] = 0;
   came[startIdx] = -1;
-  open.push({ x: start.x, y: start.y, f: octile(goal.x - start.x, goal.y - start.y) });
+  // Short trips are searched exactly. On a long trip the heuristic is weighted,
+  // which keeps the search to a corridor round the straight line instead of
+  // flooding the open ground on both sides: the route can be a few per cent
+  // longer than the best one, which nobody driving across a city would notice.
+  const trip = octile(goal.x - start.x, goal.y - start.y);
+  const weight = trip < 80 ? 1 : Math.min(2.2, 1 + (trip - 80) / 120);
+  open.push(startIdx, trip * weight);
 
   while (open.size > 0) {
-    const cur = open.pop();
-    const ci = cur.y * nav.w + cur.x;
+    const ci = open.pop();
     if (closedStamp[ci] === gen) continue;
     closedStamp[ci] = gen;
+    const cur = { x: ci % nav.w, y: (ci - (ci % nav.w)) / nav.w };
 
     if (cur.x === goal.x && cur.y === goal.y) {
       const path = [];
@@ -4304,7 +4753,7 @@ function findPath(nav, mode, from, to) {
         stamp[ni] = gen;
         gBuf[ni] = ng;
         came[ni] = ci;
-        open.push({ x: nx, y: ny, f: ng + octile(goal.x - nx, goal.y - ny) });
+        open.push(ni, ng + weight * octile(goal.x - nx, goal.y - ny));
       }
     }
   }
@@ -6052,7 +6501,7 @@ function bridgeTiles(state) {
 }
 
 /** A car goes off a bridge, or someone goes into the harbour. */
-function drowningCall(state, allowed = () => true) {
+function drowningCall(state, allowed = () => true, opts = {}) {
   const rng = state.rng;
   const city = state.city;
   let spot = null;
@@ -6079,6 +6528,7 @@ function drowningCall(state, allowed = () => true) {
     }
   }
   if (!spot) return null;
+  if (opts.what) spot.what = opts.what;
   // Make sure it is water.
   if (!city.water[Math.floor(spot.y / TILE) * city.w + Math.floor(spot.x / TILE)]) return null;
 
@@ -9488,14 +9938,24 @@ function fleetTab(state) {
       '</div>';
   }).join('');
 
-  const two = state.city.stations[1];
-  const open2 = ownsStation(state, 1);
-  const stationBox = open2
+  const landStations = state.city.stations.map((st, i) => ({ st, i })).filter(({ st }) => !st.sea);
+  const ownedLand = landStations.filter(({ i }) => ownsStation(state, i));
+  const price = (st, i) => (i === 1 ? CONFIG.economy.stationPrice : st.kind === 'airport' ? CONFIG.economy.airportStationPrice : CONFIG.economy.regionStationPrice);
+  const stationBox = (ownedLand.length > 1
     ? '<div class="station__chooser"><span>Deliver new vehicles to</span>' +
-      state.city.stations.map((st, i) => st.sea ? '' : '<button type="button" class="btn btn--small' + (buyStation === i ? ' is-active' : '') + '" data-action="deliver-to" data-station="' + i + '">' + esc(st.name) + '</button>').join('') +
+      ownedLand.map(({ st, i }) => '<button type="button" class="btn btn--small' + (buyStation === i ? ' is-active' : '') + '" data-action="deliver-to" data-station="' + i + '">' + esc(st.name) + '</button>').join('') +
       '</div>'
-    : '<div class="station__expand"><div><b>' + esc(two.name) + ' · Civic Quarter</b><span>Sixteen more bays and a second helipad, deep in the city. Calls start coming from its district too.</span></div>' +
-      '<button type="button" class="btn btn--small btn--primary" data-action="buy-station"' + (state.credits < CONFIG.economy.stationPrice ? ' disabled' : '') + '>Open $' + CONFIG.economy.stationPrice.toLocaleString('en-US') + '</button></div>';
+    : '') +
+    '<div class="station__more">' +
+    landStations.filter(({ i }) => i > 0 && !ownsStation(state, i)).map(({ st, i }) => {
+      const cost = price(st, i);
+      const blurb = i === 1 ? 'Sixteen more bays and a second helipad, deep in the city. Calls start coming from its district too.'
+        : st.kind === 'airport' ? 'The airport fire station: sixteen bays beside the runway and its own medical centre. Calls start coming from the airfield and its district.'
+          : 'A regional station with sixteen bays and a base hospital. Calls start coming from its district.';
+      return '<div class="station__expand"><div><b>' + esc(st.name) + '</b><span>' + blurb + '</span></div>' +
+        '<button type="button" class="btn btn--small btn--primary" data-action="buy-station" data-station="' + i + '"' + (state.credits < cost ? ' disabled' : '') + '>Open $' + cost.toLocaleString('en-US') + '</button></div>';
+    }).join('') +
+    '</div>';
 
   const dock = state.city.stations[2];
   const dockBox = dockOpen
@@ -9513,7 +9973,7 @@ function fleetTab(state) {
 
   return '<div class="station__balance">$' + state.credits.toLocaleString('en-US') + '<span>credits · ' + landCount + '/' + bays + ' bays</span></div>' +
     '<div class="station__list">' + engines + '</div>' +
-    (maxed ? '<p class="station__full">Every bay you own is full' + (open2 ? '.' : ' — open Station 2 for sixteen more.') + '</p>' : '') +
+    (maxed ? '<p class="station__full">Every bay you own is full' + (ownedLand.length > 1 ? '.' : ' — open another station for sixteen more bays.') + '</p>' : '') +
     stationBox + dockBox +
     '<div class="station__buys">' + buys + '</div>';
 }
@@ -9722,17 +10182,25 @@ function pickRoadSpot(state, allowed = () => true, from = null) {
   const sx = station.x + station.w / 2;
   const sy = station.y + station.h / 2;
 
-  for (let attempt = 0; attempt < 80; attempt++) {
+  // The map is huge and a call only comes from near a station you own, so most
+  // of the tries are drawn from a window round one of those stations.
+  const owned = (city.stations ?? []).filter((st, i) => state.ownedStations?.[i] ?? i === 0);
+  for (let attempt = 0; attempt < 160; attempt++) {
     const vertical = from ? from.axis === 'v' : rng.chance(0.5);
+    const hub = !from && owned.length && attempt % 4 !== 3 ? rng.pick(owned).building : null;
     let rect;
     if (vertical) {
-      const tx = from ? from.tx : rng.pick(V_ROADS);
-      const ty = from ? from.ty + from.dy : rng.int(6, city.h - 14);
+      const lines = hub ? V_ROADS.filter((vx) => Math.abs(vx - hub.x) < 260) : V_ROADS;
+      if (lines.length === 0) continue;
+      const tx = from ? from.tx : rng.pick(lines);
+      const ty = from ? from.ty + from.dy : hub ? Math.round(hub.y + rng.range(-260, 260)) : rng.int(6, city.h - 14);
       rect = { tx, ty, tw: 2, th: 3, axis: 'v' };
       if (crossesRoad(H_ROADS, ty, ty + 2)) continue;
     } else {
-      const ty = from ? from.ty : rng.pick(H_ROADS);
-      const tx = from ? from.tx + from.dx : rng.int(6, city.w - 14);
+      const lines = hub ? H_ROADS.filter((hy) => Math.abs(hy - hub.y) < 260) : H_ROADS;
+      if (lines.length === 0) continue;
+      const ty = from ? from.ty : rng.pick(lines);
+      const tx = from ? from.tx + from.dx : hub ? Math.round(hub.x + rng.range(-260, 260)) : rng.int(6, city.w - 14);
       rect = { tx, ty, tw: 3, th: 2, axis: 'h' };
       if (crossesRoad(V_ROADS, tx, tx + 2)) continue;
     }
@@ -9770,22 +10238,29 @@ function hurtAt(state, rect, count, place) {
   return made;
 }
 
-function trafficAccident(state, allowed) {
+/**
+ * A crash on a stretch of street. `opts` turns it into a story: a name, a
+ * number of injured [lo, hi], a bigger reward, a short fuse on the fuel, a log line.
+ */
+function trafficAccident(state, allowed, opts = {}) {
   const rect = pickRoadSpot(state, allowed);
   if (!rect) return null;
   const place = placeNear(state, (rect.tx + 1) * TILE, (rect.ty + 1) * TILE);
   const [lo, hi] = CONFIG.blockade.fuelDelay;
+  const fuse = opts.quickFuse ? 0.55 : 1;
   const blockade = addBlockade(state, rect, {
-    name: `Crash near ${place}`,
+    name: `${opts.name ?? 'Crash'} near ${place}`,
     place,
-    reward: CONFIG.incidents.reward.crash,
-    fuelAt: state.time + state.rng.range(lo, hi),
+    big: Boolean(opts.big),
+    reward: opts.reward ?? CONFIG.incidents.reward.crash,
+    fuelAt: state.time + state.rng.range(lo, hi) * fuse,
   });
-  const hurt = hurtAt(state, rect, state.rng.int(1, 3), place);
+  const [hlo, hhi] = opts.hurt ?? [1, 3];
+  const hurt = hurtAt(state, rect, state.rng.int(hlo, hhi), place);
   addEvent(
     state,
-    `Traffic accident near ${place} — road blocked, ${hurt} injured`,
-    'fire',
+    opts.text ? opts.text({ place, hurt }) : `Traffic accident near ${place} — road blocked, ${hurt} injured`,
+    opts.big ? 'big' : 'fire',
   );
   return blockade;
 }
@@ -10188,11 +10663,11 @@ const { alignment } = __m["src/systems/wind.js"];
 
 let seq = 1;
 
-function startWildfire(state, x, y, reward = 2200) {
+function startWildfire(state, x, y, reward = 2200, opts = {}) {
   const wildfire = {
     id: `wildfire${seq++}`,
     kind: 'wildfire',
-    name: 'Forest fire',
+    name: opts.name ?? 'Forest fire',
     x,
     y,
     radius: 2.5 * TILE,
@@ -10204,7 +10679,7 @@ function startWildfire(state, x, y, reward = 2200) {
     big: true,
   };
   state.wildfires.push(wildfire);
-  addEvent(state, `MAJOR INCIDENT — forest fire in ${placeNear(state, x, y)}`, 'big');
+  addEvent(state, opts.text ?? `MAJOR INCIDENT — forest fire in ${placeNear(state, x, y)}`, 'big');
   return wildfire;
 }
 
@@ -10289,6 +10764,211 @@ function updateWildfires(state, dt) {
 return { startWildfire, restoreWildfires, updateWildfires };
 })();
 
+// ---- src/systems/scenes.js ----
+__m["src/systems/scenes.js"] = (function () {
+// Incident scenes: the stories behind a call. Each scene is data: where it can
+// happen (a kind of building, a stretch of forest, a road, the water), how bad
+// it starts (fire, people trapped, people hurt, chemicals, a blast) and what the
+// dispatcher reads out. incidents.js picks a scene whose site exists in reach of
+// a station, and `runScene` plays it with the same primitives every other call
+// uses, so a scene is scored, listed and fought like any other incident.
+//
+// Fields:
+//   id, label        list label (and the story line on the selection card)
+//   site             'building' (default), 'forest', 'road' or 'water'
+//   types / zones    which buildings it can happen to (building scenes)
+//   waterfront       only buildings by the water
+//   weight           how often it is drawn, relative to the others
+//   big              a major incident (held back until the cycle is under way)
+//   reward           credits for finishing it
+//   fire             start the building alight at this intensity (omit: no fire)
+//   trapped [a, b]   people cut off inside
+//   hurt [[lo, hi, reason], ...]   injured people on the ground beside it
+//   hazmat           chemicals: spreads fast, may explode
+//   blast            a real explosion (neighbours, debris in the street)
+//   text(ctx)        the log line; ctx = { b, n, where }
+
+const ROAD = 'road';
+const FOREST = 'forest';
+const WATER = 'water';
+
+const SCENES = [
+  // --- homes ---------------------------------------------------------------
+  { id: 'chimney', label: 'Chimney fire', types: ['house', 'villa'], weight: 3, reward: 260, fire: 0.1,
+    text: ({ b }) => `Chimney fire at ${b.name} — flames in the roof space` },
+  { id: 'blanket', label: 'Bedroom fire', types: ['house', 'apartment'], weight: 2, reward: 320, fire: 0.18, trapped: [1, 1],
+    text: ({ b }) => `Bedroom fire at ${b.name} — an electric blanket, someone is still upstairs` },
+  { id: 'garage', label: 'Garage fire — gas cylinders', types: ['house', 'villa'], weight: 2, reward: 480, fire: 0.3, hazmat: true,
+    hurt: [[0.3, 0.6, 'Burns victim at']],
+    text: ({ b }) => `Garage fire at ${b.name} — gas cylinders inside, the neighbours are being moved back` },
+  { id: 'ebike', label: 'E-bike battery fire', types: ['apartment'], weight: 2.5, reward: 560, fire: 0.25, trapped: [1, 3],
+    text: ({ b, n }) => `E-bike battery fire in the hallway of ${b.name} — ${n} residents cut off by the smoke` },
+  { id: 'dryer', label: 'Laundry fire', types: ['apartment'], weight: 1.5, reward: 420, fire: 0.2,
+    text: ({ b }) => `Tumble dryer fire in the basement laundry of ${b.name}` },
+  { id: 'monoxide', label: 'Carbon monoxide', types: ['house', 'apartment', 'villa'], weight: 2, reward: 0,
+    hurt: [[0.4, 0.8, 'Carbon monoxide casualty at'], [0.35, 0.7, 'Carbon monoxide casualty at']],
+    text: ({ b }) => `Carbon monoxide alarm at ${b.name} — the family is unwell, get the paramedics in` },
+  { id: 'fireworks', label: 'Fireworks accident', types: ['house', 'villa'], weight: 1, reward: 380, fire: 0.2,
+    hurt: [[0.5, 0.9, 'Fireworks burns at']],
+    text: ({ b }) => `Fireworks went off in the shed at ${b.name} — it is alight and someone is hurt` },
+  { id: 'barbecue', label: 'Barbecue fire spreads', types: ['house', 'villa'], weight: 2, reward: 280, fire: 0.12,
+    text: ({ b }) => `A barbecue has set the fence and the back of ${b.name} alight` },
+  { id: 'fallen', label: 'Resident fallen', types: ['house', 'apartment', 'villa'], weight: 2, reward: 360, trapped: [1, 1], rescue: true,
+    text: ({ b }) => `Elderly resident fallen and cannot reach the door — ${b.name}` },
+  { id: 'candle', label: 'Candle fire', types: ['house', 'apartment'], weight: 2, reward: 300, fire: 0.18, trapped: [0, 1],
+    text: ({ b }) => `A candle left burning has started a fire at ${b.name}` },
+  { id: 'hoarder', label: 'Hoarder house fire', types: ['house'], weight: 1, reward: 720, fire: 0.38, trapped: [1, 1],
+    text: ({ b }) => `House fire at ${b.name} — the rooms are packed to the ceiling and the resident cannot get out` },
+  { id: 'gasleak-flat', label: 'Gas leak', types: ['apartment'], weight: 1.5, reward: 520, hazmat: true,
+    hurt: [[0.3, 0.55, 'Gas leak casualty at'], [0.3, 0.55, 'Gas leak casualty at']],
+    text: ({ b }) => `Gas leak in ${b.name} — the block is being evacuated and two people are overcome` },
+
+  // --- shops ---------------------------------------------------------------
+  { id: 'grease', label: 'Restaurant kitchen fire', types: ['shop'], weight: 3, reward: 420, fire: 0.25,
+    text: ({ b }) => `Grease fire in the kitchen of ${b.name} — the extraction duct is alight` },
+  { id: 'oven', label: 'Bakery oven fire', types: ['shop'], weight: 1.5, reward: 380, fire: 0.2,
+    text: ({ b }) => `Oven fire at ${b.name} — flames in the flue` },
+  { id: 'shortcircuit', label: 'Electrical fire', types: ['shop', 'pharmacy'], weight: 2, reward: 340, fire: 0.15,
+    text: ({ b }) => `Electrical fire behind the counter at ${b.name}` },
+  { id: 'gasleak-shop', label: 'Gas leak', types: ['shop'], weight: 1.5, reward: 480, hazmat: true,
+    hurt: [[0.3, 0.6, 'Gas leak casualty at']],
+    text: ({ b }) => `Gas leak at ${b.name} — customers evacuated, one person collapsed` },
+  { id: 'fryer', label: 'Fryer explosion', types: ['shop'], weight: 1, reward: 600, fire: 0.4,
+    hurt: [[0.5, 0.9, 'Burns victim at']],
+    text: ({ b }) => `Fryer explosion at ${b.name} — the kitchen is alight and a cook is badly burned` },
+  { id: 'chemspill', label: 'Chemical spill', types: ['pharmacy'], weight: 1, reward: 520, hazmat: true,
+    hurt: [[0.3, 0.5, 'Fume casualty at']],
+    text: ({ b }) => `Chemical spill in the stockroom of ${b.name} — fumes in the shop` },
+
+  // --- offices, hotels, towers ---------------------------------------------
+  { id: 'serverroom', label: 'Server room fire', types: ['office'], weight: 2.5, reward: 700, fire: 0.25, trapped: [0, 2],
+    text: ({ b }) => `Server room fire at ${b.name} — gas suppression has gone off and the floor is full of smoke` },
+  { id: 'arson-office', label: 'Arson', types: ['office'], weight: 1, reward: 780, fire: 0.36, trapped: [2, 4],
+    text: ({ b, n }) => `Arson at ${b.name} — a fire set on two floors, ${n} staff cut off above it` },
+  { id: 'hotelkitchen', label: 'Hotel kitchen fire', types: ['hotel'], weight: 2, reward: 720, fire: 0.25, trapped: [1, 3],
+    text: ({ b }) => `Kitchen fire at ${b.name} — the smoke is climbing the service stairs` },
+  { id: 'balcony', label: 'Fall from a balcony', types: ['hotel', 'apartment'], weight: 1, reward: 0,
+    hurt: [[0.7, 1, 'Fall victim at']],
+    text: ({ b }) => `A guest has fallen from a balcony at ${b.name} — ambulance needed urgently` },
+  { id: 'cladding', label: 'Cladding fire', types: ['tower'], weight: 1.5, big: true, reward: 2600, fire: 0.35, trapped: [4, 8],
+    text: ({ b, n }) => `MAJOR INCIDENT — flames racing up the cladding of ${b.name}, ${n} people above the fire` },
+  { id: 'rooftop', label: 'Rooftop plant fire', types: ['tower', 'office'], weight: 1.5, reward: 600, fire: 0.2,
+    text: ({ b }) => `Air-conditioning plant on the roof of ${b.name} is alight` },
+  { id: 'crane', label: 'Construction accident', types: ['office', 'tower', 'hotel'], weight: 1, reward: 700, trapped: [1, 2], rescue: true,
+    hurt: [[0.7, 1, 'Construction casualty at']],
+    text: ({ b }) => `A scaffold has collapsed at ${b.name} — workers trapped and hurt` },
+  { id: 'cradle', label: 'Cradle failure', types: ['tower', 'hotel'], weight: 1, reward: 650, trapped: [2, 2], rescue: true,
+    text: ({ b }) => `Window cleaners stranded on a failed cradle on ${b.name}` },
+
+  // --- malls and schools ---------------------------------------------------
+  { id: 'foodcourt', label: 'Food court fire', types: ['mall'], weight: 3, reward: 950, fire: 0.3, trapped: [3, 6],
+    text: ({ b, n }) => `Food court fire at ${b.name} — ${n} shoppers cut off upstairs` },
+  { id: 'crush', label: 'Crowd crush', types: ['mall'], weight: 1, reward: 0,
+    hurt: [[0.4, 0.9, 'Crowd crush casualty at'], [0.4, 0.9, 'Crowd crush casualty at'], [0.4, 0.9, 'Crowd crush casualty at'], [0.4, 0.9, 'Crowd crush casualty at']],
+    text: ({ b }) => `Panic at ${b.name} — a crowd crush at the doors, several people hurt` },
+  { id: 'carpark', label: 'Car park fire', types: ['mall'], weight: 2, reward: 800, fire: 0.25, hazmat: true,
+    text: ({ b }) => `Cars burning on the top deck of the car park at ${b.name}` },
+  { id: 'lab', label: 'Chemistry lab fire', types: ['school'], weight: 2, reward: 800, fire: 0.3, hazmat: true, trapped: [1, 3],
+    text: ({ b }) => `Chemistry lab fire at ${b.name} — the pupils are out, staff are still inside` },
+  { id: 'gym', label: 'Gymnasium fire', types: ['school'], weight: 1.5, reward: 700, fire: 0.2,
+    text: ({ b }) => `Electrical fire in the gymnasium roof of ${b.name}` },
+
+  // --- industry -------------------------------------------------------------
+  { id: 'racking', label: 'Racking collapse', types: ['warehouse'], weight: 2, reward: 850, trapped: [1, 2], rescue: true,
+    hurt: [[0.7, 1, 'Crush victim at']],
+    text: ({ b }) => `Pallet racking has collapsed at ${b.name} — workers buried under the load` },
+  { id: 'toxicleak', label: 'Toxic gas leak', types: ['factory'], weight: 1.5, reward: 1300, hazmat: true,
+    hurt: [[0.3, 0.8, 'Gas casualty at'], [0.3, 0.8, 'Gas casualty at'], [0.3, 0.8, 'Gas casualty at']],
+    text: ({ b }) => `Toxic gas leak at ${b.name} — the works is evacuating, three people down` },
+  { id: 'dust', label: 'Dust explosion', types: ['factory'], weight: 1, big: true, reward: 2000, fire: 0.5, blast: true,
+    hurt: [[0.6, 1, 'Blast casualty at']],
+    text: ({ b }) => `MAJOR INCIDENT — dust explosion at ${b.name}, the roof is open and the works is alight` },
+  { id: 'welding', label: 'Welding fire', types: ['warehouse', 'factory'], weight: 2, reward: 700, fire: 0.3,
+    text: ({ b }) => `Welding sparks have set the stock alight at ${b.name}` },
+  { id: 'boiler', label: 'Boiler explosion', types: ['factory'], weight: 1, reward: 1500, fire: 0.4, blast: true,
+    text: ({ b }) => `Boiler explosion at ${b.name} — fire in the boiler house and debris in the street` },
+  { id: 'tankvent', label: 'Tank vent fire', types: ['tankfarm'], weight: 2, reward: 1500, fire: 0.45, hazmat: true,
+    text: ({ b }) => `A vent has ignited on a fuel tank at ${b.name} — it burns hot and may spread` },
+  { id: 'ammonia', label: 'Ammonia leak', types: ['warehouse'], weight: 1, reward: 1100, hazmat: true,
+    hurt: [[0.3, 0.7, 'Ammonia casualty at'], [0.3, 0.7, 'Ammonia casualty at'], [0.3, 0.7, 'Ammonia casualty at']],
+    text: ({ b }) => `Ammonia leak from the cold store at ${b.name} — three workers overcome` },
+  { id: 'forklift', label: 'Forklift accident', types: ['warehouse', 'factory'], weight: 1.5, reward: 0,
+    hurt: [[0.8, 1, 'Forklift accident casualty at']],
+    text: ({ b }) => `Forklift accident at ${b.name} — a worker is pinned and badly hurt` },
+  { id: 'pallets', label: 'Pallet yard fire', types: ['warehouse'], weight: 2, big: true, reward: 1900, fire: 0.5, hazmat: true,
+    text: ({ b }) => `MAJOR INCIDENT — the pallet yard at ${b.name} is burning fiercely and the wind is spreading it` },
+  { id: 'quay-fuel', label: 'Boat and fuel quay fire', types: ['warehouse', 'tankfarm'], waterfront: true, weight: 2, reward: 1500, fire: 0.4, hazmat: true,
+    text: ({ b }) => `A fuelling boat is alight against the quay at ${b.name} — a fireboat can reach it` },
+
+  // --- the airport ----------------------------------------------------------
+  { id: 'crash-landing', label: 'Aircraft emergency', types: ['terminal', 'hangar'], weight: 1.5, big: true, reward: 3200, fire: 0.5, hazmat: true, blast: true,
+    hurt: [[0.5, 1, 'Air crash casualty at'], [0.5, 1, 'Air crash casualty at'], [0.4, 0.9, 'Air crash casualty at']],
+    text: ({ b }) => `MAJOR INCIDENT — an aircraft has overrun on landing at ${b.name}, fuel burning and passengers hurt` },
+  { id: 'baggage', label: 'Baggage hall fire', types: ['terminal'], weight: 2, reward: 1600, fire: 0.3, trapped: [3, 6],
+    text: ({ b, n }) => `Baggage hall fire at ${b.name} — ${n} staff and passengers cut off by the smoke` },
+  { id: 'hangarfuel', label: 'Hangar fuel fire', types: ['hangar'], weight: 2, reward: 1700, fire: 0.45, hazmat: true,
+    text: ({ b }) => `Fuel fire under an aircraft in ${b.name} — it burns hot and the hangar is filling with smoke` },
+
+  // --- the railway -----------------------------------------------------------
+  { id: 'derailment', label: 'Train derailment', types: ['railstation'], weight: 1.2, big: true, reward: 3000, fire: 0.2, trapped: [2, 4],
+    hurt: [[0.5, 1, 'Derailment casualty at'], [0.4, 0.9, 'Derailment casualty at'], [0.4, 0.9, 'Derailment casualty at'], [0.4, 0.9, 'Derailment casualty at']],
+    text: ({ b, n }) => `MAJOR INCIDENT — a train has derailed at ${b.name}: ${n} trapped in a carriage, many hurt` },
+  { id: 'platform', label: 'Platform fire', types: ['railstation'], weight: 2, reward: 1300, fire: 0.3, trapped: [3, 6],
+    text: ({ b, n }) => `Fire on the platform canopy of ${b.name} — ${n} passengers cut off in the concourse` },
+  { id: 'signalbox', label: 'Signal cabin fire', types: ['railstation'], weight: 1.5, reward: 900, fire: 0.2,
+    text: ({ b }) => `Signal cabin fire at ${b.name} — trains are stopped across the district` },
+
+  // --- the metro -------------------------------------------------------------
+  { id: 'tunnelsmoke', label: 'Smoke in the metro', types: ['metro'], weight: 2, big: true, reward: 2600, fire: 0.15, trapped: [4, 9],
+    text: ({ b, n }) => `MAJOR INCIDENT — smoke pouring from the tunnel at ${b.name}, ${n} passengers stuck below` },
+  { id: 'undertrain', label: 'Person under a train', types: ['metro'], weight: 1.2, reward: 0,
+    hurt: [[0.85, 1, 'Person hit by a train at']],
+    text: ({ b }) => `A passenger has fallen under a train at ${b.name} — paramedics needed on the platform` },
+  { id: 'escalator', label: 'Escalator fire', types: ['metro'], weight: 2, reward: 900, fire: 0.25, trapped: [2, 4],
+    text: ({ b, n }) => `Escalator motor fire at ${b.name} — ${n} people cut off on the lower level` },
+  { id: 'platform-crush', label: 'Platform crush', types: ['metro'], weight: 1, reward: 0,
+    hurt: [[0.4, 0.9, 'Platform crush casualty at'], [0.4, 0.9, 'Platform crush casualty at'], [0.4, 0.9, 'Platform crush casualty at']],
+    text: ({ b }) => `Overcrowded platform at ${b.name} — a crush at the stairs, several people hurt` },
+
+  // --- the woods -------------------------------------------------------------
+  { id: 'campfire', label: 'Campfire spreads', site: FOREST, weight: 3, big: true, reward: 2000,
+    text: ({ where }) => `MAJOR INCIDENT — a campfire left burning has caught the undergrowth in ${where}` },
+  { id: 'lightning', label: 'Lightning strike', site: FOREST, weight: 2, big: true, reward: 2400,
+    text: ({ where }) => `MAJOR INCIDENT — a lightning strike has set the trees alight in ${where}` },
+  { id: 'arson-woods', label: 'Woodland arson', site: FOREST, weight: 1.5, big: true, reward: 2600,
+    text: ({ where }) => `MAJOR INCIDENT — several fires set at once on the edge of the woods in ${where}` },
+  { id: 'cigarette', label: 'Verge fire', site: FOREST, weight: 2, big: true, reward: 1800,
+    text: ({ where }) => `MAJOR INCIDENT — a dry verge has caught from a thrown cigarette and is running into the woods in ${where}` },
+
+  // --- the roads ---------------------------------------------------------------
+  { id: 'bus', label: 'Bus crash', site: ROAD, weight: 2, reward: 700, hurt: [4, 7],
+    text: ({ place, hurt }) => `Bus crash near ${place} — road blocked, ${hurt} injured` },
+  { id: 'tanker', label: 'Tanker rollover', site: ROAD, weight: 1.2, big: true, reward: 1600, hurt: [1, 2], quickFuse: true,
+    text: ({ place, hurt }) => `MAJOR INCIDENT — a fuel tanker has rolled over near ${place} and is leaking, ${hurt} hurt` },
+  { id: 'truckfire', label: 'Lorry fire', site: ROAD, weight: 2, reward: 500, hurt: [0, 1], quickFuse: true,
+    text: ({ place, hurt }) => `Lorry fire on the road near ${place} — the road is blocked${hurt ? `, ${hurt} hurt` : ''}` },
+
+  // --- the water ---------------------------------------------------------------
+  { id: 'kayak', label: 'Kayaker capsized', site: WATER, weight: 2, reward: 0, what: 'A kayaker has capsized' },
+  { id: 'carwater', label: 'Car in the water', site: WATER, weight: 1.5, reward: 0, what: 'A car has rolled into the water' },
+];
+
+const SCENE_COUNT = SCENES.length;
+
+/** Scenes that start on a building. */
+const buildingScenes = () => SCENES.filter((s) => !s.site);
+
+/** Can this scene happen to this building? */
+function sceneFits(scene, b) {
+  if (scene.site) return false;
+  if (!scene.types.includes(b.type)) return false;
+  if (scene.waterfront && !b.waterfront) return false;
+  return true;
+}
+
+return { SCENES, SCENE_COUNT, buildingScenes, sceneFits };
+})();
+
 // ---- src/systems/incidents.js ----
 __m["src/systems/incidents.js"] = (function () {
 const { CONFIG, TILE } = __m["src/core/config.js"];
@@ -10300,11 +10980,13 @@ const { spawnPatient } = __m["src/systems/medical.js"];
 const { pileUp, trafficAccident } = __m["src/systems/chains.js"];
 const { drowningCall } = __m["src/systems/water.js"];
 const { placeNear } = __m["src/systems/places.js"];
+const { SCENES, sceneFits } = __m["src/systems/scenes.js"];
 // Calls for service: the incident generator.
 //
 // Small jobs arrive on a timer from the first minute. Major incidents are held
 // back until the shift has been running for `bigAfter` seconds, give much more
 // money, and only one can be live at a time.
+
 
 
 
@@ -10672,7 +11354,111 @@ function medicalCall(state) {
 
 const roadAllowed = (state) => (x, y) => inCoverage(state, x, y);
 
+// ------------------------------------------------------------------ scenes ---
+
+const weightedScene = (rng, options) => {
+  const total = options.reduce((sum, o) => sum + o.scene.weight, 0);
+  let roll = rng.range(0, total);
+  for (const o of options) {
+    roll -= o.scene.weight;
+    if (roll <= 0) return o;
+  }
+  return options[0];
+};
+
+/** Play one scene on a building: fire, people trapped, people hurt, chemicals, a blast. */
+function runBuildingScene(state, scene, b) {
+  const rng = state.rng;
+  const where = placeNear(state, (b.x + b.w / 2) * TILE, (b.y + b.h / 2) * TILE);
+  const n = scene.trapped ? rng.int(scene.trapped[0], scene.trapped[1]) : 0;
+  b.reward = scene.reward ?? 0;
+  b.incidentLabel = scene.label;
+  b.incidentType = scene.big ? 'big' : scene.fire != null ? 'structure' : n > 0 ? 'rescue' : null;
+  if (scene.hazmat) b.hazmat = true;
+  if (scene.big) b.big = true;
+  if (scene.fire != null) {
+    ignite(state, b, 'call'); // (this also works out who got out and who did not)
+    b.fire = Math.max(b.fire, scene.fire);
+  }
+  // The scene says how many are cut off, whatever the evacuation worked out.
+  if (n > 0) b.trapped = Math.max(b.trapped ?? 0, n);
+  addEvent(state, scene.text({ b, n, where }), scene.big ? 'big' : scene.fire != null ? 'fire' : 'warn');
+  for (const [lo, hi, reason] of scene.hurt ?? []) spawnPatient(state, b, rng.range(lo, hi), reason);
+  if (scene.blast) state.onExplosion?.(b);
+  return b;
+}
+
+function runForestScene(state, scene) {
+  const all = state.city.forestTiles;
+  if (!all || all.length === 0) return null;
+  const near = all.filter((t) => inCoverage(state, t.x, t.y, 1.4));
+  if (near.length === 0) return null;
+  const tile = state.rng.pick(near);
+  const where = placeNear(state, (tile.x + 0.5) * TILE, (tile.y + 0.5) * TILE);
+  const text = scene.text({ where });
+  const first = startWildfire(state, (tile.x + 0.5) * TILE, (tile.y + 0.5) * TILE, scene.reward, { name: scene.label, text });
+  if (scene.id === 'arson-woods') {
+    // Set in two places at once, a few tiles apart.
+    const other = state.rng.pick(near.filter((t) => Math.hypot(t.x - tile.x, t.y - tile.y) < 14)) ?? tile;
+    startWildfire(state, (other.x + 0.5) * TILE, (other.y + 0.5) * TILE, 0, { name: scene.label, text: `A second fire has started nearby in ${where}` });
+  }
+  return first;
+}
+
+function runSiteScene(state, scene) {
+  if (scene.site === 'forest') return runForestScene(state, scene);
+  if (scene.site === 'road') {
+    return trafficAccident(state, roadAllowed(state), {
+      name: scene.label, hurt: scene.hurt, big: scene.big, reward: scene.reward, quickFuse: scene.quickFuse, text: scene.text,
+    });
+  }
+  if (scene.site === 'water') return drowningCall(state, (x, y) => inCoverage(state, x, y), { what: scene.what });
+  return null;
+}
+
+/**
+ * Draw a scene (a major one if `big`): one that can happen to something within
+ * reach of a station you own. Null if nothing fits, and the caller falls back to
+ * the ordinary calls.
+ */
+function spawnScene(state, big) {
+  const pool = state.buildings.filter((b) => (
+    b.state === 'ok' && b.type !== 'station' && b.type !== 'hospital' && inCoverage(state, b.x + b.w / 2, b.y + b.h / 2)
+  ));
+  const options = [];
+  for (const scene of SCENES) {
+    if (Boolean(scene.big) !== big) continue;
+    if (scene.site) options.push({ scene });
+    else {
+      const matches = pool.filter((b) => sceneFits(scene, b));
+      if (matches.length) options.push({ scene, matches });
+    }
+  }
+  for (let tries = 0; tries < 4 && options.length > 0; tries++) {
+    const pickOne = weightedScene(state.rng, options);
+    const made = pickOne.matches
+      ? runBuildingScene(state, pickOne.scene, state.rng.pick(pickOne.matches))
+      : runSiteScene(state, pickOne.scene);
+    if (made) return made;
+    options.splice(options.indexOf(pickOne), 1);
+  }
+  return null;
+}
+
+/** Play one named scene (for the tests and the dev tools): on `building`, or on one that fits. */
+function playScene(state, id, building = null) {
+  const scene = SCENES.find((sc) => sc.id === id);
+  if (!scene) return null;
+  if (scene.site) return runSiteScene(state, scene);
+  const target = building ?? state.rng.pick(state.buildings.filter((b) => b.state === 'ok' && sceneFits(scene, b)));
+  return target ? runBuildingScene(state, scene, target) : null;
+}
+
 function spawnSmall(state) {
+  if (state.rng.chance(CONFIG.incidents.sceneCall)) {
+    const made = spawnScene(state, false);
+    if (made) return made;
+  }
   if (state.rng.chance(CONFIG.incidents.drownCall)) {
     const made = drowningCall(state, (x, y) => inCoverage(state, x, y));
     if (made) return made;
@@ -10688,6 +11474,10 @@ function spawnSmall(state) {
 }
 
 function spawnBig(state) {
+  if (state.rng.chance(CONFIG.incidents.sceneBigCall)) {
+    const made = spawnScene(state, true);
+    if (made) return made;
+  }
   const kind = state.rng.pick(BIG);
   if (kind === 'industrial') return industrialFire(state);
   if (kind === 'forest') return forestFire(state);
@@ -10741,7 +11531,7 @@ function updateIncidents(state, dt) {
   spawnBig(state);
 }
 
-return { cyclePhase, coverageRadius, openLimit, openIncidents, bigIncidentActive, updateIncidents };
+return { cyclePhase, coverageRadius, openLimit, openIncidents, playScene, bigIncidentActive, updateIncidents };
 })();
 
 // ---- src/systems/game.js ----
@@ -10814,7 +11604,7 @@ function createGame(seed = CONFIG.city.seed) {
     credits: CONFIG.economy.start,
     stats: { saved: 0, lost: 0, alarms: 0, rescued: 0, casualties: 0, escaped: 0, treated: 0 },
     ledger: createLedger(),
-    ownedStations: [true, false, false],
+    ownedStations: city.stations.map((_, i) => i === 0),
     victims: [],
     loan: 0,
     insured: false,
@@ -11325,7 +12115,7 @@ function commandBuyVehicle(state, type = 'engine', station = null) {
   return engine;
 }
 
-/** Open Station 2 (index 1) or the Harbour Dock (index 2). */
+/** Open Station 2 (index 1), the Harbour Dock (index 2) or one of the regional and airport stations (3 and up). */
 function commandBuyStation(state, index = 1) {
   const station = state.city.stations[index];
   if (!station || index === 0) return false;
@@ -11333,7 +12123,10 @@ function commandBuyStation(state, index = 1) {
     addEvent(state, `${station.name} is already open`, 'info');
     return false;
   }
-  const price = index === 2 ? CONFIG.economy.dockPrice : CONFIG.economy.stationPrice;
+  const price = index === 2 ? CONFIG.economy.dockPrice
+    : station.kind === 'airport' ? CONFIG.economy.airportStationPrice
+      : station.kind === 'region' ? CONFIG.economy.regionStationPrice
+        : CONFIG.economy.stationPrice;
   if (state.credits < price) {
     addEvent(state, `Not enough credits — $${price.toLocaleString('en-US')} for ${station.name}`, 'warn');
     return false;
@@ -11342,7 +12135,9 @@ function commandBuyStation(state, index = 1) {
   state.ownedStations[index] = true;
   addEvent(
     state,
-    index === 2 ? 'The Harbour Dock is open — sixteen berths for boats' : 'Station 2 is open — sixteen more bays across the city',
+    index === 2 ? 'The Harbour Dock is open — sixteen berths for boats'
+      : index === 1 ? 'Station 2 is open — sixteen more bays across the city'
+        : `${station.name} is open — sixteen more bays and calls from its district`,
     'good',
   );
   return true;
@@ -11372,7 +12167,7 @@ function commandSellVehicle(state, id = null) {
 
 function serialize(state) {
   return {
-    version: 10,
+    version: 11,
     seed: state.seed,
     time: state.time,
     clock: state.clock,
@@ -11491,7 +12286,7 @@ function loadState(data) {
     b.big = Boolean(saved.big);
   }
 
-  state.ownedStations = [...(data.ownedStations ?? [true, false]), false, false].slice(0, 3);
+  state.ownedStations = state.city.stations.map((_, i) => Boolean(data.ownedStations?.[i] ?? i === 0));
   restoreVictims(state, data.victims ?? []);
   state.loan = data.loan ?? 0;
   state.insured = Boolean(data.insured);
@@ -12542,6 +13337,8 @@ function drawGround(ctx, state, b, z) {
   if (z >= 0.3) drawVerges(ctx, city, forests, z);
   drawTracks(ctx, state, b, z);
 
+  drawAirfields(ctx, city, b, z);
+
   // The station apron and its parking bays.
   for (const st of city.stations ?? [{ apron: APRON }]) {
     const a = st.apron;
@@ -12653,6 +13450,99 @@ let seaGradient = null;
 
 // Bridges, drawn after the roads: concrete parapets along both sides of the
 // deck and the deck's shadow on the water downstream.
+// ----------------------------------------------------------- airfields ---
+
+const inView = (r, b) => !(r.x1 < b.x0 - 1 || r.x0 > b.x1 + 1 || r.y1 < b.y0 - 1 || r.y0 > b.y1 + 1);
+const tileRect = (r) => [r.x0 * TILE, r.y0 * TILE, (r.x1 - r.x0 + 1) * TILE, (r.y1 - r.y0 + 1) * TILE];
+
+/** Runways, taxiways and aprons: flat ground, drawn under the buildings. */
+function drawAirfields(ctx, city, b, z) {
+  for (const f of city.airfields ?? []) {
+    if (!inView(f, b)) continue;
+    // The airside is a lighter concrete than the streets, with grass between.
+    ctx.fillStyle = '#3d4f3a';
+    ctx.fillRect(...tileRect({ x0: f.x0, y0: f.y0, x1: f.x1, y1: f.y1 }));
+    ctx.fillStyle = '#4b5258';
+    ctx.fillRect(...tileRect(f.apron));
+    ctx.fillRect(...tileRect(f.forecourt));
+    ctx.fillRect(...tileRect(f.gate));
+    ctx.fillRect(...tileRect(f.service));
+    ctx.fillStyle = '#383d42';
+    ctx.fillRect(...tileRect(f.taxi));
+    for (const c of f.connectors) ctx.fillRect(...tileRect(c));
+    ctx.fillStyle = '#2b2f33';
+    ctx.fillRect(...tileRect(f.runway));
+    if (z < 0.2) continue;
+    // Markings: yellow taxi lines, white runway edges, centre dashes, thresholds.
+    ctx.strokeStyle = '#d8b83a';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(f.taxi.x0 * TILE, (f.taxi.y0 + 1) * TILE);
+    ctx.lineTo((f.taxi.x1 + 1) * TILE, (f.taxi.y0 + 1) * TILE);
+    for (const c of f.connectors) {
+      ctx.moveTo((c.x0 + 1) * TILE, c.y0 * TILE);
+      ctx.lineTo((c.x0 + 1) * TILE, (c.y1 + 1) * TILE);
+    }
+    ctx.stroke();
+    const r = f.runway;
+    ctx.strokeStyle = 'rgba(240,240,235,0.85)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(r.x0 * TILE + 6, r.y0 * TILE + 3, (r.x1 - r.x0 + 1) * TILE - 12, (r.y1 - r.y0 + 1) * TILE - 6);
+    ctx.setLineDash([26, 22]);
+    ctx.beginPath();
+    ctx.moveTo((r.x0 + 4) * TILE, (r.y0 + 2) * TILE);
+    ctx.lineTo((r.x1 - 3) * TILE, (r.y0 + 2) * TILE);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(240,240,235,0.85)';
+    for (const end of [r.x0 + 1, r.x1 - 2]) {
+      for (let k = 0; k < 4; k++) ctx.fillRect(end * TILE, (r.y0 + 0.4 + k * 0.9) * TILE, TILE * 1.3, TILE * 0.5);
+    }
+    // Aircraft stands on the apron.
+    ctx.strokeStyle = 'rgba(216,184,58,0.55)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    for (let x = f.apron.x0 + 4; x < f.apron.x1 - 2; x += 10) {
+      ctx.moveTo(x * TILE, f.apron.y0 * TILE + 6);
+      ctx.lineTo(x * TILE, (f.apron.y1 + 1) * TILE - 6);
+    }
+    ctx.stroke();
+    // A parked airliner or two, for scale.
+    if (z >= 0.35) {
+      for (let x = f.apron.x0 + 9; x < f.apron.x1 - 8; x += 20) drawAirliner(ctx, x * TILE, (f.apron.y0 + 3.4) * TILE);
+    }
+  }
+}
+
+/** A parked airliner seen from above, nose to the south. */
+function drawAirliner(ctx, cx, cy) {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.fillStyle = 'rgba(0,0,0,0.25)';
+  ctx.beginPath();
+  ctx.ellipse(5, 7, 14, 38, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#e4e7ea';
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 8, 38, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // Wings and tailplane.
+  ctx.fillStyle = '#cfd4d8';
+  ctx.beginPath();
+  ctx.moveTo(-6, -4); ctx.lineTo(-44, 14); ctx.lineTo(-44, 20); ctx.lineTo(-6, 12); ctx.closePath();
+  ctx.moveTo(6, -4); ctx.lineTo(44, 14); ctx.lineTo(44, 20); ctx.lineTo(6, 12); ctx.closePath();
+  ctx.moveTo(-3, -30); ctx.lineTo(-16, -38); ctx.lineTo(-16, -34); ctx.lineTo(-3, -26); ctx.closePath();
+  ctx.moveTo(3, -30); ctx.lineTo(16, -38); ctx.lineTo(16, -34); ctx.lineTo(3, -26); ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#2f6fa8';
+  ctx.fillRect(-1.5, -36, 3, 10);
+  ctx.fillStyle = '#5a6770';
+  ctx.beginPath();
+  ctx.ellipse(0, 31, 4, 5, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
 function drawBridges(ctx, b, z) {
   if (z < 0.3) return;
   for (const hy of H_ROADS) {
@@ -13375,11 +14265,15 @@ function drawBuilding(ctx, state, b, now, z) {
   if (b.type === 'factory') drawStacks(ctx, b, x, y - e, w, h, e);
   if (b.type === 'tower') drawMast(ctx, b, x, y - e, w, h);
   if (detailed) drawRoofDetails(ctx, b, x, y - e, w, h);
+  if (b.type === 'terminal') drawTerminalRoof(ctx, x, y - e, w, h);
+  if (b.type === 'hangar') drawHangarRoof(ctx, x, y - e, w, h);
+  if (b.type === 'railstation') drawRailRoof(ctx, x, y - e, w, h);
+  if (b.type === 'metro') drawMetroMark(ctx, x, y - e, w, h);
   if (b.type === 'pharmacy') drawPharmacyMark(ctx, x, y - e, w, h);
   if (b.type === 'hospital') drawHospitalMark(ctx, x, y - e, w, h, detailed);
   if (detailed && b.type === 'station') drawStationFace(
     ctx, b, x, facadeTop, w, e, z,
-    (b.id === 'station2' && !state.ownedStations?.[1]) || (b.id === 'dock' && !state.ownedStations?.[2]),
+    b.stationIndex > 0 && !state.ownedStations?.[b.stationIndex],
   );
 
   if (b.state === 'burning') {
@@ -13410,6 +14304,10 @@ const WALLS = {
   factory: ['#8a8f92', '#9b9d98', '#7b8286'],
   school: ['#a56a4c', '#b57a58', '#9a6248'],
   tankfarm: ['#9aa0a4'],
+  terminal: ['#b8c2c9', '#aab6be'],
+  hangar: ['#8d9498', '#80878c'],
+  railstation: ['#a89a86', '#9d8f7b'],
+  metro: ['#6f7b86', '#65717c'],
   pharmacy: ['#e3e6e2'],
   hospital: ['#e6e8e6'],
   station: ['#a2503f'],
@@ -13567,6 +14465,61 @@ function drawTrapped(ctx, b, x, y, w, h, now) {
     ctx.lineTo(px + 4 + wave, py - 2.5);
     ctx.stroke();
   }
+}
+
+// A glass-roofed terminal: long skylights, and a pale sign.
+function drawTerminalRoof(ctx, x, y, w, h) {
+  ctx.fillStyle = 'rgba(150,190,215,0.55)';
+  const n = Math.max(3, Math.floor(w / 36));
+  for (let i = 0; i < n; i++) ctx.fillRect(x + 8 + (i * (w - 16)) / n, y + 8, (w - 16) / n - 6, h - 16);
+  ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x + 6.5, y + 6.5, w - 13, h - 13);
+}
+
+// An aircraft hangar: a barrel roof, ribbed across.
+function drawHangarRoof(ctx, x, y, w, h) {
+  ctx.fillStyle = 'rgba(255,255,255,0.10)';
+  ctx.fillRect(x, y, w, h / 2);
+  ctx.fillStyle = 'rgba(0,0,0,0.12)';
+  ctx.fillRect(x, y + h / 2, w, h / 2);
+  ctx.strokeStyle = 'rgba(0,0,0,0.22)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let xx = x + 10; xx < x + w; xx += 10) { ctx.moveTo(xx, y); ctx.lineTo(xx, y + h); }
+  ctx.stroke();
+}
+
+// A railway terminus: a vaulted shed over the platforms, with the tracks showing
+// through the glass.
+function drawRailRoof(ctx, x, y, w, h) {
+  ctx.fillStyle = 'rgba(190,200,205,0.28)';
+  ctx.fillRect(x + 6, y + 6, w - 12, h - 12);
+  ctx.strokeStyle = 'rgba(60,66,72,0.75)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  const lanes = Math.max(3, Math.floor(h / 24));
+  for (let i = 0; i < lanes; i++) {
+    const yy = y + 12 + (i * (h - 24)) / Math.max(1, lanes - 1);
+    ctx.moveTo(x + 8, yy); ctx.lineTo(x + w - 8, yy);
+    ctx.moveTo(x + 8, yy + 4); ctx.lineTo(x + w - 8, yy + 4);
+  }
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+  ctx.beginPath();
+  for (let xx = x + 18; xx < x + w - 10; xx += 18) { ctx.moveTo(xx, y + 4); ctx.lineTo(xx, y + h - 4); }
+  ctx.stroke();
+}
+
+// The metro roundel on a station entrance.
+function drawMetroMark(ctx, x, y, w, h) {
+  const r = Math.min(w, h) * 0.3;
+  ctx.fillStyle = '#d6362f';
+  ctx.beginPath();
+  ctx.arc(x + w / 2, y + h / 2, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#f4f1ea';
+  ctx.fillRect(x + w / 2 - r - 3, y + h / 2 - 2, r * 2 + 6, 4);
 }
 
 function drawPharmacyMark(ctx, x, y, w, h) {
@@ -15693,6 +16646,12 @@ function miniStatic(state, mw, mh) {
   for (const r of runsInView(city, 'h', H_ROADS, 0, city.w)) {
     g.fillRect(r.a * TILE * sx, r.line * TILE * sy, (r.b - r.a + 1) * TILE * sx, Math.max(1, 2 * TILE * sy));
   }
+  g.fillStyle = '#3d4f3a';
+  for (const f of city.airfields ?? []) g.fillRect(f.x0 * TILE * sx, f.y0 * TILE * sy, (f.x1 - f.x0 + 1) * TILE * sx, (f.y1 - f.y0 + 1) * TILE * sy);
+  g.fillStyle = '#b9bec3';
+  for (const f of city.airfields ?? []) {
+    g.fillRect(f.runway.x0 * TILE * sx, f.runway.y0 * TILE * sy, (f.runway.x1 - f.runway.x0 + 1) * TILE * sx, Math.max(1.5, 4 * TILE * sy));
+  }
   for (const b of state.buildings) {
     g.fillStyle = b.state === 'rubble' ? '#4d4a44' : b.type === 'pharmacy' ? '#7fcf9c' : b.type === 'hospital' ? '#ff8f8f' : '#7d848d';
     const bigger = b.type === 'hospital' ? 2.5 : 1.2;
@@ -15890,11 +16849,13 @@ const { addEvent } = __m["src/systems/events.js"];
 const { engineForUnit } = __m["src/systems/units.js"];
 const { isUnitKey } = __m["src/core/hotkeys.js"];
 const { startWildfire } = __m["src/systems/wildfire.js"];
+const { playScene } = __m["src/systems/incidents.js"];
 const { ignite } = __m["src/systems/fire.js"];
 const { render, createCamera, clampCamera, screenToWorld } = __m["src/render/render.js"];
 const { startPinch, pinchCamera, isCompact, startZoomFor } = __m["src/ui/gestures.js"];
 // Wiring: canvas, camera, pointer and keyboard, and the bridge between the
 // simulation and the DOM HUD. No game rules live here.
+
 
 
 
@@ -16438,7 +17399,7 @@ function onAction(action, data = {}) {
     case 'buy-vehicle': buyApparatus(data.type ?? 'engine'); break;
     case 'station-tab': hud.setStationTab(data.tab ?? 'fleet'); break;
     case 'deliver-to': hud.setBuyStation(Number(data.station ?? 0)); break;
-    case 'buy-station': commandBuyStation(state, 1); break;
+    case 'buy-station': commandBuyStation(state, Number(data.station ?? 1)); break;
     case 'buy-dock': commandBuyStation(state, 2); break;
     case 'take-loan': commandLoan(state); break;
     case 'repay-loan': commandRepay(state); break;
@@ -16512,7 +17473,7 @@ function sellApparatus(id) {
 
 // ------------------------------------------------------------------- save ---
 
-const SAVE_KEY = 'firestation.save.v10';
+const SAVE_KEY = 'firestation.save.v11';
 
 function hasSave() {
   try {
@@ -16867,11 +17828,46 @@ if (fleet) {
 if (params.has('wildfire')) {
   const tiles = state.city.forestTiles;
   if (tiles.length > 0) {
-    const tile = tiles[Math.floor(tiles.length / 2)];
+    // The forest tile nearest the station: the map is big.
+    const st = state.city.station;
+    const tile = tiles.reduce((best, t) => (Math.hypot(t.x - st.x, t.y - st.y) < Math.hypot(best.x - st.x, best.y - st.y) ? t : best));
     const wf = startWildfire(state, (tile.x + 0.5) * TILE, (tile.y + 0.5) * TILE, 2200);
     cam.x = wf.x;
     cam.y = wf.y;
     cam.zoom = 0.8;
+    clampCamera(cam, state, view);
+  }
+}
+// ?allstations opens every station; ?scene=<id> plays one incident scene (see
+// scenes.js); ?goto=airport|airport2|station3 (and so on) moves the camera there.
+if (params.has('allstations')) state.ownedStations.fill(true);
+const sceneParam = params.get('scene');
+if (sceneParam) {
+  startGame();
+  const made = playScene(state, sceneParam);
+  if (made && typeof made === 'object') {
+    const px = made.kind ? made.x : (made.x + made.w / 2) * TILE;
+    const py = made.kind ? made.y : (made.y + made.h / 2) * TILE;
+    cam.x = px;
+    cam.y = py;
+    cam.zoom = 0.7;
+    clampCamera(cam, state, view);
+  }
+}
+const gotoParam = params.get('goto');
+if (gotoParam) {
+  let spot = null;
+  if (gotoParam.startsWith('airport')) {
+    const f = state.city.airfields[Number(gotoParam.slice(7) || 1) - 1];
+    if (f) spot = { x: ((f.x0 + f.x1) / 2) * TILE, y: (f.y0 + 30) * TILE, zoom: 0.3 };
+  } else if (gotoParam.startsWith('station')) {
+    const st = state.city.stations[Number(gotoParam.slice(7)) - 1];
+    if (st) spot = { x: (st.building.x + 4) * TILE, y: (st.building.y + 8) * TILE, zoom: 0.8 };
+  }
+  if (spot) {
+    cam.x = spot.x;
+    cam.y = spot.y;
+    cam.zoom = spot.zoom;
     clampCamera(cam, state, view);
   }
 }

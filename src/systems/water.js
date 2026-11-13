@@ -112,7 +112,7 @@ function bridgeTiles(state) {
 }
 
 /** A car goes off a bridge, or someone goes into the harbour. */
-export function drowningCall(state, allowed = () => true) {
+export function drowningCall(state, allowed = () => true, opts = {}) {
   const rng = state.rng;
   const city = state.city;
   let spot = null;
@@ -139,6 +139,7 @@ export function drowningCall(state, allowed = () => true) {
     }
   }
   if (!spot) return null;
+  if (opts.what) spot.what = opts.what;
   // Make sure it is water.
   if (!city.water[Math.floor(spot.y / TILE) * city.w + Math.floor(spot.x / TILE)]) return null;
 

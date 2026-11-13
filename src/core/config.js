@@ -58,6 +58,8 @@ export const CONFIG = {
     insurance: { premium: 70, lossShare: 0.4 }, // per game hour; share of a building loss you still pay
     contracts: { every: [300, 480], maxOffers: 3, maxActive: 2, failPenalty: 0.25 },
     stationPrice: 9000, // buying Station 2
+    regionStationPrice: 12000, // buying one of the regional stations out in the country
+    airportStationPrice: 18000, // buying an airport's own fire station
     dockPrice: 6500, // buying the Harbour Dock (berths for boats)
   },
 
@@ -273,6 +275,8 @@ export const CONFIG = {
       kitchen: 330, gas: 460, apartment: 560, office: 650, hotel: 720, lift: 380, shopRow: 760,
       chemical: 1400, dockFuel: 1550, tower: 2400, trapped: 400, mall: 900, school: 700,
     },
+    sceneCall: 0.6, // share of small calls that are one of the scenes (see scenes.js)
+    sceneBigCall: 0.5, // share of major incidents that are a scene
     crashCall: 0.16, // share of small calls that are a traffic accident
     drownCall: 0.1, // share of small calls that are someone in the water
   },

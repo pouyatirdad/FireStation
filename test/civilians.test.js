@@ -33,7 +33,10 @@ test('a crew brings trapped people out of a burning building', () => {
   const state = createGame(7);
   startShift(state);
   state.incidentsEnabled = false;
-  const building = state.buildings.find((b) => b.type === 'house' && b.y > 10);
+  const st = state.city.station;
+  const building = state.buildings
+    .filter((b) => b.type === 'house' && b.y > 10)
+    .sort((a, b) => Math.hypot(a.x - st.x, a.y - st.y) - Math.hypot(b.x - st.x, b.y - st.y))[0];
   building.occupants = 6;
   building.integrity = 400;
   building.maxIntegrity = 400;

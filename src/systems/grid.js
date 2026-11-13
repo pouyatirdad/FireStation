@@ -31,7 +31,30 @@ export function buildNav(city) {
     sail[i] = water[i] ? 1 : 0;
     swim[i] = blocked[i] ? 0 : 1;
   }
-  return { w, h, walk, drive, driveCost, sail, swim, water };
+  return { w, h, walk, drive, driveCost, sail, swim, water, lattice: buildLattice(city) };
+}
+
+// The avenues and streets form a lattice. Long drives are planned on it first
+// (a few thousand junctions), then each leg between two junctions is searched
+// tile by tile. That keeps a trip across the whole map to a few milliseconds.
+function buildLattice(city) {
+  const runs = city.roadRuns;
+  if (!runs?.v?.length || !runs?.h?.length) return null;
+  const vs = runs.v.map((r) => r.line);
+  const hs = runs.h.map((r) => r.line);
+  const covers = (spans, a, b) => spans.some(([s0, s1]) => s0 <= a && s1 >= b);
+  // hEdge[hi * nv + vi]: street hi is open from avenue vi to avenue vi + 1.
+  const nv = vs.length;
+  const nh = hs.length;
+  const hEdge = new Uint8Array(nh * nv);
+  const vEdge = new Uint8Array(nv * nh);
+  for (let hi = 0; hi < nh; hi++) {
+    for (let vi = 0; vi + 1 < nv; vi++) hEdge[hi * nv + vi] = covers(runs.h[hi].spans, vs[vi], vs[vi + 1] + 1) ? 1 : 0;
+  }
+  for (let vi = 0; vi < nv; vi++) {
+    for (let hi = 0; hi + 1 < nh; hi++) vEdge[vi * nh + hi] = covers(runs.v[vi].spans, hs[hi], hs[hi + 1] + 1) ? 1 : 0;
+  }
+  return { vs, hs, nv, nh, hEdge, vEdge };
 }
 
 const gridOf = (nav, mode) => (mode === 'drive' ? nav.drive : mode === 'sail' ? nav.sail : mode === 'swim' ? nav.swim : nav.walk);
@@ -112,41 +135,59 @@ export function corridorClear(nav, mode, ax, ay, bx, by, half) {
     && lineClear(nav, mode, ax - nx, ay - ny, bx - nx, by - ny);
 }
 
+// A binary min-heap of tile indices keyed by a float, kept in flat arrays so a
+// long search allocates nothing per node.
 class MinHeap {
   constructor() {
-    this.items = [];
+    this.keys = new Float64Array(1024);
+    this.vals = new Int32Array(1024);
+    this.n = 0;
   }
   get size() {
-    return this.items.length;
+    return this.n;
   }
-  push(node) {
-    const a = this.items;
-    a.push(node);
-    let i = a.length - 1;
+  push(val, key) {
+    if (this.n === this.keys.length) {
+      const keys = new Float64Array(this.n * 2);
+      const vals = new Int32Array(this.n * 2);
+      keys.set(this.keys);
+      vals.set(this.vals);
+      this.keys = keys;
+      this.vals = vals;
+    }
+    const { keys, vals } = this;
+    let i = this.n++;
     while (i > 0) {
       const p = (i - 1) >> 1;
-      if (a[p].f <= a[i].f) break;
-      [a[p], a[i]] = [a[i], a[p]];
+      if (keys[p] <= key) break;
+      keys[i] = keys[p];
+      vals[i] = vals[p];
       i = p;
     }
+    keys[i] = key;
+    vals[i] = val;
   }
+  /** Remove and return the value with the smallest key. */
   pop() {
-    const a = this.items;
-    const top = a[0];
-    const last = a.pop();
-    if (a.length > 0) {
-      a[0] = last;
+    const { keys, vals } = this;
+    const top = vals[0];
+    const n = --this.n;
+    if (n > 0) {
+      const key = keys[n];
+      const val = vals[n];
       let i = 0;
       for (;;) {
         const l = i * 2 + 1;
+        if (l >= n) break;
         const r = l + 1;
-        let small = i;
-        if (l < a.length && a[l].f < a[small].f) small = l;
-        if (r < a.length && a[r].f < a[small].f) small = r;
-        if (small === i) break;
-        [a[small], a[i]] = [a[i], a[small]];
-        i = small;
+        const c = r < n && keys[r] < keys[l] ? r : l;
+        if (keys[c] >= key) break;
+        keys[i] = keys[c];
+        vals[i] = vals[c];
+        i = c;
       }
+      keys[i] = key;
+      vals[i] = val;
     }
     return top;
   }
@@ -187,8 +228,118 @@ export function nearestPassable(nav, mode, tx, ty, maxR = 8) {
   return null;
 }
 
-/** A* on tile coordinates. Returns tiles after the start, or null. */
-export function findPath(nav, mode, from, to) {
+/** The four junctions round a tile, as lattice (vi, hi) pairs. */
+function junctionsAround(lat, x, y) {
+  const bracket = (arr, v) => {
+    let lo = 0;
+    let hi = arr.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (arr[mid] <= v) lo = mid;
+      else hi = mid - 1;
+    }
+    return lo;
+  };
+  const vi = bracket(lat.vs, x);
+  const hi = bracket(lat.hs, y);
+  const out = [];
+  for (const dv of [0, 1]) {
+    for (const dh of [0, 1]) {
+      const a = vi + dv;
+      const b = hi + dh;
+      if (a < lat.nv && b < lat.nh) out.push([a, b]);
+    }
+  }
+  return out;
+}
+
+/**
+ * Plan a long drive on the avenue/street lattice: the junctions to pass through,
+ * or null if the lattice offers no route (a street cut by a wreck or by woods).
+ */
+function latticeRoute(nav, from, to) {
+  const lat = nav.lattice;
+  if (!lat) return null;
+  const node = (vi, hi) => hi * lat.nv + vi;
+  const total = lat.nv * lat.nh;
+  const px = (n) => lat.vs[n % lat.nv] + 0.5;
+  const py = (n) => lat.hs[(n - (n % lat.nv)) / lat.nv] + 0.5;
+  const scratch = nav.latScratch ?? (nav.latScratch = { g: new Float32Array(total + 1), came: new Int32Array(total + 1), done: new Uint8Array(total + 1) });
+  const { g, came, done } = scratch;
+  g.fill(Infinity);
+  came.fill(-1);
+  done.fill(0);
+  const goalNodes = new Map();
+  for (const [vi, hi] of junctionsAround(lat, to.x, to.y)) goalNodes.set(node(vi, hi), true);
+  const heap = new MinHeap();
+  const dist = (a, b, c, d) => Math.hypot(a - c, b - d);
+  for (const [vi, hi] of junctionsAround(lat, from.x, from.y)) {
+    const n = node(vi, hi);
+    g[n] = dist(from.x, from.y, px(n), py(n));
+    heap.push(n, g[n] + dist(px(n), py(n), to.x, to.y));
+  }
+  let end = -1;
+  let endCost = Infinity;
+  while (heap.size > 0) {
+    const n = heap.pop();
+    if (done[n]) continue;
+    done[n] = 1;
+    if (goalNodes.has(n)) {
+      const total2 = g[n] + dist(px(n), py(n), to.x, to.y);
+      if (total2 < endCost) {
+        endCost = total2;
+        end = n;
+      }
+    }
+    // Nothing better than the best goal found can still be queued.
+    if (end >= 0 && g[n] >= endCost) break;
+    const vi = n % lat.nv;
+    const hi = (n - vi) / lat.nv;
+    const next = [];
+    if (vi + 1 < lat.nv && lat.hEdge[hi * lat.nv + vi]) next.push(n + 1);
+    if (vi > 0 && lat.hEdge[hi * lat.nv + vi - 1]) next.push(n - 1);
+    if (hi + 1 < lat.nh && lat.vEdge[vi * lat.nh + hi]) next.push(n + lat.nv);
+    if (hi > 0 && lat.vEdge[vi * lat.nh + hi - 1]) next.push(n - lat.nv);
+    for (const m of next) {
+      if (done[m]) continue;
+      const ng = g[n] + dist(px(n), py(n), px(m), py(m));
+      if (ng < g[m]) {
+        g[m] = ng;
+        came[m] = n;
+        heap.push(m, ng + dist(px(m), py(m), to.x, to.y));
+      }
+    }
+  }
+  if (end < 0) return null;
+  const route = [];
+  for (let n = end; n !== -1; n = came[n]) route.push({ x: Math.round(px(n) - 0.5), y: Math.round(py(n) - 0.5) });
+  return route.reverse();
+}
+
+/**
+ * A* on tile coordinates. Returns tiles after the start, or null. A long drive
+ * is first planned along the street lattice and filled in leg by leg.
+ */
+export function findPath(nav, mode, from, to, legOnly = false) {
+  if (mode === 'drive' && !legOnly && nav.lattice
+    && octile(to.x - from.x, to.y - from.y) > 140) {
+    const route = latticeRoute(nav, from, to);
+    if (route && route.length > 0) {
+      const stops = [from, ...route, to];
+      const out = [];
+      let ok = true;
+      for (let i = 0; i + 1 < stops.length && ok; i++) {
+        const leg = findPath(nav, mode, stops[i], stops[i + 1], true);
+        if (leg === null) ok = false;
+        else out.push(...leg);
+      }
+      if (ok) return out;
+    }
+  }
+  return findPathTiles(nav, mode, from, to);
+}
+
+function findPathTiles(nav, mode, from, to) {
   const grid = gridOf(nav, mode);
   const costs = mode === 'drive' ? nav.driveCost : null;
   const start = passable(nav, mode, from.x, from.y)
@@ -222,13 +373,19 @@ export function findPath(nav, mode, from, to) {
   stamp[startIdx] = gen;
   gBuf[startIdx] = 0;
   came[startIdx] = -1;
-  open.push({ x: start.x, y: start.y, f: octile(goal.x - start.x, goal.y - start.y) });
+  // Short trips are searched exactly. On a long trip the heuristic is weighted,
+  // which keeps the search to a corridor round the straight line instead of
+  // flooding the open ground on both sides: the route can be a few per cent
+  // longer than the best one, which nobody driving across a city would notice.
+  const trip = octile(goal.x - start.x, goal.y - start.y);
+  const weight = trip < 80 ? 1 : Math.min(2.2, 1 + (trip - 80) / 120);
+  open.push(startIdx, trip * weight);
 
   while (open.size > 0) {
-    const cur = open.pop();
-    const ci = cur.y * nav.w + cur.x;
+    const ci = open.pop();
     if (closedStamp[ci] === gen) continue;
     closedStamp[ci] = gen;
+    const cur = { x: ci % nav.w, y: (ci - (ci % nav.w)) / nav.w };
 
     if (cur.x === goal.x && cur.y === goal.y) {
       const path = [];
@@ -256,7 +413,7 @@ export function findPath(nav, mode, from, to) {
         stamp[ni] = gen;
         gBuf[ni] = ng;
         came[ni] = ci;
-        open.push({ x: nx, y: ny, f: ng + octile(goal.x - nx, goal.y - ny) });
+        open.push(ni, ng + weight * octile(goal.x - nx, goal.y - ny));
       }
     }
   }

@@ -188,7 +188,7 @@ test('victims survive a save', () => {
   const loaded = loadState(JSON.parse(JSON.stringify(serialize(state))));
   assert.equal(loaded.victims.length, 1);
   assert.equal(loaded.victims[0].id, v.id);
-  assert.equal(loaded.ownedStations.length, 3);
+  assert.equal(loaded.ownedStations.length, loaded.city.stations.length);
 });
 
 // -------------------------------------------------------------- fireboat ---

@@ -36,17 +36,25 @@ export function pickRoadSpot(state, allowed = () => true, from = null) {
   const sx = station.x + station.w / 2;
   const sy = station.y + station.h / 2;
 
-  for (let attempt = 0; attempt < 80; attempt++) {
+  // The map is huge and a call only comes from near a station you own, so most
+  // of the tries are drawn from a window round one of those stations.
+  const owned = (city.stations ?? []).filter((st, i) => state.ownedStations?.[i] ?? i === 0);
+  for (let attempt = 0; attempt < 160; attempt++) {
     const vertical = from ? from.axis === 'v' : rng.chance(0.5);
+    const hub = !from && owned.length && attempt % 4 !== 3 ? rng.pick(owned).building : null;
     let rect;
     if (vertical) {
-      const tx = from ? from.tx : rng.pick(V_ROADS);
-      const ty = from ? from.ty + from.dy : rng.int(6, city.h - 14);
+      const lines = hub ? V_ROADS.filter((vx) => Math.abs(vx - hub.x) < 260) : V_ROADS;
+      if (lines.length === 0) continue;
+      const tx = from ? from.tx : rng.pick(lines);
+      const ty = from ? from.ty + from.dy : hub ? Math.round(hub.y + rng.range(-260, 260)) : rng.int(6, city.h - 14);
       rect = { tx, ty, tw: 2, th: 3, axis: 'v' };
       if (crossesRoad(H_ROADS, ty, ty + 2)) continue;
     } else {
-      const ty = from ? from.ty : rng.pick(H_ROADS);
-      const tx = from ? from.tx + from.dx : rng.int(6, city.w - 14);
+      const lines = hub ? H_ROADS.filter((hy) => Math.abs(hy - hub.y) < 260) : H_ROADS;
+      if (lines.length === 0) continue;
+      const ty = from ? from.ty : rng.pick(lines);
+      const tx = from ? from.tx + from.dx : hub ? Math.round(hub.x + rng.range(-260, 260)) : rng.int(6, city.w - 14);
       rect = { tx, ty, tw: 3, th: 2, axis: 'h' };
       if (crossesRoad(V_ROADS, tx, tx + 2)) continue;
     }
@@ -84,22 +92,29 @@ function hurtAt(state, rect, count, place) {
   return made;
 }
 
-export function trafficAccident(state, allowed) {
+/**
+ * A crash on a stretch of street. `opts` turns it into a story: a name, a
+ * number of injured [lo, hi], a bigger reward, a short fuse on the fuel, a log line.
+ */
+export function trafficAccident(state, allowed, opts = {}) {
   const rect = pickRoadSpot(state, allowed);
   if (!rect) return null;
   const place = placeNear(state, (rect.tx + 1) * TILE, (rect.ty + 1) * TILE);
   const [lo, hi] = CONFIG.blockade.fuelDelay;
+  const fuse = opts.quickFuse ? 0.55 : 1;
   const blockade = addBlockade(state, rect, {
-    name: `Crash near ${place}`,
+    name: `${opts.name ?? 'Crash'} near ${place}`,
     place,
-    reward: CONFIG.incidents.reward.crash,
-    fuelAt: state.time + state.rng.range(lo, hi),
+    big: Boolean(opts.big),
+    reward: opts.reward ?? CONFIG.incidents.reward.crash,
+    fuelAt: state.time + state.rng.range(lo, hi) * fuse,
   });
-  const hurt = hurtAt(state, rect, state.rng.int(1, 3), place);
+  const [hlo, hhi] = opts.hurt ?? [1, 3];
+  const hurt = hurtAt(state, rect, state.rng.int(hlo, hhi), place);
   addEvent(
     state,
-    `Traffic accident near ${place} — road blocked, ${hurt} injured`,
-    'fire',
+    opts.text ? opts.text({ place, hurt }) : `Traffic accident near ${place} — road blocked, ${hurt} injured`,
+    opts.big ? 'big' : 'fire',
   );
   return blockade;
 }

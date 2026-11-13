@@ -13,6 +13,7 @@ import { spawnPatient } from './medical.js';
 import { pileUp, trafficAccident } from './chains.js';
 import { drowningCall } from './water.js';
 import { placeNear } from './places.js';
+import { SCENES, sceneFits } from './scenes.js';
 
 const SMALL = () => ['structure', 'structure', 'structure', 'rescue', 'block'];
 const BIG = ['industrial', 'tower', 'bigBlock', 'forest', 'pileup'];
@@ -370,7 +371,111 @@ function medicalCall(state) {
 
 const roadAllowed = (state) => (x, y) => inCoverage(state, x, y);
 
+// ------------------------------------------------------------------ scenes ---
+
+const weightedScene = (rng, options) => {
+  const total = options.reduce((sum, o) => sum + o.scene.weight, 0);
+  let roll = rng.range(0, total);
+  for (const o of options) {
+    roll -= o.scene.weight;
+    if (roll <= 0) return o;
+  }
+  return options[0];
+};
+
+/** Play one scene on a building: fire, people trapped, people hurt, chemicals, a blast. */
+function runBuildingScene(state, scene, b) {
+  const rng = state.rng;
+  const where = placeNear(state, (b.x + b.w / 2) * TILE, (b.y + b.h / 2) * TILE);
+  const n = scene.trapped ? rng.int(scene.trapped[0], scene.trapped[1]) : 0;
+  b.reward = scene.reward ?? 0;
+  b.incidentLabel = scene.label;
+  b.incidentType = scene.big ? 'big' : scene.fire != null ? 'structure' : n > 0 ? 'rescue' : null;
+  if (scene.hazmat) b.hazmat = true;
+  if (scene.big) b.big = true;
+  if (scene.fire != null) {
+    ignite(state, b, 'call'); // (this also works out who got out and who did not)
+    b.fire = Math.max(b.fire, scene.fire);
+  }
+  // The scene says how many are cut off, whatever the evacuation worked out.
+  if (n > 0) b.trapped = Math.max(b.trapped ?? 0, n);
+  addEvent(state, scene.text({ b, n, where }), scene.big ? 'big' : scene.fire != null ? 'fire' : 'warn');
+  for (const [lo, hi, reason] of scene.hurt ?? []) spawnPatient(state, b, rng.range(lo, hi), reason);
+  if (scene.blast) state.onExplosion?.(b);
+  return b;
+}
+
+function runForestScene(state, scene) {
+  const all = state.city.forestTiles;
+  if (!all || all.length === 0) return null;
+  const near = all.filter((t) => inCoverage(state, t.x, t.y, 1.4));
+  if (near.length === 0) return null;
+  const tile = state.rng.pick(near);
+  const where = placeNear(state, (tile.x + 0.5) * TILE, (tile.y + 0.5) * TILE);
+  const text = scene.text({ where });
+  const first = startWildfire(state, (tile.x + 0.5) * TILE, (tile.y + 0.5) * TILE, scene.reward, { name: scene.label, text });
+  if (scene.id === 'arson-woods') {
+    // Set in two places at once, a few tiles apart.
+    const other = state.rng.pick(near.filter((t) => Math.hypot(t.x - tile.x, t.y - tile.y) < 14)) ?? tile;
+    startWildfire(state, (other.x + 0.5) * TILE, (other.y + 0.5) * TILE, 0, { name: scene.label, text: `A second fire has started nearby in ${where}` });
+  }
+  return first;
+}
+
+function runSiteScene(state, scene) {
+  if (scene.site === 'forest') return runForestScene(state, scene);
+  if (scene.site === 'road') {
+    return trafficAccident(state, roadAllowed(state), {
+      name: scene.label, hurt: scene.hurt, big: scene.big, reward: scene.reward, quickFuse: scene.quickFuse, text: scene.text,
+    });
+  }
+  if (scene.site === 'water') return drowningCall(state, (x, y) => inCoverage(state, x, y), { what: scene.what });
+  return null;
+}
+
+/**
+ * Draw a scene (a major one if `big`): one that can happen to something within
+ * reach of a station you own. Null if nothing fits, and the caller falls back to
+ * the ordinary calls.
+ */
+function spawnScene(state, big) {
+  const pool = state.buildings.filter((b) => (
+    b.state === 'ok' && b.type !== 'station' && b.type !== 'hospital' && inCoverage(state, b.x + b.w / 2, b.y + b.h / 2)
+  ));
+  const options = [];
+  for (const scene of SCENES) {
+    if (Boolean(scene.big) !== big) continue;
+    if (scene.site) options.push({ scene });
+    else {
+      const matches = pool.filter((b) => sceneFits(scene, b));
+      if (matches.length) options.push({ scene, matches });
+    }
+  }
+  for (let tries = 0; tries < 4 && options.length > 0; tries++) {
+    const pickOne = weightedScene(state.rng, options);
+    const made = pickOne.matches
+      ? runBuildingScene(state, pickOne.scene, state.rng.pick(pickOne.matches))
+      : runSiteScene(state, pickOne.scene);
+    if (made) return made;
+    options.splice(options.indexOf(pickOne), 1);
+  }
+  return null;
+}
+
+/** Play one named scene (for the tests and the dev tools): on `building`, or on one that fits. */
+export function playScene(state, id, building = null) {
+  const scene = SCENES.find((sc) => sc.id === id);
+  if (!scene) return null;
+  if (scene.site) return runSiteScene(state, scene);
+  const target = building ?? state.rng.pick(state.buildings.filter((b) => b.state === 'ok' && sceneFits(scene, b)));
+  return target ? runBuildingScene(state, scene, target) : null;
+}
+
 function spawnSmall(state) {
+  if (state.rng.chance(CONFIG.incidents.sceneCall)) {
+    const made = spawnScene(state, false);
+    if (made) return made;
+  }
   if (state.rng.chance(CONFIG.incidents.drownCall)) {
     const made = drowningCall(state, (x, y) => inCoverage(state, x, y));
     if (made) return made;
@@ -386,6 +491,10 @@ function spawnSmall(state) {
 }
 
 function spawnBig(state) {
+  if (state.rng.chance(CONFIG.incidents.sceneBigCall)) {
+    const made = spawnScene(state, true);
+    if (made) return made;
+  }
   const kind = state.rng.pick(BIG);
   if (kind === 'industrial') return industrialFire(state);
   if (kind === 'forest') return forestFire(state);
