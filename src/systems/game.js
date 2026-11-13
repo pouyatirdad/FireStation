@@ -626,7 +626,7 @@ export { orderEngine, orderCrew };
 
 export function serialize(state) {
   return {
-    version: 13,
+    version: 14,
     seed: state.seed,
     time: state.time,
     clock: state.clock,

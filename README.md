@@ -1,7 +1,7 @@
 # Fire Station — Harbor City
 
 A top-down emergency-services management game for Windows, in the spirit of **Emergency 4**: a
-520×384 city (ten times the area of the first version) with forests, pharmacies, an airport, a railway, a metro and a waterfront,
+520×384 city (ten times the area of the first version) with forests, pharmacies, an airport, a railway, a tram and a waterfront,
 a fleet of thirteen kinds of apparatus you buy and sell — engines, ladders, tankers, rescue units,
 paramedic cars, ambulances and ambulance buses, rescue boats, fireboats, a helicopter, an air tanker and
 **ambulances** — small calls and major incidents, injured civilians, forest fires, a loans-and-insurance economy,
@@ -270,12 +270,12 @@ simulation knows about the DOM, and nothing in the renderer changes the simulati
 - **The airport:** *Harbor City International Airport* in the east takes a box of blocks (the streets inside are taken out): a runway, a taxiway, an apron with
   parked airliners, a glass-roofed **terminal**, **hangars**, a **control tower**, a **fuel farm** and an
   airport fire station of their own. The paved airside counts as road, so engines can drive onto it.
-- **Railway and metro:** big **railway stations** (vaulted roofs over the tracks) and **metro**
-  entrances (red roundels) stand in the business districts, along with a good many **malls**. The
+- **Railway and tram:** big **railway stations** (vaulted roofs over the tracks) and **tram stops**
+  (shelters with a yellow sign) stand in the business districts, along with a good many **malls**. The
   stations are joined by real lines (`src/data/transit.js`): the *Harbor Line* railway is an elevated
-  viaduct over the streets with passenger trains running end to end and back, and the *Red* and *Blue*
-  metro lines run in tunnels under them (dashed, with the trains showing through the pavement). Both
-  are on the minimap. Where a train is depends only on the game clock.
+  viaduct over the streets with passenger trains running end to end and back, and two **tram** lines
+  run on rails set into the streets, with overhead wire, yellow and red trams and a stop at each shelter.
+  All of them are on the minimap. Where a train is depends only on the game clock.
 - **Fire stations across the map:** Station 1 is yours; Station 2, the Harbour Dock, six regional
   stations (`$12,000`) and the airport station (`$18,000`) are for sale in Headquarters. Each has
   sixteen bays and a base hospital, and calls come from the district round every station you own.
@@ -285,7 +285,7 @@ simulation knows about the DOM, and nothing in the renderer changes the simulati
 - **Incident scenes** (`src/systems/scenes.js`): sixty stories on top of the basic calls, each a row of
   data — a chimney or e-bike battery fire, carbon monoxide in a flat, a grease fire, a server-room fire,
   cladding racing up a tower, a crowd crush in a mall, a dust explosion, an ammonia leak, an aircraft
-  overrunning the runway, a train derailment, smoke in a metro tunnel, a person under a train, a
+  overrunning the runway, a train derailment, a tram hitting a car, a tram derailment, a person under a tram, a fallen overhead wire, a
   campfire, lightning or arson in the woods, a bus crash, a tanker rollover, a kayaker in the river, and
   so on. A scene is something that can happen to a kind of building (or a stretch of forest, road or
   water) within reach of a station you own; it starts a fire, traps people, hurts people, spills
@@ -366,7 +366,7 @@ needs editing.
 ?wildfire       start a forest fire (the nearest wood to Station 1)
 ?scene=cladding play one incident scene by id (see src/systems/scenes.js)
 ?allstations    open every station
-?goto=airport1  move the camera: airport1, rail, metro, station3, station4 ...
+?goto=airport1  move the camera: airport1, rail, tram, station3, station4 ...
 ?zoom=0.8       set the opening zoom
 ?select=b7      select a building by id
 ?help           open the controls overlay

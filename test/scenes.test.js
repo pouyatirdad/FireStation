@@ -28,9 +28,9 @@ test('there are more than fifty incident scenes, each complete', () => {
   }
 });
 
-test('the scenes cover homes, shops, offices, malls, industry, the airport, the railway, the metro, the woods, roads and water', () => {
+test('the scenes cover homes, shops, offices, malls, industry, the airport, the railway, the tram, the woods, roads and water', () => {
   const types = new Set(SCENES.flatMap((s) => s.types ?? []));
-  for (const t of ['house', 'apartment', 'shop', 'office', 'hotel', 'tower', 'mall', 'school', 'warehouse', 'factory', 'tankfarm', 'terminal', 'hangar', 'railstation', 'metro']) {
+  for (const t of ['house', 'apartment', 'shop', 'office', 'hotel', 'tower', 'mall', 'school', 'warehouse', 'factory', 'tankfarm', 'terminal', 'hangar', 'railstation', 'tramstop']) {
     assert.ok(types.has(t), `no scene for ${t}`);
   }
   const sites = new Set(SCENES.map((s) => s.site));

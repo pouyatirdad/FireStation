@@ -3029,10 +3029,10 @@ return { OFFROAD_COST, buildNav, buildLattice, index, passable, walkableAt, driv
 // ---- src/data/transit.js ----
 __m["src/data/transit.js"] = (function () {
 const { buildLattice, latticeRoute } = __m["src/systems/grid.js"];
-// The railway and the metro: lines of track that join the railway stations and
-// the metro entrances along the avenues and streets, and the trains that run on
-// them. The railway is an elevated line over the street; the metro runs in a
-// tunnel under it. Trains are not part of the simulation: where one is at any
+// The railway and the tram: lines of track that join the railway stations and
+// the tram stops along the avenues and streets, and the trains that run on
+// them. The railway is an elevated line over the street; the trams run on rails
+// set into the street itself. Trains are not part of the simulation: where one is at any
 // moment is a pure function of the game clock, so the renderer, the minimap and
 // the tests all agree and nothing needs saving.
 
@@ -3117,13 +3117,13 @@ function buildTransit(city) {
   const railLine = makeLine(nav, { id: 'rail1', kind: 'rail', name: 'Harbor Line', color: '#2f6fa8', speed: 7, cars: 5, carGap: 1.7, spacing: 220 }, rail.length >= 2 ? nearestChain(rail, 0) : []);
   if (railLine) lines.push(railLine);
 
-  // The metro: the entrances are shared out between a red line and a blue line.
-  const entrances = city.buildings.filter((b) => b.type === 'metro').sort((a, b) => a.x - b.x);
-  const red = entrances.filter((_, i) => i % 2 === 0);
-  const blue = entrances.filter((_, i) => i % 2 === 1);
+  // The tram: the stops are shared out between a yellow line and a red line.
+  const stops = city.buildings.filter((b) => b.type === 'tramstop').sort((a, b) => a.x - b.x);
+  const yellow = stops.filter((_, i) => i % 2 === 0);
+  const red = stops.filter((_, i) => i % 2 === 1);
   for (const [def, list] of [
-    [{ id: 'metro1', kind: 'metro', name: 'Red Line', color: '#e5484d', speed: 9, cars: 4, carGap: 1.5, spacing: 170 }, red],
-    [{ id: 'metro2', kind: 'metro', name: 'Blue Line', color: '#3b82f6', speed: 9, cars: 4, carGap: 1.5, spacing: 170 }, blue],
+    [{ id: 'tram1', kind: 'tram', name: 'Tram 1', color: '#e8b923', speed: 5, cars: 2, carGap: 1.75, spacing: 150 }, yellow],
+    [{ id: 'tram2', kind: 'tram', name: 'Tram 2', color: '#d6453d', speed: 5, cars: 2, carGap: 1.75, spacing: 150 }, red],
   ]) {
     const line = makeLine(nav, def, list.length >= 2 ? nearestChain(list, 0) : []);
     if (line) lines.push(line);
@@ -3181,7 +3181,7 @@ const { Rng, clamp } = __m["src/core/math.js"];
 const { buildTransit } = __m["src/data/transit.js"];
 // Harbor City: a 520×384 tile grid (about ten times the area of the original
 // 160×120 town) of districts between 17 avenues and 15 streets, with several
-// forests, parks, two airports, a railway, a metro and a waterfront. Generated from a seed, so every shift is the
+// forests, parks, an airport, a railway, a tram and a waterfront. Generated from a seed, so every shift is the
 // same city and the tests can point at a named building. The original town sits
 // in the north-west corner with Station 1 where it always was.
 //
@@ -3283,17 +3283,20 @@ const SPEC = {
   factory: { floors: [1, 3], hp: [140, 180], risk: 1.25 },
   school: { floors: [2, 3], hp: [110, 140], risk: 0.7 },
   tankfarm: { floors: [1, 1], hp: [160, 210], risk: 1.45 },
-  // Transport: the airport, the railway and the metro.
+  // Transport: the airport, the railway and the tram.
   terminal: { floors: [2, 3], hp: [170, 210], risk: 0.6 },
   hangar: { floors: [1, 1], hp: [120, 160], risk: 1.2 },
   railstation: { floors: [2, 3], hp: [150, 190], risk: 0.6 },
-  metro: { floors: [1, 2], hp: [100, 130], risk: 0.55 },
+  tramstop: { floors: [1, 1], hp: [90, 120], risk: 0.55 },
 };
 
 // Size classes by building mass (footprint x floors, the measure the fire logic
 // uses): the map is meant to be about half small buildings, three in ten medium,
 // one in eight large and one in twelve very large.
 const SIZE_CLASSES = [['small', 30], ['medium', 80], ['large', 200], ['huge', Infinity]];
+// How far a roof is drawn above the ground. Capped: a tall tower's roof would
+// otherwise be painted four tiles up the screen, over the street behind it.
+const elevationOf = (floors) => Math.min(46, 11 + floors * 5);
 const buildingMass = (w, h, floors) => w * h * (0.7 + 0.15 * floors);
 const sizeClassOf = (mass) => SIZE_CLASSES.find(([, max]) => mass < max)[0];
 
@@ -3316,7 +3319,7 @@ const ROOFS = {
   terminal: ['#8d949b', '#7f8a93', '#98a0a6'],
   hangar: ['#6d7479', '#7a8085', '#646b70'],
   railstation: ['#6f7c86', '#5f6c76', '#7b8790'],
-  metro: ['#4a5a68', '#56606b', '#3f4f5c'],
+  tramstop: ['#7b8a96', '#6f7e8a', '#85929c'],
 };
 
 // What is built in each kind of block (by lot style), with weights. The big
@@ -3326,7 +3329,7 @@ const KIND_TYPES = {
   villa: [['villa', 8], ['house', 0.8], ['school', 0.15], ['apartment', 0.15]],
   suburb: [['house', 8], ['apartment', 1.6], ['school', 0.12], ['shop', 0.3]],
   flats: [['apartment', 5], ['house', 1.5], ['school', 0.4], ['shop', 0.4]],
-  downtown: [['office', 3.2], ['tower', 3], ['hotel', 1.8], ['mall', 7], ['apartment', 0.7], ['shop', 0.6], ['metro', 3.5], ['railstation', 9]],
+  downtown: [['office', 3.2], ['tower', 3], ['hotel', 1.8], ['mall', 7], ['apartment', 0.7], ['shop', 0.6], ['tramstop', 3.5], ['railstation', 9]],
   industry: [['warehouse', 4], ['factory', 3.5], ['tankfarm', 1.6], ['office', 0.4]],
   market: [['shop', 4], ['apartment', 2.6], ['house', 0.6], ['hotel', 0.25], ['mall', 0.5]],
 };
@@ -3352,7 +3355,7 @@ const OCCUPANTS = {
   terminal: [80, 200],
   hangar: [2, 10],
   railstation: [40, 120],
-  metro: [20, 70],
+  tramstop: [4, 16],
 };
 
 const NAMES = {
@@ -3424,10 +3427,10 @@ const NAMES = {
     'Lincoln High School', 'St. Clair Academy', 'Maple Grove School', 'Westfield Primary', 'Riverside College',
     'Holloway Secondary', 'Elmgrove School', 'Fairmount Academy',
   ],
-  metro: [
-    'Central Metro', 'Union Square Metro', 'Harbor Line Metro', 'Northgate Metro', 'City Hall Metro', 'Market Street Metro',
-    'University Metro', 'Riverside Metro', 'Cathedral Metro', 'Exchange Metro', 'Stadium Metro', 'Park Lane Metro',
-    'Kings Cross Metro', 'Mill Road Metro', 'Docks Metro', 'Old Town Metro', 'Victoria Metro', 'Albion Metro',
+  tramstop: [
+    'Central Tram Stop', 'Union Square Tram Stop', 'Harbor Line Tram Stop', 'Northgate Tram Stop', 'City Hall Tram Stop', 'Market Street Tram Stop',
+    'University Tram Stop', 'Riverside Tram Stop', 'Cathedral Tram Stop', 'Exchange Tram Stop', 'Stadium Tram Stop', 'Park Lane Tram Stop',
+    'Kings Cross Tram Stop', 'Mill Road Tram Stop', 'Docks Tram Stop', 'Old Town Tram Stop', 'Victoria Tram Stop', 'Albion Tram Stop',
   ],
   railstation: [
     'Harbor Central Station', 'Northgate Rail Station', 'Eastside Junction', 'Union Terminus', 'Riverside Rail Station',
@@ -3583,7 +3586,7 @@ const TYPE_RULES = {
   terminal: { minW: 24, minH: 9, maxW: 32, maxH: 12 },
   hangar: { minW: 14, minH: 9, maxW: 20, maxH: 12 },
   railstation: { minW: 16, minH: 10, maxW: 26, maxH: 14 },
-  metro: { minW: 4, minH: 4, maxW: 6, maxH: 5 },
+  tramstop: { minW: 4, minH: 4, maxW: 6, maxH: 5 },
 };
 
 // How each kind of block is cut into lots: lot sizes, the lane between lots, how
@@ -3914,7 +3917,7 @@ function rebalanceSizes(buildings) {
   const setFloors = (b, floors) => {
     b.occupants = Math.round(b.occupants * (floors / b.floors));
     b.floors = floors;
-    b.elevation = 11 + floors * 5;
+    b.elevation = elevationOf(floors);
     b.sizeClass = sizeClassOf(buildingMass(b.w, b.h, floors));
   };
   // Promote from the class below until `to` has its share.
@@ -4148,7 +4151,7 @@ function generateCity(seed = 7) {
       w: wid,
       h: hei,
       floors,
-      elevation: 11 + floors * 5,
+      elevation: elevationOf(floors),
       roofColor: extra.roofColor ?? rng.pick(ROOFS[type]),
       integrity: hp,
       maxIntegrity: hp,
@@ -4854,7 +4857,7 @@ function generateCity(seed = 7) {
   };
 }
 
-return { CITY_W, CITY_NAME, V_ROADS, H_ROADS, SEA_Y, CITY_H, RIVER_HALF_WIDTH, riverCentre, APRON, SIZE_CLASSES, buildingMass, sizeClassOf, SIZE_TARGET, createCity };
+return { CITY_W, CITY_NAME, V_ROADS, H_ROADS, SEA_Y, CITY_H, RIVER_HALF_WIDTH, riverCentre, APRON, SIZE_CLASSES, elevationOf, buildingMass, sizeClassOf, SIZE_TARGET, createCity };
 })();
 
 // ---- src/core/hotkeys.js ----
@@ -11032,17 +11035,21 @@ const SCENES = [
   { id: 'signalbox', label: 'Signal cabin fire', types: ['railstation'], weight: 1.5, reward: 900, fire: 0.2,
     text: ({ b }) => `Signal cabin fire at ${b.name} — trains are stopped across the district` },
 
-  // --- the metro -------------------------------------------------------------
-  { id: 'tunnelsmoke', label: 'Smoke in the metro', types: ['metro'], weight: 2, big: true, reward: 2600, fire: 0.15, trapped: [4, 9],
-    text: ({ b, n }) => `MAJOR INCIDENT — smoke pouring from the tunnel at ${b.name}, ${n} passengers stuck below` },
-  { id: 'undertrain', label: 'Person under a train', types: ['metro'], weight: 1.2, reward: 0,
-    hurt: [[0.85, 1, 'Person hit by a train at']],
-    text: ({ b }) => `A passenger has fallen under a train at ${b.name} — paramedics needed on the platform` },
-  { id: 'escalator', label: 'Escalator fire', types: ['metro'], weight: 2, reward: 900, fire: 0.25, trapped: [2, 4],
-    text: ({ b, n }) => `Escalator motor fire at ${b.name} — ${n} people cut off on the lower level` },
-  { id: 'platform-crush', label: 'Platform crush', types: ['metro'], weight: 1, reward: 0,
-    hurt: [[0.4, 0.9, 'Platform crush casualty at'], [0.4, 0.9, 'Platform crush casualty at'], [0.4, 0.9, 'Platform crush casualty at']],
-    text: ({ b }) => `Overcrowded platform at ${b.name} — a crush at the stairs, several people hurt` },
+  // --- the tram --------------------------------------------------------------
+  { id: 'tramcrash', label: 'Tram hits a car', types: ['tramstop'], weight: 2.5, reward: 1100, trapped: [1, 3], rescue: true,
+    hurt: [[0.5, 1, 'Tram crash casualty at'], [0.4, 0.9, 'Tram crash casualty at'], [0.4, 0.9, 'Tram crash casualty at']],
+    text: ({ b, n }) => `A tram has hit a car at ${b.name} — ${n} trapped in the wreckage and the street is blocked` },
+  { id: 'tramwire', label: 'Overhead wire fire', types: ['tramstop'], weight: 2, reward: 800, fire: 0.2,
+    text: ({ b }) => `A fallen overhead wire has set the shelter at ${b.name} alight — the tram line is dead` },
+  { id: 'undertram', label: 'Person under a tram', types: ['tramstop'], weight: 1.2, reward: 0,
+    hurt: [[0.85, 1, 'Person hit by a tram at']],
+    text: ({ b }) => `A pedestrian has been hit by a tram at ${b.name} — paramedics needed at once` },
+  { id: 'tramderail', label: 'Tram derailment', types: ['tramstop'], weight: 1.5, big: true, reward: 2400, fire: 0.15, trapped: [3, 6],
+    hurt: [[0.5, 1, 'Derailment casualty at'], [0.4, 0.9, 'Derailment casualty at'], [0.4, 0.9, 'Derailment casualty at']],
+    text: ({ b, n }) => `MAJOR INCIDENT — a tram has left the rails at ${b.name}, ${n} passengers trapped and many hurt` },
+  { id: 'tramcrush', label: 'Tram stop crush', types: ['tramstop'], weight: 1, reward: 0,
+    hurt: [[0.4, 0.9, 'Crowd crush casualty at'], [0.4, 0.9, 'Crowd crush casualty at'], [0.4, 0.9, 'Crowd crush casualty at']],
+    text: ({ b }) => `Overcrowded tram stop at ${b.name} — a crush at the doors, several people hurt` },
 
   // --- the woods -------------------------------------------------------------
   { id: 'campfire', label: 'Campfire spreads', site: FOREST, weight: 3, big: true, reward: 2000,
@@ -12281,7 +12288,7 @@ function commandSellVehicle(state, id = null) {
 
 function serialize(state) {
   return {
-    version: 13,
+    version: 14,
     seed: state.seed,
     time: state.time,
     clock: state.clock,
@@ -13067,6 +13074,7 @@ function render(ctx, state, cam, view, opts = {}) {
   drawHoses(ctx, state, now);
   drawEntities(ctx, state, bounds, now, z);
   drawRail(ctx, state, bounds, z);
+  drawTrams(ctx, state, bounds, z);
   drawWildfires(ctx, state, now, z);
   if (currentDark > 0.12) {
     ctx.globalCompositeOperation = 'lighter';
@@ -13504,7 +13512,7 @@ function drawGround(ctx, state, b, z) {
   drawTracks(ctx, state, b, z);
 
   drawAirfields(ctx, city, b, z);
-  drawMetro(ctx, state, b, z);
+  drawTramRails(ctx, state, b, z);
 
   // The station apron and its parking bays.
   for (const st of city.stations ?? [{ apron: APRON }]) {
@@ -13617,7 +13625,7 @@ let seaGradient = null;
 
 // Bridges, drawn after the roads: concrete parapets along both sides of the
 // deck and the deck's shadow on the water downstream.
-// ------------------------------------------------------- rail and metro ---
+// ------------------------------------------------------- rail and tram ---
 
 const lineInView = (line, b) => {
   let x0 = Infinity; let y0 = Infinity; let x1 = -Infinity; let y1 = -Infinity;
@@ -13652,39 +13660,99 @@ function drawTrainCar(ctx, car, color, length, width, head) {
   ctx.restore();
 }
 
-/** The metro: a tunnel under the street, seen as a faint dashed line with its trains running through it. */
-function drawMetro(ctx, state, b, z) {
-  const lines = (state.city.transit?.lines ?? []).filter((l) => l.kind === 'metro');
+/** One tram car, centred on (x, y) tiles and pointing along `angle`. */
+function drawTramCar(ctx, car, color, head) {
+  ctx.save();
+  ctx.translate(car.x * TILE, car.y * TILE);
+  ctx.rotate(car.angle);
+  const l = 1.7 * TILE;
+  const w = 0.8 * TILE;
+  ctx.fillStyle = 'rgba(0,0,0,0.25)';
+  rr(ctx, -l / 2 + 2, -w / 2 + 4, l, w, 5);
+  ctx.fill();
+  ctx.fillStyle = color;
+  rr(ctx, -l / 2, -w / 2, l, w, 5);
+  ctx.fill();
+  ctx.fillStyle = '#f1f3f4';
+  ctx.fillRect(-l / 2 + 4, -w / 2 + 4, l - 8, 4);
+  ctx.fillRect(-l / 2 + 4, w / 2 - 8, l - 8, 4);
+  ctx.fillStyle = 'rgba(40,55,70,0.85)';
+  for (let x = -l / 2 + 6; x < l / 2 - 8; x += 9) ctx.fillRect(x, -3, 6, 6);
+  // The pantograph on the roof.
+  ctx.strokeStyle = '#2b2f33';
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(-4, -4, 8, 8);
+  if (head) {
+    ctx.fillStyle = '#ffe9a8';
+    ctx.fillRect(l / 2 - 3, -w / 2 + 3, 2.5, 4);
+    ctx.fillRect(l / 2 - 3, w / 2 - 7, 2.5, 4);
+  }
+  ctx.restore();
+}
+
+/** The tram: two rails set into the street, with a platform at each stop. */
+function drawTramRails(ctx, state, b, z) {
+  const lines = (state.city.transit?.lines ?? []).filter((l) => l.kind === 'tram');
   if (lines.length === 0 || z < 0.2) return;
   ctx.save();
   ctx.lineJoin = 'round';
   for (const line of lines) {
     if (!lineInView(line, b)) continue;
-    ctx.strokeStyle = line.color;
-    ctx.globalAlpha = 0.4;
-    ctx.lineWidth = 5;
-    ctx.setLineDash([16, 12]);
+    ctx.strokeStyle = 'rgba(40,36,30,0.28)';
+    ctx.lineWidth = 15;
     tracePolyline(ctx, line);
     ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.globalAlpha = 1;
+    // Two rails: a light line either side of the lane's centre.
+    for (const off of [-0.3, 0.3]) {
+      ctx.strokeStyle = 'rgba(205,208,212,0.9)';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      for (let i = 0; i < line.pts.length; i++) {
+        const a = line.pts[i];
+        const prev = line.pts[Math.max(0, i - 1)];
+        const next = line.pts[Math.min(line.pts.length - 1, i + 1)];
+        const dx = Math.sign(next.x - prev.x);
+        const dy = Math.sign(next.y - prev.y);
+        // The offset is across the direction of travel.
+        const ox = dy !== 0 && dx === 0 ? off : 0;
+        const oy = dx !== 0 && dy === 0 ? off : 0;
+        const px = (a.x + 0.5 + ox) * TILE;
+        const py = (a.y + 0.5 + oy) * TILE;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+    }
     for (const stop of line.stops) {
       if (stop.x < b.x0 - 2 || stop.x > b.x1 + 2 || stop.y < b.y0 - 2 || stop.y > b.y1 + 2) continue;
-      ctx.fillStyle = '#f4f1ea';
+      ctx.fillStyle = 'rgba(214,203,170,0.85)';
       ctx.strokeStyle = line.color;
       ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.arc((stop.x + 0.5) * TILE, (stop.y + 0.5) * TILE, 9, 0, Math.PI * 2);
+      rr(ctx, (stop.x - 0.9) * TILE + 16, (stop.y - 0.9) * TILE + 16, 1.8 * TILE, 1.8 * TILE, 5);
       ctx.fill();
       ctx.stroke();
     }
-    if (z < 0.3) continue;
-    // Trains under the pavement: a little translucent.
-    ctx.globalAlpha = 0.65;
-    for (const train of trainsAt(line, state.time)) {
-      train.cars.forEach((car, i) => drawTrainCar(ctx, car, line.color, 1.35, 0.5, i === 0));
+  }
+  ctx.restore();
+}
+
+/** The trams themselves, above the traffic, with the overhead wire. */
+function drawTrams(ctx, state, b, z) {
+  const lines = (state.city.transit?.lines ?? []).filter((l) => l.kind === 'tram');
+  if (lines.length === 0 || z < 0.2) return;
+  ctx.save();
+  ctx.lineJoin = 'round';
+  for (const line of lines) {
+    if (!lineInView(line, b)) continue;
+    if (z >= 0.5) {
+      ctx.strokeStyle = 'rgba(30,32,36,0.55)';
+      ctx.lineWidth = 1;
+      tracePolyline(ctx, line);
+      ctx.stroke();
     }
-    ctx.globalAlpha = 1;
+    for (const train of trainsAt(line, state.time)) {
+      train.cars.forEach((car, i) => drawTramCar(ctx, car, line.color, i === 0));
+    }
   }
   ctx.restore();
 }
@@ -14600,7 +14668,7 @@ function drawBuilding(ctx, state, b, now, z) {
   if (b.type === 'terminal') drawTerminalRoof(ctx, x, y - e, w, h);
   if (b.type === 'hangar') drawHangarRoof(ctx, x, y - e, w, h);
   if (b.type === 'railstation') drawRailRoof(ctx, x, y - e, w, h);
-  if (b.type === 'metro') drawMetroMark(ctx, x, y - e, w, h);
+  if (b.type === 'tramstop') drawTramMark(ctx, x, y - e, w, h);
   if (b.type === 'pharmacy') drawPharmacyMark(ctx, x, y - e, w, h);
   if (b.type === 'hospital') drawHospitalMark(ctx, x, y - e, w, h, detailed);
   if (detailed && b.type === 'station') drawStationFace(
@@ -14639,7 +14707,7 @@ const WALLS = {
   terminal: ['#b8c2c9', '#aab6be'],
   hangar: ['#8d9498', '#80878c'],
   railstation: ['#a89a86', '#9d8f7b'],
-  metro: ['#6f7b86', '#65717c'],
+  tramstop: ['#8d97a0', '#838d96'],
   pharmacy: ['#e3e6e2'],
   hospital: ['#e6e8e6'],
   station: ['#a2503f'],
@@ -14843,15 +14911,17 @@ function drawRailRoof(ctx, x, y, w, h) {
   ctx.stroke();
 }
 
-// The metro roundel on a station entrance.
-function drawMetroMark(ctx, x, y, w, h) {
-  const r = Math.min(w, h) * 0.3;
-  ctx.fillStyle = '#d6362f';
+// A tram stop: a shelter roof with a yellow tram sign.
+function drawTramMark(ctx, x, y, w, h) {
+  ctx.fillStyle = 'rgba(150,190,215,0.5)';
+  ctx.fillRect(x + 4, y + 4, w - 8, h - 8);
+  const r = Math.min(w, h) * 0.22;
+  ctx.fillStyle = '#e8b923';
   ctx.beginPath();
   ctx.arc(x + w / 2, y + h / 2, r, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = '#f4f1ea';
-  ctx.fillRect(x + w / 2 - r - 3, y + h / 2 - 2, r * 2 + 6, 4);
+  ctx.fillStyle = '#2b2f33';
+  ctx.fillRect(x + w / 2 - r * 0.55, y + h / 2 - r * 0.35, r * 1.1, r * 0.7);
 }
 
 function drawPharmacyMark(ctx, x, y, w, h) {
@@ -17879,7 +17949,7 @@ function sellApparatus(id) {
 
 // ------------------------------------------------------------------- save ---
 
-const SAVE_KEY = 'firestation.save.v13';
+const SAVE_KEY = 'firestation.save.v14';
 
 function hasSave() {
   try {
@@ -18263,7 +18333,7 @@ if (sceneParam) {
 const gotoParam = params.get('goto');
 if (gotoParam) {
   let spot = null;
-  if (gotoParam === 'rail' || gotoParam === 'metro') {
+  if (gotoParam === 'rail' || gotoParam === 'tram') {
     const line = state.city.transit.lines.find((l) => l.kind === gotoParam);
     if (line) spot = { x: (line.stops[0].x + 0.5) * TILE, y: (line.stops[0].y + 0.5) * TILE, zoom: 0.7 };
   } else if (gotoParam.startsWith('airport')) {

@@ -40,11 +40,11 @@ test('the runways are part of the road network, so engines can drive onto the ai
   }
 });
 
-test('the metro and the railway have stations in the business districts', () => {
+test('the tram and the railway have stops in the business districts', () => {
   const of = (type) => city.buildings.filter((b) => b.type === type);
-  assert.ok(of('metro').length >= 10, `${of('metro').length} metro entrances`);
+  assert.ok(of('tramstop').length >= 10, `${of('tramstop').length} tram stops`);
   assert.ok(of('railstation').length >= 2, `${of('railstation').length} railway stations`);
-  assert.ok(of('metro').every((b) => b.zone === 'company'));
+  assert.ok(of('tramstop').every((b) => b.zone === 'company'));
   assert.ok(of('mall').length >= 3, `${of('mall').length} malls`);
 });
 

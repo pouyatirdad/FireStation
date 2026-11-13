@@ -7,15 +7,15 @@ import { pointAt, trainsAt } from '../src/data/transit.js';
 const city = createCity(7);
 const lines = city.transit.lines;
 
-test('there is a railway and two metro lines', () => {
+test('there is a railway and two tram lines', () => {
   assert.ok(lines.some((l) => l.kind === 'rail'), 'no railway');
-  assert.equal(lines.filter((l) => l.kind === 'metro').length, 2);
+  assert.equal(lines.filter((l) => l.kind === 'tram').length, 2);
   const rail = lines.find((l) => l.kind === 'rail');
   assert.ok(rail.stops.length >= 2);
   assert.ok(rail.stops.every((s) => city.buildings.some((b) => b.id === s.building && b.type === 'railstation')), 'a rail stop is not at a railway station');
-  for (const m of lines.filter((l) => l.kind === 'metro')) {
+  for (const m of lines.filter((l) => l.kind === 'tram')) {
     assert.ok(m.stops.length >= 2);
-    assert.ok(m.stops.every((s) => city.buildings.some((b) => b.id === s.building && b.type === 'metro')), 'a metro stop is not at an entrance');
+    assert.ok(m.stops.every((s) => city.buildings.some((b) => b.id === s.building && b.type === 'tramstop')), 'a tram stop is not at a tram stop building');
   }
 });
 

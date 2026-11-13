@@ -252,6 +252,7 @@ export function render(ctx, state, cam, view, opts = {}) {
   drawHoses(ctx, state, now);
   drawEntities(ctx, state, bounds, now, z);
   drawRail(ctx, state, bounds, z);
+  drawTrams(ctx, state, bounds, z);
   drawWildfires(ctx, state, now, z);
   if (currentDark > 0.12) {
     ctx.globalCompositeOperation = 'lighter';
@@ -689,7 +690,7 @@ function drawGround(ctx, state, b, z) {
   drawTracks(ctx, state, b, z);
 
   drawAirfields(ctx, city, b, z);
-  drawMetro(ctx, state, b, z);
+  drawTramRails(ctx, state, b, z);
 
   // The station apron and its parking bays.
   for (const st of city.stations ?? [{ apron: APRON }]) {
@@ -802,7 +803,7 @@ let seaGradient = null;
 
 // Bridges, drawn after the roads: concrete parapets along both sides of the
 // deck and the deck's shadow on the water downstream.
-// ------------------------------------------------------- rail and metro ---
+// ------------------------------------------------------- rail and tram ---
 
 const lineInView = (line, b) => {
   let x0 = Infinity; let y0 = Infinity; let x1 = -Infinity; let y1 = -Infinity;
@@ -837,39 +838,99 @@ function drawTrainCar(ctx, car, color, length, width, head) {
   ctx.restore();
 }
 
-/** The metro: a tunnel under the street, seen as a faint dashed line with its trains running through it. */
-function drawMetro(ctx, state, b, z) {
-  const lines = (state.city.transit?.lines ?? []).filter((l) => l.kind === 'metro');
+/** One tram car, centred on (x, y) tiles and pointing along `angle`. */
+function drawTramCar(ctx, car, color, head) {
+  ctx.save();
+  ctx.translate(car.x * TILE, car.y * TILE);
+  ctx.rotate(car.angle);
+  const l = 1.7 * TILE;
+  const w = 0.8 * TILE;
+  ctx.fillStyle = 'rgba(0,0,0,0.25)';
+  rr(ctx, -l / 2 + 2, -w / 2 + 4, l, w, 5);
+  ctx.fill();
+  ctx.fillStyle = color;
+  rr(ctx, -l / 2, -w / 2, l, w, 5);
+  ctx.fill();
+  ctx.fillStyle = '#f1f3f4';
+  ctx.fillRect(-l / 2 + 4, -w / 2 + 4, l - 8, 4);
+  ctx.fillRect(-l / 2 + 4, w / 2 - 8, l - 8, 4);
+  ctx.fillStyle = 'rgba(40,55,70,0.85)';
+  for (let x = -l / 2 + 6; x < l / 2 - 8; x += 9) ctx.fillRect(x, -3, 6, 6);
+  // The pantograph on the roof.
+  ctx.strokeStyle = '#2b2f33';
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(-4, -4, 8, 8);
+  if (head) {
+    ctx.fillStyle = '#ffe9a8';
+    ctx.fillRect(l / 2 - 3, -w / 2 + 3, 2.5, 4);
+    ctx.fillRect(l / 2 - 3, w / 2 - 7, 2.5, 4);
+  }
+  ctx.restore();
+}
+
+/** The tram: two rails set into the street, with a platform at each stop. */
+function drawTramRails(ctx, state, b, z) {
+  const lines = (state.city.transit?.lines ?? []).filter((l) => l.kind === 'tram');
   if (lines.length === 0 || z < 0.2) return;
   ctx.save();
   ctx.lineJoin = 'round';
   for (const line of lines) {
     if (!lineInView(line, b)) continue;
-    ctx.strokeStyle = line.color;
-    ctx.globalAlpha = 0.4;
-    ctx.lineWidth = 5;
-    ctx.setLineDash([16, 12]);
+    ctx.strokeStyle = 'rgba(40,36,30,0.28)';
+    ctx.lineWidth = 15;
     tracePolyline(ctx, line);
     ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.globalAlpha = 1;
+    // Two rails: a light line either side of the lane's centre.
+    for (const off of [-0.3, 0.3]) {
+      ctx.strokeStyle = 'rgba(205,208,212,0.9)';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      for (let i = 0; i < line.pts.length; i++) {
+        const a = line.pts[i];
+        const prev = line.pts[Math.max(0, i - 1)];
+        const next = line.pts[Math.min(line.pts.length - 1, i + 1)];
+        const dx = Math.sign(next.x - prev.x);
+        const dy = Math.sign(next.y - prev.y);
+        // The offset is across the direction of travel.
+        const ox = dy !== 0 && dx === 0 ? off : 0;
+        const oy = dx !== 0 && dy === 0 ? off : 0;
+        const px = (a.x + 0.5 + ox) * TILE;
+        const py = (a.y + 0.5 + oy) * TILE;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+    }
     for (const stop of line.stops) {
       if (stop.x < b.x0 - 2 || stop.x > b.x1 + 2 || stop.y < b.y0 - 2 || stop.y > b.y1 + 2) continue;
-      ctx.fillStyle = '#f4f1ea';
+      ctx.fillStyle = 'rgba(214,203,170,0.85)';
       ctx.strokeStyle = line.color;
       ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.arc((stop.x + 0.5) * TILE, (stop.y + 0.5) * TILE, 9, 0, Math.PI * 2);
+      rr(ctx, (stop.x - 0.9) * TILE + 16, (stop.y - 0.9) * TILE + 16, 1.8 * TILE, 1.8 * TILE, 5);
       ctx.fill();
       ctx.stroke();
     }
-    if (z < 0.3) continue;
-    // Trains under the pavement: a little translucent.
-    ctx.globalAlpha = 0.65;
-    for (const train of trainsAt(line, state.time)) {
-      train.cars.forEach((car, i) => drawTrainCar(ctx, car, line.color, 1.35, 0.5, i === 0));
+  }
+  ctx.restore();
+}
+
+/** The trams themselves, above the traffic, with the overhead wire. */
+function drawTrams(ctx, state, b, z) {
+  const lines = (state.city.transit?.lines ?? []).filter((l) => l.kind === 'tram');
+  if (lines.length === 0 || z < 0.2) return;
+  ctx.save();
+  ctx.lineJoin = 'round';
+  for (const line of lines) {
+    if (!lineInView(line, b)) continue;
+    if (z >= 0.5) {
+      ctx.strokeStyle = 'rgba(30,32,36,0.55)';
+      ctx.lineWidth = 1;
+      tracePolyline(ctx, line);
+      ctx.stroke();
     }
-    ctx.globalAlpha = 1;
+    for (const train of trainsAt(line, state.time)) {
+      train.cars.forEach((car, i) => drawTramCar(ctx, car, line.color, i === 0));
+    }
   }
   ctx.restore();
 }
@@ -1785,7 +1846,7 @@ function drawBuilding(ctx, state, b, now, z) {
   if (b.type === 'terminal') drawTerminalRoof(ctx, x, y - e, w, h);
   if (b.type === 'hangar') drawHangarRoof(ctx, x, y - e, w, h);
   if (b.type === 'railstation') drawRailRoof(ctx, x, y - e, w, h);
-  if (b.type === 'metro') drawMetroMark(ctx, x, y - e, w, h);
+  if (b.type === 'tramstop') drawTramMark(ctx, x, y - e, w, h);
   if (b.type === 'pharmacy') drawPharmacyMark(ctx, x, y - e, w, h);
   if (b.type === 'hospital') drawHospitalMark(ctx, x, y - e, w, h, detailed);
   if (detailed && b.type === 'station') drawStationFace(
@@ -1824,7 +1885,7 @@ const WALLS = {
   terminal: ['#b8c2c9', '#aab6be'],
   hangar: ['#8d9498', '#80878c'],
   railstation: ['#a89a86', '#9d8f7b'],
-  metro: ['#6f7b86', '#65717c'],
+  tramstop: ['#8d97a0', '#838d96'],
   pharmacy: ['#e3e6e2'],
   hospital: ['#e6e8e6'],
   station: ['#a2503f'],
@@ -2028,15 +2089,17 @@ function drawRailRoof(ctx, x, y, w, h) {
   ctx.stroke();
 }
 
-// The metro roundel on a station entrance.
-function drawMetroMark(ctx, x, y, w, h) {
-  const r = Math.min(w, h) * 0.3;
-  ctx.fillStyle = '#d6362f';
+// A tram stop: a shelter roof with a yellow tram sign.
+function drawTramMark(ctx, x, y, w, h) {
+  ctx.fillStyle = 'rgba(150,190,215,0.5)';
+  ctx.fillRect(x + 4, y + 4, w - 8, h - 8);
+  const r = Math.min(w, h) * 0.22;
+  ctx.fillStyle = '#e8b923';
   ctx.beginPath();
   ctx.arc(x + w / 2, y + h / 2, r, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = '#f4f1ea';
-  ctx.fillRect(x + w / 2 - r - 3, y + h / 2 - 2, r * 2 + 6, 4);
+  ctx.fillStyle = '#2b2f33';
+  ctx.fillRect(x + w / 2 - r * 0.55, y + h / 2 - r * 0.35, r * 1.1, r * 0.7);
 }
 
 function drawPharmacyMark(ctx, x, y, w, h) {

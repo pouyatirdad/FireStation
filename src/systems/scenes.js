@@ -150,17 +150,21 @@ export const SCENES = [
   { id: 'signalbox', label: 'Signal cabin fire', types: ['railstation'], weight: 1.5, reward: 900, fire: 0.2,
     text: ({ b }) => `Signal cabin fire at ${b.name} — trains are stopped across the district` },
 
-  // --- the metro -------------------------------------------------------------
-  { id: 'tunnelsmoke', label: 'Smoke in the metro', types: ['metro'], weight: 2, big: true, reward: 2600, fire: 0.15, trapped: [4, 9],
-    text: ({ b, n }) => `MAJOR INCIDENT — smoke pouring from the tunnel at ${b.name}, ${n} passengers stuck below` },
-  { id: 'undertrain', label: 'Person under a train', types: ['metro'], weight: 1.2, reward: 0,
-    hurt: [[0.85, 1, 'Person hit by a train at']],
-    text: ({ b }) => `A passenger has fallen under a train at ${b.name} — paramedics needed on the platform` },
-  { id: 'escalator', label: 'Escalator fire', types: ['metro'], weight: 2, reward: 900, fire: 0.25, trapped: [2, 4],
-    text: ({ b, n }) => `Escalator motor fire at ${b.name} — ${n} people cut off on the lower level` },
-  { id: 'platform-crush', label: 'Platform crush', types: ['metro'], weight: 1, reward: 0,
-    hurt: [[0.4, 0.9, 'Platform crush casualty at'], [0.4, 0.9, 'Platform crush casualty at'], [0.4, 0.9, 'Platform crush casualty at']],
-    text: ({ b }) => `Overcrowded platform at ${b.name} — a crush at the stairs, several people hurt` },
+  // --- the tram --------------------------------------------------------------
+  { id: 'tramcrash', label: 'Tram hits a car', types: ['tramstop'], weight: 2.5, reward: 1100, trapped: [1, 3], rescue: true,
+    hurt: [[0.5, 1, 'Tram crash casualty at'], [0.4, 0.9, 'Tram crash casualty at'], [0.4, 0.9, 'Tram crash casualty at']],
+    text: ({ b, n }) => `A tram has hit a car at ${b.name} — ${n} trapped in the wreckage and the street is blocked` },
+  { id: 'tramwire', label: 'Overhead wire fire', types: ['tramstop'], weight: 2, reward: 800, fire: 0.2,
+    text: ({ b }) => `A fallen overhead wire has set the shelter at ${b.name} alight — the tram line is dead` },
+  { id: 'undertram', label: 'Person under a tram', types: ['tramstop'], weight: 1.2, reward: 0,
+    hurt: [[0.85, 1, 'Person hit by a tram at']],
+    text: ({ b }) => `A pedestrian has been hit by a tram at ${b.name} — paramedics needed at once` },
+  { id: 'tramderail', label: 'Tram derailment', types: ['tramstop'], weight: 1.5, big: true, reward: 2400, fire: 0.15, trapped: [3, 6],
+    hurt: [[0.5, 1, 'Derailment casualty at'], [0.4, 0.9, 'Derailment casualty at'], [0.4, 0.9, 'Derailment casualty at']],
+    text: ({ b, n }) => `MAJOR INCIDENT — a tram has left the rails at ${b.name}, ${n} passengers trapped and many hurt` },
+  { id: 'tramcrush', label: 'Tram stop crush', types: ['tramstop'], weight: 1, reward: 0,
+    hurt: [[0.4, 0.9, 'Crowd crush casualty at'], [0.4, 0.9, 'Crowd crush casualty at'], [0.4, 0.9, 'Crowd crush casualty at']],
+    text: ({ b }) => `Overcrowded tram stop at ${b.name} — a crush at the doors, several people hurt` },
 
   // --- the woods -------------------------------------------------------------
   { id: 'campfire', label: 'Campfire spreads', site: FOREST, weight: 3, big: true, reward: 2000,

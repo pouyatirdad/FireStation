@@ -1,6 +1,6 @@
 // Harbor City: a 520×384 tile grid (about ten times the area of the original
 // 160×120 town) of districts between 17 avenues and 15 streets, with several
-// forests, parks, two airports, a railway, a metro and a waterfront. Generated from a seed, so every shift is the
+// forests, parks, an airport, a railway, a tram and a waterfront. Generated from a seed, so every shift is the
 // same city and the tests can point at a named building. The original town sits
 // in the north-west corner with Station 1 where it always was.
 //
@@ -102,17 +102,20 @@ const SPEC = {
   factory: { floors: [1, 3], hp: [140, 180], risk: 1.25 },
   school: { floors: [2, 3], hp: [110, 140], risk: 0.7 },
   tankfarm: { floors: [1, 1], hp: [160, 210], risk: 1.45 },
-  // Transport: the airport, the railway and the metro.
+  // Transport: the airport, the railway and the tram.
   terminal: { floors: [2, 3], hp: [170, 210], risk: 0.6 },
   hangar: { floors: [1, 1], hp: [120, 160], risk: 1.2 },
   railstation: { floors: [2, 3], hp: [150, 190], risk: 0.6 },
-  metro: { floors: [1, 2], hp: [100, 130], risk: 0.55 },
+  tramstop: { floors: [1, 1], hp: [90, 120], risk: 0.55 },
 };
 
 // Size classes by building mass (footprint x floors, the measure the fire logic
 // uses): the map is meant to be about half small buildings, three in ten medium,
 // one in eight large and one in twelve very large.
 export const SIZE_CLASSES = [['small', 30], ['medium', 80], ['large', 200], ['huge', Infinity]];
+// How far a roof is drawn above the ground. Capped: a tall tower's roof would
+// otherwise be painted four tiles up the screen, over the street behind it.
+export const elevationOf = (floors) => Math.min(46, 11 + floors * 5);
 export const buildingMass = (w, h, floors) => w * h * (0.7 + 0.15 * floors);
 export const sizeClassOf = (mass) => SIZE_CLASSES.find(([, max]) => mass < max)[0];
 
@@ -135,7 +138,7 @@ const ROOFS = {
   terminal: ['#8d949b', '#7f8a93', '#98a0a6'],
   hangar: ['#6d7479', '#7a8085', '#646b70'],
   railstation: ['#6f7c86', '#5f6c76', '#7b8790'],
-  metro: ['#4a5a68', '#56606b', '#3f4f5c'],
+  tramstop: ['#7b8a96', '#6f7e8a', '#85929c'],
 };
 
 // What is built in each kind of block (by lot style), with weights. The big
@@ -145,7 +148,7 @@ const KIND_TYPES = {
   villa: [['villa', 8], ['house', 0.8], ['school', 0.15], ['apartment', 0.15]],
   suburb: [['house', 8], ['apartment', 1.6], ['school', 0.12], ['shop', 0.3]],
   flats: [['apartment', 5], ['house', 1.5], ['school', 0.4], ['shop', 0.4]],
-  downtown: [['office', 3.2], ['tower', 3], ['hotel', 1.8], ['mall', 7], ['apartment', 0.7], ['shop', 0.6], ['metro', 3.5], ['railstation', 9]],
+  downtown: [['office', 3.2], ['tower', 3], ['hotel', 1.8], ['mall', 7], ['apartment', 0.7], ['shop', 0.6], ['tramstop', 3.5], ['railstation', 9]],
   industry: [['warehouse', 4], ['factory', 3.5], ['tankfarm', 1.6], ['office', 0.4]],
   market: [['shop', 4], ['apartment', 2.6], ['house', 0.6], ['hotel', 0.25], ['mall', 0.5]],
 };
@@ -171,7 +174,7 @@ const OCCUPANTS = {
   terminal: [80, 200],
   hangar: [2, 10],
   railstation: [40, 120],
-  metro: [20, 70],
+  tramstop: [4, 16],
 };
 
 const NAMES = {
@@ -243,10 +246,10 @@ const NAMES = {
     'Lincoln High School', 'St. Clair Academy', 'Maple Grove School', 'Westfield Primary', 'Riverside College',
     'Holloway Secondary', 'Elmgrove School', 'Fairmount Academy',
   ],
-  metro: [
-    'Central Metro', 'Union Square Metro', 'Harbor Line Metro', 'Northgate Metro', 'City Hall Metro', 'Market Street Metro',
-    'University Metro', 'Riverside Metro', 'Cathedral Metro', 'Exchange Metro', 'Stadium Metro', 'Park Lane Metro',
-    'Kings Cross Metro', 'Mill Road Metro', 'Docks Metro', 'Old Town Metro', 'Victoria Metro', 'Albion Metro',
+  tramstop: [
+    'Central Tram Stop', 'Union Square Tram Stop', 'Harbor Line Tram Stop', 'Northgate Tram Stop', 'City Hall Tram Stop', 'Market Street Tram Stop',
+    'University Tram Stop', 'Riverside Tram Stop', 'Cathedral Tram Stop', 'Exchange Tram Stop', 'Stadium Tram Stop', 'Park Lane Tram Stop',
+    'Kings Cross Tram Stop', 'Mill Road Tram Stop', 'Docks Tram Stop', 'Old Town Tram Stop', 'Victoria Tram Stop', 'Albion Tram Stop',
   ],
   railstation: [
     'Harbor Central Station', 'Northgate Rail Station', 'Eastside Junction', 'Union Terminus', 'Riverside Rail Station',
@@ -402,7 +405,7 @@ const TYPE_RULES = {
   terminal: { minW: 24, minH: 9, maxW: 32, maxH: 12 },
   hangar: { minW: 14, minH: 9, maxW: 20, maxH: 12 },
   railstation: { minW: 16, minH: 10, maxW: 26, maxH: 14 },
-  metro: { minW: 4, minH: 4, maxW: 6, maxH: 5 },
+  tramstop: { minW: 4, minH: 4, maxW: 6, maxH: 5 },
 };
 
 // How each kind of block is cut into lots: lot sizes, the lane between lots, how
@@ -733,7 +736,7 @@ function rebalanceSizes(buildings) {
   const setFloors = (b, floors) => {
     b.occupants = Math.round(b.occupants * (floors / b.floors));
     b.floors = floors;
-    b.elevation = 11 + floors * 5;
+    b.elevation = elevationOf(floors);
     b.sizeClass = sizeClassOf(buildingMass(b.w, b.h, floors));
   };
   // Promote from the class below until `to` has its share.
@@ -967,7 +970,7 @@ function generateCity(seed = 7) {
       w: wid,
       h: hei,
       floors,
-      elevation: 11 + floors * 5,
+      elevation: elevationOf(floors),
       roofColor: extra.roofColor ?? rng.pick(ROOFS[type]),
       integrity: hp,
       maxIntegrity: hp,

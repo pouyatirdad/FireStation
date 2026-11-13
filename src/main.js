@@ -628,7 +628,7 @@ function sellApparatus(id) {
 
 // ------------------------------------------------------------------- save ---
 
-const SAVE_KEY = 'firestation.save.v13';
+const SAVE_KEY = 'firestation.save.v14';
 
 function hasSave() {
   try {
@@ -1012,7 +1012,7 @@ if (sceneParam) {
 const gotoParam = params.get('goto');
 if (gotoParam) {
   let spot = null;
-  if (gotoParam === 'rail' || gotoParam === 'metro') {
+  if (gotoParam === 'rail' || gotoParam === 'tram') {
     const line = state.city.transit.lines.find((l) => l.kind === gotoParam);
     if (line) spot = { x: (line.stops[0].x + 0.5) * TILE, y: (line.stops[0].y + 0.5) * TILE, zoom: 0.7 };
   } else if (gotoParam.startsWith('airport')) {

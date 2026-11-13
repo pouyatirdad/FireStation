@@ -1,7 +1,7 @@
-// The railway and the metro: lines of track that join the railway stations and
-// the metro entrances along the avenues and streets, and the trains that run on
-// them. The railway is an elevated line over the street; the metro runs in a
-// tunnel under it. Trains are not part of the simulation: where one is at any
+// The railway and the tram: lines of track that join the railway stations and
+// the tram stops along the avenues and streets, and the trains that run on
+// them. The railway is an elevated line over the street; the trams run on rails
+// set into the street itself. Trains are not part of the simulation: where one is at any
 // moment is a pure function of the game clock, so the renderer, the minimap and
 // the tests all agree and nothing needs saving.
 
@@ -86,13 +86,13 @@ export function buildTransit(city) {
   const railLine = makeLine(nav, { id: 'rail1', kind: 'rail', name: 'Harbor Line', color: '#2f6fa8', speed: 7, cars: 5, carGap: 1.7, spacing: 220 }, rail.length >= 2 ? nearestChain(rail, 0) : []);
   if (railLine) lines.push(railLine);
 
-  // The metro: the entrances are shared out between a red line and a blue line.
-  const entrances = city.buildings.filter((b) => b.type === 'metro').sort((a, b) => a.x - b.x);
-  const red = entrances.filter((_, i) => i % 2 === 0);
-  const blue = entrances.filter((_, i) => i % 2 === 1);
+  // The tram: the stops are shared out between a yellow line and a red line.
+  const stops = city.buildings.filter((b) => b.type === 'tramstop').sort((a, b) => a.x - b.x);
+  const yellow = stops.filter((_, i) => i % 2 === 0);
+  const red = stops.filter((_, i) => i % 2 === 1);
   for (const [def, list] of [
-    [{ id: 'metro1', kind: 'metro', name: 'Red Line', color: '#e5484d', speed: 9, cars: 4, carGap: 1.5, spacing: 170 }, red],
-    [{ id: 'metro2', kind: 'metro', name: 'Blue Line', color: '#3b82f6', speed: 9, cars: 4, carGap: 1.5, spacing: 170 }, blue],
+    [{ id: 'tram1', kind: 'tram', name: 'Tram 1', color: '#e8b923', speed: 5, cars: 2, carGap: 1.75, spacing: 150 }, yellow],
+    [{ id: 'tram2', kind: 'tram', name: 'Tram 2', color: '#d6453d', speed: 5, cars: 2, carGap: 1.75, spacing: 150 }, red],
   ]) {
     const line = makeLine(nav, def, list.length >= 2 ? nearestChain(list, 0) : []);
     if (line) lines.push(line);
