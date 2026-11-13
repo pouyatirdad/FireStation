@@ -19,7 +19,7 @@ import {
   findVictim, nearestVictim, restoreVictims, updateVictims,
 } from './water.js';
 import {
-  repayLoan, takeLoan, toggleInsurance, trainCrew,
+  repayLoan, takeLoan, toggleInsurance,
 } from './economy.js';
 import {
   acceptContract, createContracts, restoreContracts, updateContracts,
@@ -67,7 +67,6 @@ export function createGame(seed = CONFIG.city.seed) {
     victims: [],
     loan: 0,
     insured: false,
-    training: { fire: 0, medic: 0, rescue: 0 },
     contracts: createContracts(),
     patients: [],
     blockades: [],
@@ -601,7 +600,6 @@ export function commandBuyStation(state, index = 1) {
 export const commandLoan = (state, amount) => takeLoan(state, amount);
 export const commandRepay = (state, amount) => repayLoan(state, amount);
 export const commandInsurance = (state) => toggleInsurance(state);
-export const commandTrain = (state, kind) => trainCrew(state, kind);
 export const commandAcceptContract = (state, id) => acceptContract(state, id);
 
 export function commandBuyEngine(state) {
@@ -705,7 +703,6 @@ export function serialize(state) {
     })),
     loan: state.loan,
     insured: state.insured,
-    training: { ...state.training },
     contracts: JSON.parse(JSON.stringify(state.contracts)),
     ledger: { ...state.ledger, lastCharges: state.ledger.lastCharges ? { ...state.ledger.lastCharges } : null, by: { ...(state.ledger.by ?? {}) } },
   };
@@ -747,7 +744,6 @@ export function loadState(data) {
   restoreVictims(state, data.victims ?? []);
   state.loan = data.loan ?? 0;
   state.insured = Boolean(data.insured);
-  state.training = { fire: 0, medic: 0, rescue: 0, ...(data.training ?? {}) };
   state.contracts = restoreContracts(data.contracts);
   restoreCuts(state, data.cut ?? []);
   restoreFleet(state, { engines: data.engines ?? [], crews: data.crews ?? [] });

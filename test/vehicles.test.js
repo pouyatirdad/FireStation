@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 
 import {
   createGame, startShift, update, commandBuyVehicle, commandBuyStation,
-  commandLoan, commandRepay, commandInsurance, commandTrain, commandAcceptContract,
+  commandLoan, commandRepay, commandInsurance, commandAcceptContract,
   commandDispatch, commandDispatchWildfire, commandSellVehicle, selectUnit, serialize, loadState,
 } from '../src/systems/game.js';
-import { firePower, freeBay, totalBays } from '../src/systems/units.js';
+import { freeBay, totalBays } from '../src/systems/units.js';
 import { hourlyCharges } from '../src/systems/economy.js';
 import { updateContracts } from '../src/systems/contracts.js';
 import { ignite, updateFire } from '../src/systems/fire.js';
@@ -124,27 +124,6 @@ test('a helicopter fights a forest fire from the air and refills in the harbour'
   assert.ok(heli.water > 500, 'the helicopter did not refill over the harbour');
 });
 
-test('fire training makes a crew put a fire out faster', () => {
-  const run = (level) => {
-    const state = shift();
-    state.training.fire = level;
-    const engine = state.engines[0];
-    const target = burnable(state);
-    ignite(state, target, 'test');
-    target.fire = 0.9;
-    target.integrity = 1e6;
-    target.maxIntegrity = 1e6;
-    let t = 0;
-    while (target.state === 'burning' && t < 600) {
-      state.streams = [{ targetId: target.id, power: 0.05 * firePower(state, engine.x, engine.y) }];
-      updateFire(state, 1 / 30);
-      t += 1 / 30;
-    }
-    return t;
-  };
-  assert.ok(run(3) < run(0));
-});
-
 // --------------------------------------------------------------- finance ---
 
 test('a loan adds credits, charges interest every hour, and can be repaid', () => {
@@ -188,21 +167,6 @@ test('insurance cuts the cost of a lost building and costs a premium', () => {
   const state = shift();
   commandInsurance(state);
   assert.equal(hourlyCharges(state).premium, CONFIG.economy.insurance.premium);
-});
-
-test('training makes crews better at their jobs, and costs no running cost', () => {
-  const state = shift();
-  const engine = state.engines[0];
-  assert.equal(firePower(state, engine.x, engine.y), 1);
-  assert.equal(commandTrain(state, 'fire'), true);
-  assert.ok(Math.abs(firePower(state, engine.x, engine.y) - (1 + CONFIG.economy.training.fire)) < 1e-9);
-  assert.equal(hourlyCharges(state).total, 0, 'training added a running cost');
-  state.credits = 100000;
-  const levels = CONFIG.economy.training.cost.length;
-  for (let i = 1; i < levels; i++) commandTrain(state, 'fire');
-  assert.equal(commandTrain(state, 'fire'), false, 'a level past the last');
-  assert.equal(state.training.fire, levels);
-  assert.equal(commandTrain(state, 'nonsense'), false);
 });
 
 test('a day report is written at midnight', () => {
@@ -275,14 +239,12 @@ test('finance state survives a save', () => {
   const state = shift();
   commandLoan(state);
   commandInsurance(state);
-  commandTrain(state, 'medic');
   commandBuyStation(state);
   state.contracts.nextOfferAt = 0;
   updateContracts(state);
   const loaded = loadState(JSON.parse(JSON.stringify(serialize(state))));
   assert.equal(loaded.loan, CONFIG.economy.loan.step);
   assert.equal(loaded.insured, true);
-  assert.equal(loaded.training.medic, 1);
   assert.deepEqual(loaded.ownedStations, [true, true, false]);
   assert.equal(loaded.contracts.offers.length, 1);
 });

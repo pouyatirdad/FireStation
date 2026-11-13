@@ -4,7 +4,7 @@ A top-down emergency-services management game for Windows, in the spirit of **Em
 520×384 city (ten times the area of the first version) with forests, pharmacies and a waterfront,
 a fleet of thirteen kinds of apparatus you buy and sell — engines, ladders, tankers, rescue units,
 paramedic cars, ambulances and ambulance buses, rescue boats, fireboats, a helicopter, an air tanker and
-**ambulances** — small calls and major incidents, injured civilians, forest fires, a loans-and-training economy,
+**ambulances** — small calls and major incidents, injured civilians, forest fires, a loans-and-insurance economy,
 synthesised sound, hospitals, blocked roads with live traffic, wind that drives the fire, chained incidents and a day/night cycle. Vanilla JavaScript, no dependencies; one self-contained
 `index.html`.
 
@@ -139,7 +139,6 @@ The **Finance** tab holds the levers:
 
 - **Loans** in $5,000 steps up to $30,000, at 3% of what you owe every two real minutes.
 - **Insurance** for $70 an hour: a lost building costs 40% instead of all of it.
-- **Training** for fire attack, paramedics and rescue, five levels each (00 up to ,800; +15% spray power, 14% faster treatment, 14% faster rescue per level).
 - A breakdown of everything you earned and spent this shift, and a **day report** in the log every midnight.
 
 **Contracts:** every five to eight minutes a sponsor offers a side job (knock down N fires, treat N people, reopen N roads, deliver critical patients, or go a stretch with no casualties). Accept up to two; finish in time and they pay, miss the deadline and you forfeit a quarter of the fee.

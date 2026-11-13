@@ -159,31 +159,6 @@ export function toggleInsurance(state) {
   return state.insured;
 }
 
-const TRAINING_LABEL = { fire: 'Fire attack', medic: 'Paramedic', rescue: 'Rescue' };
-
-/** Buy the next level of a crew training programme (applies to every crew). */
-export function trainCrew(state, kind) {
-  const t = CONFIG.economy.training;
-  if (!(kind in TRAINING_LABEL)) return false;
-  state.training = state.training ?? { fire: 0, medic: 0, rescue: 0 };
-  const level = state.training[kind] ?? 0;
-  if (level >= t.cost.length) {
-    addEvent(state, `${TRAINING_LABEL[kind]} training is complete`, 'info');
-    return false;
-  }
-  const cost = t.cost[level];
-  if (state.credits < cost) {
-    addEvent(state, `Not enough credits — ${money(cost)} for ${TRAINING_LABEL[kind]} training`, 'warn');
-    return false;
-  }
-  spend(state, cost, 'training');
-  state.training[kind] = level + 1;
-  addEvent(state, `${TRAINING_LABEL[kind]} training level ${level + 1} complete`, 'good');
-  return true;
-}
-
-export { TRAINING_LABEL };
-
 /** Charge loan interest and the insurance premium every hour; the daily report; maybe a donation. */
 export function updateEconomy(state, dt) {
   const ledger = state.ledger;

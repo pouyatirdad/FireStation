@@ -11,7 +11,7 @@ import {
   commandDispatchPatient, commandDispatchBlockade, commandPharmacy, commandHospital,
   selectPatient, selectBlockade, selectVictim, commandDispatchVictim,
   commandBuyStation, commandLoan, commandRepay, commandInsurance,
-  commandTrain, commandAcceptContract, commandEquip,
+  commandAcceptContract, commandEquip,
   commandDispatchAll, commandReturnAll, selectUnitByKey, commandBindKey,
   selectWildfire, getSelected, serialize, loadState,
 } from './systems/game.js';
@@ -558,7 +558,6 @@ function onAction(action, data = {}) {
     case 'take-loan': commandLoan(state); break;
     case 'repay-loan': commandRepay(state); break;
     case 'toggle-insurance': commandInsurance(state); break;
-    case 'train': commandTrain(state, data.kind); break;
     case 'accept-contract': commandAcceptContract(state, data.id); break;
     case 'sell-vehicle': sellApparatus(data.engine); break;
     case 'save-game': saveGame(); break;

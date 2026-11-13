@@ -53,15 +53,9 @@ export const CONFIG = {
     // then only sometimes. A miss pushes the next chance a few missions on.
     grant: { after: [10, 20], chance: 0.4, retry: [3, 7], min: 20000, max: 50000, minRating: 85 },
 
-    // Finance: borrowing, insurance, training and sponsor contracts.
+    // Finance: borrowing, insurance and sponsor contracts.
     loan: { max: 30000, step: 5000, rate: 0.03 }, // interest per game hour on what is owed
     insurance: { premium: 70, lossShare: 0.4 }, // per game hour; share of a building loss you still pay
-    training: {
-      cost: [700, 1400, 2300, 3400, 4800], // five levels per programme
-      fire: 0.15, // extra spray power per level
-      medic: 0.14, // faster treatment per level (five levels cap at 70%)
-      rescue: 0.14, // faster rescue per level (five levels cap at 70%)
-    },
     contracts: { every: [300, 480], maxOffers: 3, maxActive: 2, failPenalty: 0.25 },
     stationPrice: 9000, // buying Station 2
     dockPrice: 6500, // buying the Harbour Dock (berths for boats)

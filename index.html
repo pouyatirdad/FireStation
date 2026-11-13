@@ -2200,15 +2200,9 @@ const CONFIG = {
     // then only sometimes. A miss pushes the next chance a few missions on.
     grant: { after: [10, 20], chance: 0.4, retry: [3, 7], min: 20000, max: 50000, minRating: 85 },
 
-    // Finance: borrowing, insurance, training and sponsor contracts.
+    // Finance: borrowing, insurance and sponsor contracts.
     loan: { max: 30000, step: 5000, rate: 0.03 }, // interest per game hour on what is owed
     insurance: { premium: 70, lossShare: 0.4 }, // per game hour; share of a building loss you still pay
-    training: {
-      cost: [700, 1400, 2300, 3400, 4800], // five levels per programme
-      fire: 0.15, // extra spray power per level
-      medic: 0.14, // faster treatment per level (five levels cap at 70%)
-      rescue: 0.14, // faster rescue per level (five levels cap at 70%)
-    },
     contracts: { every: [300, 480], maxOffers: 3, maxActive: 2, failPenalty: 0.25 },
     stationPrice: 9000, // buying Station 2
     dockPrice: 6500, // buying the Harbour Dock (berths for boats)
@@ -4555,31 +4549,6 @@ function toggleInsurance(state) {
   return state.insured;
 }
 
-const TRAINING_LABEL = { fire: 'Fire attack', medic: 'Paramedic', rescue: 'Rescue' };
-
-/** Buy the next level of a crew training programme (applies to every crew). */
-function trainCrew(state, kind) {
-  const t = CONFIG.economy.training;
-  if (!(kind in TRAINING_LABEL)) return false;
-  state.training = state.training ?? { fire: 0, medic: 0, rescue: 0 };
-  const level = state.training[kind] ?? 0;
-  if (level >= t.cost.length) {
-    addEvent(state, `${TRAINING_LABEL[kind]} training is complete`, 'info');
-    return false;
-  }
-  const cost = t.cost[level];
-  if (state.credits < cost) {
-    addEvent(state, `Not enough credits — ${money(cost)} for ${TRAINING_LABEL[kind]} training`, 'warn');
-    return false;
-  }
-  spend(state, cost, 'training');
-  state.training[kind] = level + 1;
-  addEvent(state, `${TRAINING_LABEL[kind]} training level ${level + 1} complete`, 'good');
-  return true;
-}
-
-
-
 /** Charge loan interest and the insurance premium every hour; the daily report; maybe a donation. */
 function updateEconomy(state, dt) {
   const ledger = state.ledger;
@@ -4629,7 +4598,7 @@ function updateEconomy(state, dt) {
 
 }
 
-return { money, createLedger, earn, cityInGoodShape, missionDone, spend, valueFactor, speedBonus, lossShare, hourlyCharges, takeLoan, repayLoan, toggleInsurance, trainCrew, updateEconomy, TRAINING_LABEL };
+return { money, createLedger, earn, cityInGoodShape, missionDone, spend, valueFactor, speedBonus, lossShare, hourlyCharges, takeLoan, repayLoan, toggleInsurance, updateEconomy };
 })();
 
 // ---- src/systems/medical.js ----
@@ -6744,11 +6713,6 @@ function nearStation(state, engine) {
   });
 }
 
-/** Spray power multiplier: fire training. (x and y are kept for callers that pass the crew's position.) */
-function firePower(state, x, y) {
-  return 1 + CONFIG.economy.training.fire * (state.training?.fire ?? 0);
-}
-
 function hydrantInReach(state, engine) {
   const range = CONFIG.refillRange * TILE;
   for (const h of state.city.hydrants) {
@@ -7579,7 +7543,7 @@ function runTurret(state, engine, dt) {
       sy: engine.y - 10 + Math.sin(engine.angle) * 6,
       tx: impact.x,
       ty: impact.y,
-      power: engine.spec.turretPower * firePower(state, engine.x, engine.y),
+      power: engine.spec.turretPower,
       targetId: target.id,
       engineId: engine.id,
     });
@@ -7613,7 +7577,7 @@ function runTurret(state, engine, dt) {
         sy: engine.y - 10 + Math.sin(engine.angle) * 6,
         tx,
         ty,
-        power: engine.spec.turretPower * firePower(state, engine.x, engine.y),
+        power: engine.spec.turretPower,
         wildfireId: wf.id,
         engineId: engine.id,
       });
@@ -7884,7 +7848,7 @@ function updateDiver(state, crew, engine, dt) {
   crew.status = 'rescuing';
   crew.rescueTimer += dt;
   victim.rescueTimer = crew.rescueTimer;
-  const need = engine.spec.rescueTime * (1 - CONFIG.economy.training.rescue * (state.training?.rescue ?? 0));
+  const need = engine.spec.rescueTime;
   if (crew.rescueTimer >= need) {
     crew.rescueTimer = 0;
     rescueVictim(state, victim);
@@ -7953,7 +7917,7 @@ function updateMedic(state, crew, engine, dt) {
   crew.status = 'treating';
   crew.treatTimer += dt;
   patient.treatTimer = crew.treatTimer;
-  if (crew.treatTimer >= engine.spec.treatTime * (1 - CONFIG.economy.training.medic * (state.training?.medic ?? 0))) {
+  if (crew.treatTimer >= engine.spec.treatTime) {
     crew.treatTimer = 0;
     treatPatient(state, patient, engine);
     crew.patientId = null;
@@ -8068,7 +8032,7 @@ function updateCrewWildfire(state, crew, engine, wildfire, dt) {
       sy: crew.y + Math.sin(crew.angle) * 10 - 4,
       tx,
       ty,
-      power: CONFIG.crew.sprayPower * firePower(state, crew.x, crew.y),
+      power: CONFIG.crew.sprayPower,
       wildfireId: wildfire.id,
       crewId: crew.id,
       engineId: engine.id,
@@ -8210,8 +8174,7 @@ function updateCutter(state, crew, engine, dt) {
   const ty = (next.y + 0.5) * TILE;
   crew.angle = angleTo(crew.x, crew.y, tx, ty);
   crew.status = 'cutting';
-  const skill = 1 + CONFIG.economy.training.rescue * (state.training?.rescue ?? 0);
-  job.timer += dt * skill;
+  job.timer += dt;
   if (state.rng.float() < dt * 14) spawnChips(state, (crew.x + tx) / 2, (crew.y + ty) / 2);
   if (job.timer >= CONFIG.tools.chainsaw.cutTime) {
     job.timer = 0;
@@ -8355,8 +8318,7 @@ function updateCrew(state, crew, dt) {
       crew.rescueTimer = 0;
     }
     crew.rescueTimer += dt;
-    const rescueTime = (engine.spec.rescueTime ?? CONFIG.crew.rescueTime)
-      * (1 - CONFIG.economy.training.rescue * (state.training?.rescue ?? 0));
+    const rescueTime = (engine.spec.rescueTime ?? CONFIG.crew.rescueTime);
     if (crew.rescueTimer >= rescueTime) {
       crew.rescueTimer = 0;
       if (rescuePerson(state, target)) spawnRescue(state, crew.x, crew.y);
@@ -8382,7 +8344,7 @@ function updateCrew(state, crew, dt) {
       sy: crew.y + Math.sin(crew.angle) * 10 - 4,
       tx: impact.x,
       ty: impact.y,
-      power: CONFIG.crew.sprayPower * firePower(state, crew.x, crew.y),
+      power: CONFIG.crew.sprayPower,
       targetId: target.id,
       crewId: crew.id,
       engineId: engine.id,
@@ -8417,7 +8379,7 @@ function updateCrew(state, crew, dt) {
   }
 }
 
-return { createUnits, vehicleSpec, vehicleCost, isFirefighter, defaultTool, toolCount, vehicleTools, toolsFree, canDive, equipCrew, crewForTool, cuttable, cutTile, restoreCuts, cutList, orderCut, ownsStation, freeBay, totalBays, totalBerths, buyVehicle, sellVehicle, buyEngine, restoreFleet, findUnit, buildingOf, crewOf, engineOfCrew, engineForUnit, activeEngine, firePower, nearestHydrant, nearestWater, boatCanReach, orderEngine, orderEngineToWildfire, orderCrew, deployCrew, recallCrew, sendEngineHome, toggleHydrant, repathEngines, orderEngineToBlockade, pickEngineForBlockade, orderEngineToVictim, diveVehiclesFor, sendToHospital, orderAmbulanceToPatient, pickAmbulanceFor, sendToPharmacy, urgentFire, dispatchEngine, updateUnits, hydrantInReach };
+return { createUnits, vehicleSpec, vehicleCost, isFirefighter, defaultTool, toolCount, vehicleTools, toolsFree, canDive, equipCrew, crewForTool, cuttable, cutTile, restoreCuts, cutList, orderCut, ownsStation, freeBay, totalBays, totalBerths, buyVehicle, sellVehicle, buyEngine, restoreFleet, findUnit, buildingOf, crewOf, engineOfCrew, engineForUnit, activeEngine, nearestHydrant, nearestWater, boatCanReach, orderEngine, orderEngineToWildfire, orderCrew, deployCrew, recallCrew, sendEngineHome, toggleHydrant, repathEngines, orderEngineToBlockade, pickEngineForBlockade, orderEngineToVictim, diveVehiclesFor, sendToHospital, orderAmbulanceToPatient, pickAmbulanceFor, sendToPharmacy, urgentFire, dispatchEngine, updateUnits, hydrantInReach };
 })();
 
 // ---- src/systems/contracts.js ----
@@ -8553,11 +8515,9 @@ const { formatClock } = __m["src/core/math.js"];
 const { freeBay, hydrantInReach, ownsStation, toolCount, toolsFree, totalBays, totalBerths, vehicleTools } = __m["src/systems/units.js"];
 const { contractProgress } = __m["src/systems/contracts.js"];
 const { fireDifficulty } = __m["src/systems/fire.js"];
-const { TRAINING_LABEL } = __m["src/systems/economy.js"];
 const { windLabel } = __m["src/systems/wind.js"];
 // All DOM: the top bar, the selection card, the dispatch log, the unit roster
 // and the overlay screens. The renderer never touches an element.
-
 
 
 
@@ -9565,21 +9525,6 @@ function financeTab(state) {
   const loan = CONFIG.economy.loan;
   const owed = state.loan ?? 0;
   const ins = CONFIG.economy.insurance;
-  const train = CONFIG.economy.training;
-
-  const trainRows = Object.entries(TRAINING_LABEL).map(([kind, label]) => {
-    const level = state.training?.[kind] ?? 0;
-    const cost = train.cost[level];
-    const pips = train.cost.map((_, i) => '<i class="pip' + (i < level ? ' is-on' : '') + '"></i>').join('');
-    const effect = kind === 'fire' ? '+' + Math.round(train.fire * 100) + '% water power'
-      : kind === 'medic' ? Math.round(train.medic * 100) + '% faster treatment'
-        : Math.round(train.rescue * 100) + '% faster rescue';
-    const button = cost == null
-      ? '<span class="upgrade__max">Max</span>'
-      : '<button type="button" class="btn btn--small" data-action="train" data-kind="' + kind + '"' + (state.credits < cost ? ' disabled' : '') + '>$' + cost.toLocaleString('en-US') + '</button>';
-    return '<div class="upgrade"><div class="upgrade__text"><b>' + esc(label) + ' training</b><span>' + effect + ' per level</span></div><span class="pips">' + pips + '</span>' + button + '</div>';
-  }).join('');
-
   const by = Object.entries(ledger.by ?? {}).sort((a, c) => c[1] - a[1]);
   const ledgerRows = by.length
     ? by.map(([tag, amount]) => line(esc(tag), (amount >= 0 ? '+' : '') + money(amount), amount >= 0 ? 'good' : 'bad')).join('')
@@ -9594,8 +9539,6 @@ function financeTab(state) {
     '<div class="budget"><p class="menu__eyebrow">Insurance</p>' +
     '<p class="budget__total">' + money(ins.premium) + ' an hour. Buildings you lose cost ' + Math.round(ins.lossShare * 100) + '% instead of 100%.</p>' +
     '<div class="finance__buttons"><button type="button" class="btn btn--small' + (state.insured ? ' is-active' : '') + '" data-action="toggle-insurance">' + (state.insured ? 'Insured — cancel' : 'Take out insurance') + '</button></div></div>' +
-
-    '<div class="budget"><p class="menu__eyebrow">Crew training</p>' + trainRows + '</div>' +
 
     '<div class="budget"><p class="menu__eyebrow">This shift · earned ' + money(ledger.earned) + ' · spent ' + money(ledger.spent) + '</p>' + ledgerRows + '</div>';
 }
@@ -10809,7 +10752,7 @@ const { createCity } = __m["src/data/city.js"];
 const { buildNav } = __m["src/systems/grid.js"];
 const { activeEngine, buildingOf, buyVehicle, createUnits, deployCrew, dispatchEngine, engineForUnit, orderAmbulanceToPatient, orderCrew, orderEngine, orderEngineToWildfire, orderEngineToBlockade, pickAmbulanceFor, pickEngineForBlockade, recallCrew, repathEngines, restoreFleet, sellVehicle, sendEngineHome, sendToHospital, sendToPharmacy, toggleHydrant, updateUnits, isFirefighter, boatCanReach, diveVehiclesFor, orderEngineToVictim, canDive, crewForTool, cutList, equipCrew, orderCut, restoreCuts } = __m["src/systems/units.js"];
 const { findVictim, nearestVictim, restoreVictims, updateVictims } = __m["src/systems/water.js"];
-const { repayLoan, takeLoan, toggleInsurance, trainCrew } = __m["src/systems/economy.js"];
+const { repayLoan, takeLoan, toggleInsurance } = __m["src/systems/economy.js"];
 const { acceptContract, createContracts, restoreContracts, updateContracts } = __m["src/systems/contracts.js"];
 const { createTraffic, findBlockade, restoreBlockades, updateTraffic } = __m["src/systems/blockades.js"];
 const { explode, updateChains } = __m["src/systems/chains.js"];
@@ -10875,7 +10818,6 @@ function createGame(seed = CONFIG.city.seed) {
     victims: [],
     loan: 0,
     insured: false,
-    training: { fire: 0, medic: 0, rescue: 0 },
     contracts: createContracts(),
     patients: [],
     blockades: [],
@@ -11409,7 +11351,6 @@ function commandBuyStation(state, index = 1) {
 const commandLoan = (state, amount) => takeLoan(state, amount);
 const commandRepay = (state, amount) => repayLoan(state, amount);
 const commandInsurance = (state) => toggleInsurance(state);
-const commandTrain = (state, kind) => trainCrew(state, kind);
 const commandAcceptContract = (state, id) => acceptContract(state, id);
 
 function commandBuyEngine(state) {
@@ -11513,7 +11454,6 @@ function serialize(state) {
     })),
     loan: state.loan,
     insured: state.insured,
-    training: { ...state.training },
     contracts: JSON.parse(JSON.stringify(state.contracts)),
     ledger: { ...state.ledger, lastCharges: state.ledger.lastCharges ? { ...state.ledger.lastCharges } : null, by: { ...(state.ledger.by ?? {}) } },
   };
@@ -11555,7 +11495,6 @@ function loadState(data) {
   restoreVictims(state, data.victims ?? []);
   state.loan = data.loan ?? 0;
   state.insured = Boolean(data.insured);
-  state.training = { fire: 0, medic: 0, rescue: 0, ...(data.training ?? {}) };
   state.contracts = restoreContracts(data.contracts);
   restoreCuts(state, data.cut ?? []);
   restoreFleet(state, { engines: data.engines ?? [], crews: data.crews ?? [] });
@@ -11569,7 +11508,7 @@ function loadState(data) {
   return state;
 }
 
-return { createGame, startShift, shiftTime, update, getSelected, selectWildfire, selectVictim, selectBlockade, selectPatient, selectUnit, selectBuilding, pickAt, commandMove, commandDispatchWildfire, commandDispatchPatient, commandDispatchVictim, commandDispatchBlockade, commandHospital, commandPharmacy, commandDispatch, commandDispatchAll, commandReturnAll, selectUnitByKey, commandBindKey, commandDeploy, commandRecall, commandReturnHome, commandEquip, commandHydrant, commandBuyVehicle, commandBuyStation, commandLoan, commandRepay, commandInsurance, commandTrain, commandAcceptContract, commandBuyEngine, commandSellVehicle, serialize, loadState, orderEngine, orderCrew };
+return { createGame, startShift, shiftTime, update, getSelected, selectWildfire, selectVictim, selectBlockade, selectPatient, selectUnit, selectBuilding, pickAt, commandMove, commandDispatchWildfire, commandDispatchPatient, commandDispatchVictim, commandDispatchBlockade, commandHospital, commandPharmacy, commandDispatch, commandDispatchAll, commandReturnAll, selectUnitByKey, commandBindKey, commandDeploy, commandRecall, commandReturnHome, commandEquip, commandHydrant, commandBuyVehicle, commandBuyStation, commandLoan, commandRepay, commandInsurance, commandAcceptContract, commandBuyEngine, commandSellVehicle, serialize, loadState, orderEngine, orderCrew };
 })();
 
 // ---- src/systems/audio.js ----
@@ -15941,7 +15880,7 @@ const hud = __m["src/ui/hud.js"];
 const { CONFIG, TILE } = __m["src/core/config.js"];
 const { clamp, formatClock } = __m["src/core/math.js"];
 const { createLoop } = __m["src/core/loop.js"];
-const { createGame, startShift, update, pickAt, selectUnit, selectBuilding, commandMove, commandDispatch, commandDeploy, commandRecall, commandReturnHome, commandBuyVehicle, commandSellVehicle, commandHydrant, commandDispatchWildfire, commandDispatchPatient, commandDispatchBlockade, commandPharmacy, commandHospital, selectPatient, selectBlockade, selectVictim, commandDispatchVictim, commandBuyStation, commandLoan, commandRepay, commandInsurance, commandTrain, commandAcceptContract, commandEquip, commandDispatchAll, commandReturnAll, selectUnitByKey, commandBindKey, selectWildfire, getSelected, serialize, loadState } = __m["src/systems/game.js"];
+const { createGame, startShift, update, pickAt, selectUnit, selectBuilding, commandMove, commandDispatch, commandDeploy, commandRecall, commandReturnHome, commandBuyVehicle, commandSellVehicle, commandHydrant, commandDispatchWildfire, commandDispatchPatient, commandDispatchBlockade, commandPharmacy, commandHospital, selectPatient, selectBlockade, selectVictim, commandDispatchVictim, commandBuyStation, commandLoan, commandRepay, commandInsurance, commandAcceptContract, commandEquip, commandDispatchAll, commandReturnAll, selectUnitByKey, commandBindKey, selectWildfire, getSelected, serialize, loadState } = __m["src/systems/game.js"];
 const { createAudio } = __m["src/systems/audio.js"];
 const { spawnPatient } = __m["src/systems/medical.js"];
 const { trafficAccident, pileUp } = __m["src/systems/chains.js"];
@@ -16504,7 +16443,6 @@ function onAction(action, data = {}) {
     case 'take-loan': commandLoan(state); break;
     case 'repay-loan': commandRepay(state); break;
     case 'toggle-insurance': commandInsurance(state); break;
-    case 'train': commandTrain(state, data.kind); break;
     case 'accept-contract': commandAcceptContract(state, data.id); break;
     case 'sell-vehicle': sellApparatus(data.engine); break;
     case 'save-game': saveGame(); break;

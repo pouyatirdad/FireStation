@@ -603,11 +603,6 @@ function nearStation(state, engine) {
   });
 }
 
-/** Spray power multiplier: fire training. (x and y are kept for callers that pass the crew's position.) */
-export function firePower(state, x, y) {
-  return 1 + CONFIG.economy.training.fire * (state.training?.fire ?? 0);
-}
-
 function hydrantInReach(state, engine) {
   const range = CONFIG.refillRange * TILE;
   for (const h of state.city.hydrants) {
@@ -1438,7 +1433,7 @@ function runTurret(state, engine, dt) {
       sy: engine.y - 10 + Math.sin(engine.angle) * 6,
       tx: impact.x,
       ty: impact.y,
-      power: engine.spec.turretPower * firePower(state, engine.x, engine.y),
+      power: engine.spec.turretPower,
       targetId: target.id,
       engineId: engine.id,
     });
@@ -1472,7 +1467,7 @@ function runTurret(state, engine, dt) {
         sy: engine.y - 10 + Math.sin(engine.angle) * 6,
         tx,
         ty,
-        power: engine.spec.turretPower * firePower(state, engine.x, engine.y),
+        power: engine.spec.turretPower,
         wildfireId: wf.id,
         engineId: engine.id,
       });
@@ -1743,7 +1738,7 @@ function updateDiver(state, crew, engine, dt) {
   crew.status = 'rescuing';
   crew.rescueTimer += dt;
   victim.rescueTimer = crew.rescueTimer;
-  const need = engine.spec.rescueTime * (1 - CONFIG.economy.training.rescue * (state.training?.rescue ?? 0));
+  const need = engine.spec.rescueTime;
   if (crew.rescueTimer >= need) {
     crew.rescueTimer = 0;
     rescueVictim(state, victim);
@@ -1812,7 +1807,7 @@ function updateMedic(state, crew, engine, dt) {
   crew.status = 'treating';
   crew.treatTimer += dt;
   patient.treatTimer = crew.treatTimer;
-  if (crew.treatTimer >= engine.spec.treatTime * (1 - CONFIG.economy.training.medic * (state.training?.medic ?? 0))) {
+  if (crew.treatTimer >= engine.spec.treatTime) {
     crew.treatTimer = 0;
     treatPatient(state, patient, engine);
     crew.patientId = null;
@@ -1927,7 +1922,7 @@ function updateCrewWildfire(state, crew, engine, wildfire, dt) {
       sy: crew.y + Math.sin(crew.angle) * 10 - 4,
       tx,
       ty,
-      power: CONFIG.crew.sprayPower * firePower(state, crew.x, crew.y),
+      power: CONFIG.crew.sprayPower,
       wildfireId: wildfire.id,
       crewId: crew.id,
       engineId: engine.id,
@@ -2069,8 +2064,7 @@ function updateCutter(state, crew, engine, dt) {
   const ty = (next.y + 0.5) * TILE;
   crew.angle = angleTo(crew.x, crew.y, tx, ty);
   crew.status = 'cutting';
-  const skill = 1 + CONFIG.economy.training.rescue * (state.training?.rescue ?? 0);
-  job.timer += dt * skill;
+  job.timer += dt;
   if (state.rng.float() < dt * 14) spawnChips(state, (crew.x + tx) / 2, (crew.y + ty) / 2);
   if (job.timer >= CONFIG.tools.chainsaw.cutTime) {
     job.timer = 0;
@@ -2214,8 +2208,7 @@ function updateCrew(state, crew, dt) {
       crew.rescueTimer = 0;
     }
     crew.rescueTimer += dt;
-    const rescueTime = (engine.spec.rescueTime ?? CONFIG.crew.rescueTime)
-      * (1 - CONFIG.economy.training.rescue * (state.training?.rescue ?? 0));
+    const rescueTime = (engine.spec.rescueTime ?? CONFIG.crew.rescueTime);
     if (crew.rescueTimer >= rescueTime) {
       crew.rescueTimer = 0;
       if (rescuePerson(state, target)) spawnRescue(state, crew.x, crew.y);
@@ -2241,7 +2234,7 @@ function updateCrew(state, crew, dt) {
       sy: crew.y + Math.sin(crew.angle) * 10 - 4,
       tx: impact.x,
       ty: impact.y,
-      power: CONFIG.crew.sprayPower * firePower(state, crew.x, crew.y),
+      power: CONFIG.crew.sprayPower,
       targetId: target.id,
       crewId: crew.id,
       engineId: engine.id,

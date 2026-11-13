@@ -8,7 +8,6 @@ import {
 } from '../systems/units.js';
 import { contractProgress } from '../systems/contracts.js';
 import { fireDifficulty } from '../systems/fire.js';
-import { TRAINING_LABEL } from '../systems/economy.js';
 import { windLabel } from '../systems/wind.js';
 
 const $ = (id) => document.getElementById(id);
@@ -1010,21 +1009,6 @@ function financeTab(state) {
   const loan = CONFIG.economy.loan;
   const owed = state.loan ?? 0;
   const ins = CONFIG.economy.insurance;
-  const train = CONFIG.economy.training;
-
-  const trainRows = Object.entries(TRAINING_LABEL).map(([kind, label]) => {
-    const level = state.training?.[kind] ?? 0;
-    const cost = train.cost[level];
-    const pips = train.cost.map((_, i) => '<i class="pip' + (i < level ? ' is-on' : '') + '"></i>').join('');
-    const effect = kind === 'fire' ? '+' + Math.round(train.fire * 100) + '% water power'
-      : kind === 'medic' ? Math.round(train.medic * 100) + '% faster treatment'
-        : Math.round(train.rescue * 100) + '% faster rescue';
-    const button = cost == null
-      ? '<span class="upgrade__max">Max</span>'
-      : '<button type="button" class="btn btn--small" data-action="train" data-kind="' + kind + '"' + (state.credits < cost ? ' disabled' : '') + '>$' + cost.toLocaleString('en-US') + '</button>';
-    return '<div class="upgrade"><div class="upgrade__text"><b>' + esc(label) + ' training</b><span>' + effect + ' per level</span></div><span class="pips">' + pips + '</span>' + button + '</div>';
-  }).join('');
-
   const by = Object.entries(ledger.by ?? {}).sort((a, c) => c[1] - a[1]);
   const ledgerRows = by.length
     ? by.map(([tag, amount]) => line(esc(tag), (amount >= 0 ? '+' : '') + money(amount), amount >= 0 ? 'good' : 'bad')).join('')
@@ -1039,8 +1023,6 @@ function financeTab(state) {
     '<div class="budget"><p class="menu__eyebrow">Insurance</p>' +
     '<p class="budget__total">' + money(ins.premium) + ' an hour. Buildings you lose cost ' + Math.round(ins.lossShare * 100) + '% instead of 100%.</p>' +
     '<div class="finance__buttons"><button type="button" class="btn btn--small' + (state.insured ? ' is-active' : '') + '" data-action="toggle-insurance">' + (state.insured ? 'Insured — cancel' : 'Take out insurance') + '</button></div></div>' +
-
-    '<div class="budget"><p class="menu__eyebrow">Crew training</p>' + trainRows + '</div>' +
 
     '<div class="budget"><p class="menu__eyebrow">This shift · earned ' + money(ledger.earned) + ' · spent ' + money(ledger.spent) + '</p>' + ledgerRows + '</div>';
 }
