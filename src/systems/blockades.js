@@ -180,7 +180,7 @@ export function createTraffic(state) {
     }
   }
 
-  const colors = ['#cfd3d8', '#3d4d63', '#8f2f27', '#e7e3d6', '#4c5c50', '#b98a3a', '#6b6f76', '#2f4f7a'];
+  const colors = ['#cfd3d8', '#3d4d63', '#8f2f27', '#e7e3d6', '#9a9d9f', '#1f2124', '#6b6f76', '#2f4f7a'];
   const total = CONFIG.traffic.cars;
   const [lo, hi] = CONFIG.traffic.speed;
   // Longer roads carry more cars.
