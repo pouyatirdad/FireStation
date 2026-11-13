@@ -707,7 +707,7 @@ export function serialize(state) {
     insured: state.insured,
     training: { ...state.training },
     contracts: JSON.parse(JSON.stringify(state.contracts)),
-    ledger: { ...state.ledger, lastBudget: state.ledger.lastBudget ? { ...state.ledger.lastBudget } : null, by: { ...(state.ledger.by ?? {}) } },
+    ledger: { ...state.ledger, lastCharges: state.ledger.lastCharges ? { ...state.ledger.lastCharges } : null, by: { ...(state.ledger.by ?? {}) } },
   };
 }
 

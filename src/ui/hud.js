@@ -8,7 +8,7 @@ import {
 } from '../systems/units.js';
 import { contractProgress } from '../systems/contracts.js';
 import { fireDifficulty } from '../systems/fire.js';
-import { TRAINING_LABEL, hourlyBudget } from '../systems/economy.js';
+import { TRAINING_LABEL } from '../systems/economy.js';
 import { windLabel } from '../systems/wind.js';
 
 const $ = (id) => document.getElementById(id);
@@ -345,11 +345,6 @@ export function update(state, force = false) {
   $('stat-clock').textContent = formatClock(state.clock);
   $('stat-credits').textContent = money(state.credits);
   $('stat-credits').dataset.debt = state.credits < 0 ? '1' : '';
-  const budget = hourlyBudget(state);
-  const budgetEl = $('stat-budget');
-  budgetEl.textContent = `${budget.net >= 0 ? '+' : '−'}$${Math.abs(budget.net)}/h`;
-  budgetEl.dataset.tone = budget.net >= 0 ? 'good' : 'bad';
-  budgetEl.title = `Subsidy ${money(budget.subsidy)} − upkeep ${money(budget.upkeep)} per budget hour (every 2 minutes)`;
   $('stat-injured').textContent = String(state.patients.filter((q) => !q.treated).length);
   $('stat-wind').textContent = windLabel(state.wind);
   $('wind-arrow').style.transform = `rotate(${state.wind.dir}rad)`;
@@ -998,8 +993,7 @@ function fleetTab(state) {
     const disabled = noRoom || state.credits < spec.cost;
     return '<button type="button" class="station__buybtn" data-action="buy-vehicle" data-type="' + type + '"' + (disabled ? ' disabled' : '') + '>' +
       '<span class="station__buyhead"><b>' + esc(spec.label) + '</b><i>$' + spec.cost.toLocaleString('en-US') + '</i></span>' +
-      '<span>' + esc(vehicleBlurb(spec)) + '</span>' +
-      '<span class="station__upkeep">upkeep $' + spec.upkeep + '/h</span></button>';
+      '<span>' + esc(vehicleBlurb(spec)) + '</span></button>';
   }).join('');
 
   return '<div class="station__balance">$' + state.credits.toLocaleString('en-US') + '<span>credits · ' + landCount + '/' + bays + ' bays</span></div>' +
@@ -1010,7 +1004,6 @@ function fleetTab(state) {
 }
 
 function financeTab(state) {
-  const b = hourlyBudget(state);
   const ledger = state.ledger;
   const money = (n) => (n < 0 ? '−' : '') + '$' + Math.abs(Math.round(n)).toLocaleString('en-US');
   const line = (label, value, tone) => '<div class="budget__row"' + (tone ? ' data-tone="' + tone + '"' : '') + '><span>' + label + '</span><b>' + value + '</b></div>';
@@ -1038,13 +1031,6 @@ function financeTab(state) {
     : '<p class="budget__total">Nothing yet this shift.</p>';
 
   return '<div class="station__balance">$' + state.credits.toLocaleString('en-US') + '<span>credits' + (owed ? ' · owe ' + money(owed) : '') + '</span></div>' +
-    '<div class="budget"><p class="menu__eyebrow">Budget · per budget hour (every 2 minutes)</p>' +
-    line('City subsidy (scales with rating)', '+' + money(b.subsidy), 'good') +
-    line('Upkeep · ' + state.engines.length + ' vehicles', '−' + money(b.upkeep), 'bad') +
-    (b.premium ? line('Insurance premium', '−' + money(b.premium), 'bad') : '') +
-    (b.interest ? line('Loan interest', '−' + money(b.interest), 'bad') : '') +
-    line('Net per hour', (b.net >= 0 ? '+' : '') + money(b.net), b.net >= 0 ? 'good' : 'bad') + '</div>' +
-
     '<div class="budget"><p class="menu__eyebrow">Loan · ' + Math.round(loan.rate * 100) + '% interest an hour</p>' +
     line('Owed', money(owed) + ' of ' + money(loan.max)) +
     '<div class="finance__buttons"><button type="button" class="btn btn--small" data-action="take-loan">Borrow ' + money(loan.step) + '</button>' +

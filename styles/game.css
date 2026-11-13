@@ -1166,16 +1166,12 @@ button { font-family: inherit; }
 
 /* ---- budget, medical and sound ------------------------------------------- */
 
-.stat__value--budget { font-size: 12px; }
-.stat__value--budget[data-tone='good'] { color: #8fe0a8; }
-.stat__value--budget[data-tone='bad'] { color: #ff8f84; }
 .stat__value--credits[data-debt='1'] { color: #ff8f84; }
 .stat__value--injured { color: #9fd8ff; }
 
 #btn-sound.is-off { opacity: 0.55; }
 #btn-sound span { pointer-events: none; }
 
-.station__upkeep { font-size: 10px; color: var(--muted); }
 
 .budget {
   margin: 14px 0 0;

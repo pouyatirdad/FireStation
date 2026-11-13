@@ -1,9 +1,9 @@
 // The money model. Every credit that moves goes through here so the ledger, the
-// hourly budget and the "why did I lose money" log all agree.
+// hourly charges and the "why did I lose money" log all agree.
 //
 //   income   incident rewards (with a speed bonus), knockdown fees, treatment
-//            fees, the hourly city subsidy, and the odd donation
-//   costs    vehicle upkeep every game hour, medical kits, and the
+//            fees, and the odd donation
+//   costs    loan interest and insurance every hour, medical kits, and the
 //            penalties for losing a building or a life
 //
 // Credits may go negative (the city never closes the station) but nothing can be
@@ -21,7 +21,7 @@ export function createLedger() {
     spent: 0,
     hourAcc: 0,
     hours: 0,
-    lastBudget: null, // { subsidy, upkeep, premium, interest, net }
+    lastCharges: null, // { premium, interest, total }
     nextDonationAt: 0,
     missions: 0, // successful missions since the last volunteers' grant
     grantAfter: null, // missions needed before the next grant can happen
@@ -108,17 +108,11 @@ export function speedBonus(state, building) {
 /** Share of a building loss you still pay: 40% with insurance, all of it without. */
 export const lossShare = (state) => (state.insured ? CONFIG.economy.insurance.lossShare : 1);
 
-/** What the city is paying per game hour right now. */
-export function hourlyBudget(state) {
-  const budget = CONFIG.economy.budget;
-  const rating = clamp(state.rating / CONFIG.rating.start, 0, 1);
-  const subsidy = Math.round(
-    budget.subsidy * (budget.subsidyFloor + (1 - budget.subsidyFloor) * rating),
-  );
-  const upkeep = state.engines.reduce((sum, e) => sum + (e.spec?.upkeep ?? 0), 0);
+/** What the bank and the insurer charge per hour right now. */
+export function hourlyCharges(state) {
   const premium = state.insured ? CONFIG.economy.insurance.premium : 0;
   const interest = Math.round((state.loan ?? 0) * CONFIG.economy.loan.rate);
-  return { subsidy, upkeep, premium, interest, net: subsidy - upkeep - premium - interest };
+  return { premium, interest, total: premium + interest };
 }
 
 // ------------------------------------------------------------- finance ---
@@ -190,29 +184,23 @@ export function trainCrew(state, kind) {
 
 export { TRAINING_LABEL };
 
-/** Settle the budget at the top of every game hour; maybe a donation. */
+/** Charge loan interest and the insurance premium every hour; the daily report; maybe a donation. */
 export function updateEconomy(state, dt) {
   const ledger = state.ledger;
   if (!ledger) return;
-  const budget = CONFIG.economy.budget;
 
   ledger.hourAcc += dt;
-  if (ledger.hourAcc >= budget.hourEvery) {
-    ledger.hourAcc -= budget.hourEvery;
+  if (ledger.hourAcc >= CONFIG.economy.hourEvery) {
+    ledger.hourAcc -= CONFIG.economy.hourEvery;
     ledger.hours += 1;
-    const b = hourlyBudget(state);
-    earn(state, b.subsidy, 'subsidy');
-    spend(state, b.upkeep, 'upkeep');
-    spend(state, b.premium, 'insurance');
-    spend(state, b.interest, 'interest');
-    ledger.lastBudget = b;
-    const sign = b.net >= 0 ? '+' : '−';
-    const extra = (b.premium ? `, insurance ${money(b.premium)}` : '') + (b.interest ? `, interest ${money(b.interest)}` : '');
-    addEvent(
-      state,
-      `Hourly budget ${sign}${money(Math.abs(b.net))} — subsidy ${money(b.subsidy)}, upkeep ${money(b.upkeep)}${extra}`,
-      b.net >= 0 ? 'info' : 'warn',
-    );
+    const c = hourlyCharges(state);
+    ledger.lastCharges = c;
+    if (c.total > 0) {
+      spend(state, c.premium, 'insurance');
+      spend(state, c.interest, 'interest');
+      const parts = [c.premium ? `insurance ${money(c.premium)}` : '', c.interest ? `loan interest ${money(c.interest)}` : ''].filter(Boolean);
+      addEvent(state, `Hourly charges −${money(c.total)} — ${parts.join(', ')}`, 'warn');
+    }
   }
 
   // A daily report at midnight: what came in, what went out.
@@ -242,4 +230,5 @@ export function updateEconomy(state, dt) {
     const [lo, hi] = donation.every;
     ledger.nextDonationAt = state.time + state.rng.range(lo, hi);
   }
+
 }

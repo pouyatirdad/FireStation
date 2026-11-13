@@ -4,7 +4,7 @@ A top-down emergency-services management game for Windows, in the spirit of **Em
 520×384 city (ten times the area of the first version) with forests, pharmacies and a waterfront,
 a fleet of thirteen kinds of apparatus you buy and sell — engines, ladders, tankers, rescue units,
 paramedic cars, ambulances and ambulance buses, rescue boats, fireboats, a helicopter, an air tanker and
-**ambulances** — small calls and major incidents, injured civilians, forest fires, a real budget,
+**ambulances** — small calls and major incidents, injured civilians, forest fires, a loans-and-training economy,
 synthesised sound, hospitals, blocked roads with live traffic, wind that drives the fire, chained incidents and a day/night cycle. Vanilla JavaScript, no dependencies; one self-contained
 `index.html`.
 
@@ -64,20 +64,20 @@ the night.
 
 ### Apparatus and credits
 
-| Vehicle | Crew | Water | Hose | Deck gun | Price | Upkeep/h |
-|---|---|---|---|---|---|---|
-| **Engine** | 3 | 1,800 L | 15 | 9 | $1,000 | $24 |
-| **Ladder** | 3 | 1,200 L | 14 | 18 | $1,800 | $36 |
-| **Tanker** | 2 | 6,000 L | 12 | 7 | $1,500 | $26 |
-| **Rescue** | 4 | 600 L | 16 | 6 | $1,600 | $30 |
-| **Ambulance** | 2 paramedics | 8 kits | walks 22 tiles | — | $1,400 | $22 |
-| **Rapid response** | 2 | none (hydrant only) | 16 | — | $1,300 | $20 |
-| **Helicopter** | none | 2,600 L | — | 11 (from the air) | $8,000 | $95 |
-| **Air tanker** | none | 5,000 L | — | 8 (circling) | $11,000 | $140 |
-| **Fireboat** | none | unlimited | — | 18 (from the water) | $6,200 | $70 |
-| **Rescue boat** | 2 divers | — | — | — | $2,800 | $34 |
-| **Paramedic car** | 1 paramedic | 4 kits | walks 18 tiles | — | $750 | $12 |
-| **Ambulance bus** | 4 paramedics | 16 kits, 8 stretchers | walks 24 tiles | — | $3,400 | $48 |
+| Vehicle | Crew | Water | Hose | Deck gun | Price |
+|---|---|---|---|---|---|
+| **Engine** | 3 | 1,800 L | 15 | 9 | $1,000 |
+| **Ladder** | 3 | 1,200 L | 14 | 18 | $1,800 |
+| **Tanker** | 2 | 6,000 L | 12 | 7 | $1,500 |
+| **Rescue** | 4 | 600 L | 16 | 6 | $1,600 |
+| **Ambulance** | 2 paramedics | 8 kits | walks 22 tiles | — | $1,400 |
+| **Rapid response** | 2 | none (hydrant only) | 16 | — | $1,300 |
+| **Helicopter** | none | 2,600 L | — | 11 (from the air) | $8,000 |
+| **Air tanker** | none | 5,000 L | — | 8 (circling) | $11,000 |
+| **Fireboat** | none | unlimited | — | 18 (from the water) | $6,200 |
+| **Rescue boat** | 2 divers | — | — | — | $2,800 |
+| **Paramedic car** | 1 paramedic | 4 kits | walks 18 tiles | — | $750 |
+| **Ambulance bus** | 4 paramedics | 16 kits, 8 stretchers | walks 24 tiles | — | $3,400 |
 
 - **Rapid response car:** a small, quick utility car with two crew and a locker of tools (a chainsaw, a rescue cutter and diving gear) but no pump, no tank and no deck gun. Sent to a fire it drives to the hydrant nearest the building, connects its supply line there by itself (or press <kbd>G</kbd>) and the crew run the hose out, up to 16 tiles. It is no use where there is no hydrant in hose reach, such as a forest fire. Dispatch picks it after the real engines.
 - **Empty tank:** a fire vehicle whose tank runs dry drives back to its station to refill by itself (unless it is connected to a hydrant).
@@ -137,9 +137,9 @@ are driving into. The minimap is tinted by district.
 
 The **Finance** tab holds the levers:
 
-- **Loans** in $5,000 steps up to $30,000, at 3% of what you owe per budget hour (every two real minutes).
+- **Loans** in $5,000 steps up to $30,000, at 3% of what you owe every two real minutes.
 - **Insurance** for $70 an hour: a lost building costs 40% instead of all of it.
-- **Training** for fire attack, paramedics and rescue, three levels each (+12% spray power, 15% faster treatment, 12% faster rescue per level).
+- **Training** for fire attack, paramedics and rescue, five levels each (00 up to ,800; +15% spray power, 14% faster treatment, 14% faster rescue per level).
 - A breakdown of everything you earned and spent this shift, and a **day report** in the log every midnight.
 
 **Contracts:** every five to eight minutes a sponsor offers a side job (knock down N fires, treat N people, reopen N roads, deliver critical patients, or go a stretch with no casualties). Accept up to two; finish in time and they pay, miss the deadline and you forfeit a quarter of the fee.
@@ -164,26 +164,24 @@ One call can become several if you are slow:
 
 ### The money
 
-There is a real budget, shown in the top bar and in Headquarters.
+There is no running budget: no subsidy and no vehicle upkeep. Credits come only from what you do.
 
 - **Income:** incident rewards (with up to **+50% for a fast knockdown**), a knockdown fee of $260
   scaled by what the building is worth (a hotel pays 1.8× a shop, a house 0.8×), $120 per rescue, $160
-  per treated patient, the odd community donation, and an **hourly city subsidy** of $260 that shrinks to
-  40% as the city rating falls.
+  per treated patient, and the odd community donation.
 - **Volunteers' grant:** very rarely a volunteers' foundation gives **$20,000–$50,000**. It can only
   happen after a run of 10–20 successful missions, only while the city is doing well (rating 85 or more,
   no forest fire, at most one building alight), and even then only on a lucky roll — a miss pushes the
   next chance a few missions on.
 - **Time:** the clock runs 3× faster than it used to: a game hour is 40 real seconds and a day is 16 minutes, so a shift
-  starting at 07:00 reaches dusk after about seven minutes and the rush hours come round quickly. Money is settled on its own
-  timer, a **budget hour** of two real minutes, so the economy is unchanged by the clock speed (`clockRate` in the config).
+  starting at 07:00 reaches dusk after about seven minutes and the rush hours come round quickly. Loan interest and insurance are charged on their own
+  two-minute timer, so they are unchanged by the clock speed (`clockRate` in the config).
 - **Night:** after dusk the vehicles light the scene: long headlight beams with a pool of light on the road, big alternating red
   and blue pulses from the light bars (red and white on an ambulance) across the street and the buildings, a floodlight round an
   engine working at a scene, a searchlight under a helicopter, and larger warm pools under the street lights.
-- **Costs:** every budget hour (two real minutes) the city deducts the **upkeep** of every vehicle (there are no crew wages). A lost building costs $350 (scaled the same way), a life $700, and kits
+- **Costs:** vehicles cost nothing to run (no upkeep, no crew wages). Loan interest and the insurance premium, if you take them, are charged every two real minutes. A lost building costs $350 (scaled the same way), a life $700, and kits
   bought at a pharmacy $12 each.
-- The balance can go negative; you just cannot buy anything until it recovers. A full sixteen-bay fleet
-  costs more than the subsidy pays, so it has to earn its keep.
+- The balance can go negative; you just cannot buy anything until it recovers.
 
 ![Apparatus](docs/screenshot-station.png)
 

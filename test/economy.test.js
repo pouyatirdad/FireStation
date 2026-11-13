@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { createGame, startShift, update, commandBuyVehicle, serialize, loadState } from '../src/systems/game.js';
-import { hourlyBudget, speedBonus, valueFactor, earn, spend } from '../src/systems/economy.js';
+import { hourlyCharges, speedBonus, valueFactor, earn, spend } from '../src/systems/economy.js';
 import { ignite, updateFire } from '../src/systems/fire.js';
 import { CONFIG } from '../src/core/config.js';
 
@@ -13,38 +13,29 @@ function shift() {
   return state;
 }
 
-test('the hourly budget is subsidy minus upkeep, and the subsidy follows the rating', () => {
-  const state = shift();
-  const full = hourlyBudget(state);
-  assert.equal(full.subsidy, CONFIG.economy.budget.subsidy);
-  assert.equal(full.wages, undefined, 'there are no wages any more');
-  assert.equal(full.upkeep, CONFIG.vehicles.engine.upkeep);
-  assert.equal(full.net, full.subsidy - full.upkeep);
-
-  state.rating = 0;
-  const broke = hourlyBudget(state);
-  assert.equal(broke.subsidy, Math.round(CONFIG.economy.budget.subsidy * CONFIG.economy.budget.subsidyFloor));
-});
-
-test('a bigger fleet costs more per hour', () => {
+test('there is no subsidy or upkeep: a fleet costs nothing to run', () => {
   const state = shift();
   state.credits = 50000;
-  const before = hourlyBudget(state);
   commandBuyVehicle(state, 'ladder');
   commandBuyVehicle(state, 'ambulance');
-  const after = hourlyBudget(state);
-  assert.equal(after.upkeep, before.upkeep + CONFIG.vehicles.ladder.upkeep + CONFIG.vehicles.ambulance.upkeep);
-  assert.ok(after.net < before.net);
+  const credits = state.credits;
+  for (let t = 0; t < CONFIG.economy.hourEvery + 1; t++) update(state, 1);
+  assert.equal(state.ledger.hours, 1);
+  assert.equal(hourlyCharges(state).total, 0);
+  assert.equal(state.credits, credits, 'credits moved with no loan or insurance');
+  assert.ok(!state.events.some((e) => /Hourly/.test(e.text)), 'a charges line with nothing to charge');
 });
 
-test('payroll is settled at the top of every game hour and logged', () => {
+test('loan interest and insurance are charged every hour and logged', () => {
   const state = shift();
+  state.loan = 5000;
+  state.insured = true;
   const credits = state.credits;
-  const expected = hourlyBudget(state).net;
-  for (let t = 0; t < CONFIG.economy.budget.hourEvery + 1; t++) update(state, 1);
-  assert.equal(state.ledger.hours, 1);
-  assert.equal(state.credits, credits + expected);
-  assert.ok(state.events.some((e) => /Hourly budget/.test(e.text)), 'no budget line in the log');
+  const c = hourlyCharges(state);
+  assert.equal(c.total, c.premium + c.interest);
+  for (let t = 0; t < CONFIG.economy.hourEvery + 1; t++) update(state, 1);
+  assert.equal(state.credits, credits - c.total);
+  assert.ok(state.events.some((e) => /Hourly charges/.test(e.text)), 'no charges line in the log');
 });
 
 test('the ledger tracks what was earned and spent', () => {

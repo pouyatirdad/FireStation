@@ -7,7 +7,7 @@ import {
   commandDispatch, commandDispatchWildfire, commandSellVehicle, selectUnit, serialize, loadState,
 } from '../src/systems/game.js';
 import { firePower, freeBay, totalBays } from '../src/systems/units.js';
-import { hourlyBudget } from '../src/systems/economy.js';
+import { hourlyCharges } from '../src/systems/economy.js';
 import { updateContracts } from '../src/systems/contracts.js';
 import { ignite, updateFire } from '../src/systems/fire.js';
 import { startWildfire } from '../src/systems/wildfire.js';
@@ -150,13 +150,11 @@ test('fire training makes a crew put a fire out faster', () => {
 test('a loan adds credits, charges interest every hour, and can be repaid', () => {
   const state = shift();
   state.credits = 1000;
-  const before = hourlyBudget(state);
+  assert.equal(hourlyCharges(state).interest, 0);
   assert.equal(commandLoan(state), true);
   assert.equal(state.credits, 1000 + CONFIG.economy.loan.step);
   assert.equal(state.loan, CONFIG.economy.loan.step);
-  const after = hourlyBudget(state);
-  assert.equal(after.interest, Math.round(CONFIG.economy.loan.step * CONFIG.economy.loan.rate));
-  assert.equal(after.net, before.net - after.interest);
+  assert.equal(hourlyCharges(state).interest, Math.round(CONFIG.economy.loan.step * CONFIG.economy.loan.rate));
 
   for (let i = 0; i < 5; i++) commandLoan(state);
   assert.equal(state.loan, CONFIG.economy.loan.max, 'borrowed past the limit');
@@ -188,23 +186,22 @@ test('insurance cuts the cost of a lost building and costs a premium', () => {
   assert.ok(withCover < without);
 
   const state = shift();
-  const plain = hourlyBudget(state).net;
   commandInsurance(state);
-  assert.equal(hourlyBudget(state).net, plain - CONFIG.economy.insurance.premium);
+  assert.equal(hourlyCharges(state).premium, CONFIG.economy.insurance.premium);
 });
 
-test('training makes crews better at their jobs, and costs no extra wages', () => {
+test('training makes crews better at their jobs, and costs no running cost', () => {
   const state = shift();
-  const plain = hourlyBudget(state).net;
   const engine = state.engines[0];
   assert.equal(firePower(state, engine.x, engine.y), 1);
   assert.equal(commandTrain(state, 'fire'), true);
   assert.ok(Math.abs(firePower(state, engine.x, engine.y) - (1 + CONFIG.economy.training.fire)) < 1e-9);
-  assert.equal(hourlyBudget(state).net, plain, 'training changed the hourly budget');
-  commandTrain(state, 'fire');
-  commandTrain(state, 'fire');
-  assert.equal(commandTrain(state, 'fire'), false, 'a fourth level');
-  assert.equal(state.training.fire, 3);
+  assert.equal(hourlyCharges(state).total, 0, 'training added a running cost');
+  state.credits = 100000;
+  const levels = CONFIG.economy.training.cost.length;
+  for (let i = 1; i < levels; i++) commandTrain(state, 'fire');
+  assert.equal(commandTrain(state, 'fire'), false, 'a level past the last');
+  assert.equal(state.training.fire, levels);
   assert.equal(commandTrain(state, 'nonsense'), false);
 });
 

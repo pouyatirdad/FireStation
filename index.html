@@ -1179,16 +1179,12 @@ button { font-family: inherit; }
 
 /* ---- budget, medical and sound ------------------------------------------- */
 
-.stat__value--budget { font-size: 12px; }
-.stat__value--budget[data-tone='good'] { color: #8fe0a8; }
-.stat__value--budget[data-tone='bad'] { color: #ff8f84; }
 .stat__value--credits[data-debt='1'] { color: #ff8f84; }
 .stat__value--injured { color: #9fd8ff; }
 
 #btn-sound.is-off { opacity: 0.55; }
 #btn-sound span { pointer-events: none; }
 
-.station__upkeep { font-size: 10px; color: var(--muted); }
 
 .budget {
   margin: 14px 0 0;
@@ -1926,10 +1922,6 @@ body {
         <b class="stat__value stat__value--credits" id="stat-credits">$3,000</b>
       </div>
       <div class="stat">
-        <span class="stat__label">Budget</span>
-        <b class="stat__value stat__value--budget" id="stat-budget">+$0/h</b>
-      </div>
-      <div class="stat">
         <span class="stat__label">Wind</span>
         <b class="stat__value stat__value--wind"><span id="wind-arrow" class="wind__arrow" aria-hidden="true">➤</span><span id="stat-wind">N 0 km/h</span></b>
       </div>
@@ -2055,7 +2047,7 @@ body {
         <p class="menu__lead">
           One engine, one crew, and a 520×384 city of streets, a river and a harbour that
           keeps catching fire. Answer the calls, send ambulances and divers, and spend what
-          you earn on more apparatus, boats and aircraft. Vehicle upkeep is due every hour.
+          you earn on more apparatus, boats and aircraft.
         </p>
         <div class="menu__grid">
           <div><b>Respond</b><span><span class="only-mouse">Select a vehicle (1–8), right-click a fire. It finds the road route.</span><span class="only-touch">Tap a vehicle, then press and hold on a fire (or use Order). It finds the road route.</span></span></div>
@@ -2128,8 +2120,8 @@ body {
           marked on the building: a crew at the building brings them out before
           attacking the fire. Park beside a hydrant and press G to hook up a
           supply line; the station apron refills too. Knockdowns, rescues and
-          treated patients earn credits; vehicle upkeep is paid every game
-          hour out of the city subsidy, which shrinks as the rating falls.
+          treated patients earn credits; there is no budget, so vehicles cost
+          nothing to run.
         </p>
       </div>
     </section>
@@ -2183,9 +2175,9 @@ const CONFIG = {
   city: { seed: 7, name: 'Harbor City' },
 
   // The money model. Income is incident rewards, a knockdown fee, treatment fees
-  // and an hourly city subsidy that shrinks as the rating falls. Costs are crew
-  // vehicle upkeep, medical kits and the penalties for losing buildings
-  // or people. Fees and penalties are scaled by the building's `value` factor.
+  // and the odd donation. There is no budget: no subsidy and no vehicle upkeep.
+  // Costs are medical kits, loan interest, insurance and the penalties for
+  // losing buildings or people. Fees and penalties are scaled by the building's `value` factor.
   economy: {
     start: 3000,
     saved: 260, // knockdown fee
@@ -2199,11 +2191,8 @@ const CONFIG = {
       hotel: 1.8, warehouse: 1.3, hospital: 2.2, station: 2,
       villa: 1.4, tower: 2.4, mall: 1.9, factory: 1.7, school: 1.5, tankfarm: 1.6,
     },
-    budget: {
-      hourEvery: 120, // real seconds per budget hour (the money is settled on this timer, whatever the clock says)
-      subsidy: 260, // per game hour at full rating
-      subsidyFloor: 0.4, // share of the subsidy paid at rating 0
-    },
+    // Loan interest and the insurance premium are charged on this timer (real seconds).
+    hourEvery: 120,
     kitPrice: 12, // per medical kit bought at a pharmacy
     donation: { every: [420, 700], min: 300, max: 900, minRating: 60 },
     // Very rarely a volunteers' foundation makes a big gift: only after a long
@@ -2215,10 +2204,10 @@ const CONFIG = {
     loan: { max: 30000, step: 5000, rate: 0.03 }, // interest per game hour on what is owed
     insurance: { premium: 70, lossShare: 0.4 }, // per game hour; share of a building loss you still pay
     training: {
-      cost: [900, 1800, 3000],
-      fire: 0.12, // extra spray power per level
-      medic: 0.15, // faster treatment per level
-      rescue: 0.12, // faster rescue per level
+      cost: [700, 1400, 2300, 3400, 4800], // five levels per programme
+      fire: 0.15, // extra spray power per level
+      medic: 0.14, // faster treatment per level (five levels cap at 70%)
+      rescue: 0.14, // faster rescue per level (five levels cap at 70%)
     },
     contracts: { every: [300, 480], maxOffers: 3, maxActive: 2, failPenalty: 0.25 },
     stationPrice: 9000, // buying Station 2
@@ -2241,24 +2230,24 @@ const CONFIG = {
   // out at once. Every fire vehicle with a pump also carries hose for everyone.
   vehicles: {
     engine: {
-      label: 'Engine', cost: 1000, crew: 3, speed: 8.2, capacity: 1800, upkeep: 24,
+      label: 'Engine', cost: 1000, crew: 3, speed: 8.2, capacity: 1800,
       hoseRange: 15, turretRange: 9, turretPower: 0.035, turretWater: 42,
       refillRate: 170, rescueTime: 3.6, refund: 0.6,
       tools: { chainsaw: 1, diving: 2 },
     },
     ladder: {
-      label: 'Ladder', cost: 1800, crew: 3, speed: 7.6, capacity: 1200, upkeep: 36,
+      label: 'Ladder', cost: 1800, crew: 3, speed: 7.6, capacity: 1200,
       hoseRange: 14, turretRange: 18, turretPower: 0.055, turretWater: 34,
       refillRate: 150, rescueTime: 3.4, refund: 0.6,
       tools: { chainsaw: 1 },
     },
     tanker: {
-      label: 'Tanker', cost: 1500, crew: 2, speed: 7.0, capacity: 6000, upkeep: 26,
+      label: 'Tanker', cost: 1500, crew: 2, speed: 7.0, capacity: 6000,
       hoseRange: 12, turretRange: 7, turretPower: 0.028, turretWater: 55,
       refillRate: 90, rescueTime: 3.8, refund: 0.6,
     },
     rescue: {
-      label: 'Rescue', cost: 1600, crew: 4, speed: 9.2, capacity: 600, upkeep: 30,
+      label: 'Rescue', cost: 1600, crew: 4, speed: 9.2, capacity: 600,
       hoseRange: 16, turretRange: 6, turretPower: 0.02, turretWater: 12,
       refillRate: 160, rescueTime: 2.2, refund: 0.6,
       tools: { chainsaw: 2, cutter: 2, diving: 2 },
@@ -2267,7 +2256,7 @@ const CONFIG = {
     // people and use one kit per patient; kits are restocked at the station or
     // at a pharmacy.
     ambulance: {
-      label: 'Ambulance', cost: 1400, crew: 2, speed: 10, capacity: 0, upkeep: 22,
+      label: 'Ambulance', cost: 1400, crew: 2, speed: 10, capacity: 0,
       hoseRange: 0, turretRange: 0, turretPower: 0, turretWater: 0,
       refillRate: 0, rescueTime: 3, refund: 0.6,
       medical: true, kits: 8, treatTime: 4, medRange: 22, carry: 2,
@@ -2275,7 +2264,7 @@ const CONFIG = {
     // A small, fast medic car: one paramedic, four kits, one stretcher. Gets to a
     // call sooner than an ambulance but cannot carry much.
     medcar: {
-      label: 'Paramedic car', cost: 750, crew: 1, speed: 12.5, capacity: 0, upkeep: 12,
+      label: 'Paramedic car', cost: 750, crew: 1, speed: 12.5, capacity: 0,
       hoseRange: 0, turretRange: 0, turretPower: 0, turretWater: 0,
       refillRate: 0, rescueTime: 3, refund: 0.6,
       medical: true, kits: 4, treatTime: 3.2, medRange: 18, carry: 1,
@@ -2283,14 +2272,14 @@ const CONFIG = {
     // A bus fitted out for mass casualties: eight stretchers, sixteen kits, four
     // paramedics, and slow.
     ambubus: {
-      label: 'Ambulance bus', cost: 3400, crew: 4, speed: 6.8, capacity: 0, upkeep: 48,
+      label: 'Ambulance bus', cost: 3400, crew: 4, speed: 6.8, capacity: 0,
       hoseRange: 0, turretRange: 0, turretPower: 0, turretWater: 0,
       refillRate: 0, rescueTime: 3, refund: 0.6,
       medical: true, kits: 16, treatTime: 3.6, medRange: 24, carry: 8,
     },
     // Divers by water: sails to the casualty and puts them over the side.
     rescueboat: {
-      label: 'Rescue boat', cost: 2800, crew: 2, speed: 11, capacity: 0, upkeep: 34,
+      label: 'Rescue boat', cost: 2800, crew: 2, speed: 11, capacity: 0,
       hoseRange: 0, turretRange: 0, turretPower: 0, turretWater: 0,
       refillRate: 0, rescueTime: 4.2, refund: 0.6,
       diver: true, diveRange: 20, boat: true,
@@ -2298,7 +2287,7 @@ const CONFIG = {
     // A fireboat pumps river or sea water without limit, from up to 18 tiles
     // out, but can only work buildings and forests close to the water.
     fireboat: {
-      label: 'Fireboat', cost: 6200, crew: 0, speed: 9, capacity: 100000, upkeep: 70,
+      label: 'Fireboat', cost: 6200, crew: 0, speed: 9, capacity: 100000,
       hoseRange: 0, turretRange: 18, turretPower: 0.06, turretWater: 80,
       refillRate: 100000, rescueTime: 3, refund: 0.55,
       boat: true,
@@ -2306,7 +2295,7 @@ const CONFIG = {
     // A scooping air tanker: very fast, circles the target dropping water, and
     // skims the sea to refill. Strong, but it needs a fire to circle.
     airtanker: {
-      label: 'Air tanker', cost: 11000, crew: 0, speed: 30, capacity: 5000, upkeep: 140,
+      label: 'Air tanker', cost: 11000, crew: 0, speed: 30, capacity: 5000,
       hoseRange: 0, turretRange: 8, turretPower: 0.07, turretWater: 110,
       refillRate: 1200, rescueTime: 3, refund: 0.55,
       flying: true, plane: true,
@@ -2317,7 +2306,7 @@ const CONFIG = {
     // its crew run the hose out from there. It is no good where there is no
     // hydrant (a forest fire).
     rapid: {
-      label: 'Rapid response', cost: 1300, crew: 2, speed: 11.5, capacity: 0, upkeep: 20,
+      label: 'Rapid response', cost: 1300, crew: 2, speed: 11.5, capacity: 0,
       hoseRange: 16, turretRange: 0, turretPower: 0, turretWater: 0,
       refillRate: 0, rescueTime: 2.6, refund: 0.6,
       hydrantOnly: true, tag: 'U',
@@ -2328,7 +2317,7 @@ const CONFIG = {
     // It refills at a station helipad or by dipping in the harbour (the south
     // waterfront band), which is why it is fast but never close to the water.
     helicopter: {
-      label: 'Helicopter', cost: 8000, crew: 0, speed: 17, capacity: 2600, upkeep: 95,
+      label: 'Helicopter', cost: 8000, crew: 0, speed: 17, capacity: 2600,
       hoseRange: 0, turretRange: 11, turretPower: 0.05, turretWater: 70,
       refillRate: 300, rescueTime: 3, refund: 0.55,
       flying: true,
@@ -4406,11 +4395,11 @@ const { CONFIG } = __m["src/core/config.js"];
 const { clamp } = __m["src/core/math.js"];
 const { addEvent } = __m["src/systems/events.js"];
 // The money model. Every credit that moves goes through here so the ledger, the
-// hourly budget and the "why did I lose money" log all agree.
+// hourly charges and the "why did I lose money" log all agree.
 //
 //   income   incident rewards (with a speed bonus), knockdown fees, treatment
-//            fees, the hourly city subsidy, and the odd donation
-//   costs    vehicle upkeep every game hour, medical kits, and the
+//            fees, and the odd donation
+//   costs    loan interest and insurance every hour, medical kits, and the
 //            penalties for losing a building or a life
 //
 // Credits may go negative (the city never closes the station) but nothing can be
@@ -4428,7 +4417,7 @@ function createLedger() {
     spent: 0,
     hourAcc: 0,
     hours: 0,
-    lastBudget: null, // { subsidy, upkeep, premium, interest, net }
+    lastCharges: null, // { premium, interest, total }
     nextDonationAt: 0,
     missions: 0, // successful missions since the last volunteers' grant
     grantAfter: null, // missions needed before the next grant can happen
@@ -4515,17 +4504,11 @@ function speedBonus(state, building) {
 /** Share of a building loss you still pay: 40% with insurance, all of it without. */
 const lossShare = (state) => (state.insured ? CONFIG.economy.insurance.lossShare : 1);
 
-/** What the city is paying per game hour right now. */
-function hourlyBudget(state) {
-  const budget = CONFIG.economy.budget;
-  const rating = clamp(state.rating / CONFIG.rating.start, 0, 1);
-  const subsidy = Math.round(
-    budget.subsidy * (budget.subsidyFloor + (1 - budget.subsidyFloor) * rating),
-  );
-  const upkeep = state.engines.reduce((sum, e) => sum + (e.spec?.upkeep ?? 0), 0);
+/** What the bank and the insurer charge per hour right now. */
+function hourlyCharges(state) {
   const premium = state.insured ? CONFIG.economy.insurance.premium : 0;
   const interest = Math.round((state.loan ?? 0) * CONFIG.economy.loan.rate);
-  return { subsidy, upkeep, premium, interest, net: subsidy - upkeep - premium - interest };
+  return { premium, interest, total: premium + interest };
 }
 
 // ------------------------------------------------------------- finance ---
@@ -4597,29 +4580,23 @@ function trainCrew(state, kind) {
 
 
 
-/** Settle the budget at the top of every game hour; maybe a donation. */
+/** Charge loan interest and the insurance premium every hour; the daily report; maybe a donation. */
 function updateEconomy(state, dt) {
   const ledger = state.ledger;
   if (!ledger) return;
-  const budget = CONFIG.economy.budget;
 
   ledger.hourAcc += dt;
-  if (ledger.hourAcc >= budget.hourEvery) {
-    ledger.hourAcc -= budget.hourEvery;
+  if (ledger.hourAcc >= CONFIG.economy.hourEvery) {
+    ledger.hourAcc -= CONFIG.economy.hourEvery;
     ledger.hours += 1;
-    const b = hourlyBudget(state);
-    earn(state, b.subsidy, 'subsidy');
-    spend(state, b.upkeep, 'upkeep');
-    spend(state, b.premium, 'insurance');
-    spend(state, b.interest, 'interest');
-    ledger.lastBudget = b;
-    const sign = b.net >= 0 ? '+' : '−';
-    const extra = (b.premium ? `, insurance ${money(b.premium)}` : '') + (b.interest ? `, interest ${money(b.interest)}` : '');
-    addEvent(
-      state,
-      `Hourly budget ${sign}${money(Math.abs(b.net))} — subsidy ${money(b.subsidy)}, upkeep ${money(b.upkeep)}${extra}`,
-      b.net >= 0 ? 'info' : 'warn',
-    );
+    const c = hourlyCharges(state);
+    ledger.lastCharges = c;
+    if (c.total > 0) {
+      spend(state, c.premium, 'insurance');
+      spend(state, c.interest, 'interest');
+      const parts = [c.premium ? `insurance ${money(c.premium)}` : '', c.interest ? `loan interest ${money(c.interest)}` : ''].filter(Boolean);
+      addEvent(state, `Hourly charges −${money(c.total)} — ${parts.join(', ')}`, 'warn');
+    }
   }
 
   // A daily report at midnight: what came in, what went out.
@@ -4649,9 +4626,10 @@ function updateEconomy(state, dt) {
     const [lo, hi] = donation.every;
     ledger.nextDonationAt = state.time + state.rng.range(lo, hi);
   }
+
 }
 
-return { money, createLedger, earn, cityInGoodShape, missionDone, spend, valueFactor, speedBonus, lossShare, hourlyBudget, takeLoan, repayLoan, toggleInsurance, trainCrew, updateEconomy, TRAINING_LABEL };
+return { money, createLedger, earn, cityInGoodShape, missionDone, spend, valueFactor, speedBonus, lossShare, hourlyCharges, takeLoan, repayLoan, toggleInsurance, trainCrew, updateEconomy, TRAINING_LABEL };
 })();
 
 // ---- src/systems/medical.js ----
@@ -8575,7 +8553,7 @@ const { formatClock } = __m["src/core/math.js"];
 const { freeBay, hydrantInReach, ownsStation, toolCount, toolsFree, totalBays, totalBerths, vehicleTools } = __m["src/systems/units.js"];
 const { contractProgress } = __m["src/systems/contracts.js"];
 const { fireDifficulty } = __m["src/systems/fire.js"];
-const { TRAINING_LABEL, hourlyBudget } = __m["src/systems/economy.js"];
+const { TRAINING_LABEL } = __m["src/systems/economy.js"];
 const { windLabel } = __m["src/systems/wind.js"];
 // All DOM: the top bar, the selection card, the dispatch log, the unit roster
 // and the overlay screens. The renderer never touches an element.
@@ -8922,11 +8900,6 @@ function update(state, force = false) {
   $('stat-clock').textContent = formatClock(state.clock);
   $('stat-credits').textContent = money(state.credits);
   $('stat-credits').dataset.debt = state.credits < 0 ? '1' : '';
-  const budget = hourlyBudget(state);
-  const budgetEl = $('stat-budget');
-  budgetEl.textContent = `${budget.net >= 0 ? '+' : '−'}$${Math.abs(budget.net)}/h`;
-  budgetEl.dataset.tone = budget.net >= 0 ? 'good' : 'bad';
-  budgetEl.title = `Subsidy ${money(budget.subsidy)} − upkeep ${money(budget.upkeep)} per budget hour (every 2 minutes)`;
   $('stat-injured').textContent = String(state.patients.filter((q) => !q.treated).length);
   $('stat-wind').textContent = windLabel(state.wind);
   $('wind-arrow').style.transform = `rotate(${state.wind.dir}rad)`;
@@ -9575,8 +9548,7 @@ function fleetTab(state) {
     const disabled = noRoom || state.credits < spec.cost;
     return '<button type="button" class="station__buybtn" data-action="buy-vehicle" data-type="' + type + '"' + (disabled ? ' disabled' : '') + '>' +
       '<span class="station__buyhead"><b>' + esc(spec.label) + '</b><i>$' + spec.cost.toLocaleString('en-US') + '</i></span>' +
-      '<span>' + esc(vehicleBlurb(spec)) + '</span>' +
-      '<span class="station__upkeep">upkeep $' + spec.upkeep + '/h</span></button>';
+      '<span>' + esc(vehicleBlurb(spec)) + '</span></button>';
   }).join('');
 
   return '<div class="station__balance">$' + state.credits.toLocaleString('en-US') + '<span>credits · ' + landCount + '/' + bays + ' bays</span></div>' +
@@ -9587,7 +9559,6 @@ function fleetTab(state) {
 }
 
 function financeTab(state) {
-  const b = hourlyBudget(state);
   const ledger = state.ledger;
   const money = (n) => (n < 0 ? '−' : '') + '$' + Math.abs(Math.round(n)).toLocaleString('en-US');
   const line = (label, value, tone) => '<div class="budget__row"' + (tone ? ' data-tone="' + tone + '"' : '') + '><span>' + label + '</span><b>' + value + '</b></div>';
@@ -9615,13 +9586,6 @@ function financeTab(state) {
     : '<p class="budget__total">Nothing yet this shift.</p>';
 
   return '<div class="station__balance">$' + state.credits.toLocaleString('en-US') + '<span>credits' + (owed ? ' · owe ' + money(owed) : '') + '</span></div>' +
-    '<div class="budget"><p class="menu__eyebrow">Budget · per budget hour (every 2 minutes)</p>' +
-    line('City subsidy (scales with rating)', '+' + money(b.subsidy), 'good') +
-    line('Upkeep · ' + state.engines.length + ' vehicles', '−' + money(b.upkeep), 'bad') +
-    (b.premium ? line('Insurance premium', '−' + money(b.premium), 'bad') : '') +
-    (b.interest ? line('Loan interest', '−' + money(b.interest), 'bad') : '') +
-    line('Net per hour', (b.net >= 0 ? '+' : '') + money(b.net), b.net >= 0 ? 'good' : 'bad') + '</div>' +
-
     '<div class="budget"><p class="menu__eyebrow">Loan · ' + Math.round(loan.rate * 100) + '% interest an hour</p>' +
     line('Owed', money(owed) + ' of ' + money(loan.max)) +
     '<div class="finance__buttons"><button type="button" class="btn btn--small" data-action="take-loan">Borrow ' + money(loan.step) + '</button>' +
@@ -11551,7 +11515,7 @@ function serialize(state) {
     insured: state.insured,
     training: { ...state.training },
     contracts: JSON.parse(JSON.stringify(state.contracts)),
-    ledger: { ...state.ledger, lastBudget: state.ledger.lastBudget ? { ...state.ledger.lastBudget } : null, by: { ...(state.ledger.by ?? {}) } },
+    ledger: { ...state.ledger, lastCharges: state.ledger.lastCharges ? { ...state.ledger.lastCharges } : null, by: { ...(state.ledger.by ?? {}) } },
   };
 }
 
