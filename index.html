@@ -3295,9 +3295,9 @@ const SPEC = {
 // uses): the map is meant to be about half small buildings, three in ten medium,
 // one in eight large and one in twelve very large.
 const SIZE_CLASSES = [['small', 30], ['medium', 80], ['large', 200], ['huge', Infinity]];
-// How far a roof is drawn above the ground. Capped: a tall tower's roof would
+// How far a roof is drawn above the ground. Capped below a tile of pavement (32 px): a tall roof would
 // otherwise be painted four tiles up the screen, over the street behind it.
-const elevationOf = (floors) => Math.min(46, 11 + floors * 5);
+const elevationOf = (floors) => Math.min(30, 11 + floors * 5);
 const buildingMass = (w, h, floors) => w * h * (0.7 + 0.15 * floors);
 const sizeClassOf = (mass) => SIZE_CLASSES.find(([, max]) => mass < max)[0];
 
