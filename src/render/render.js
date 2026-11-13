@@ -14,7 +14,7 @@ import { pointAt, trainsAt } from '../data/transit.js';
 // What the ground of each kind of block looks like, painted over the pavement:
 // lawns round the houses, dark yards in industry, pale paving downtown.
 const ZONE_GROUND = {
-  housing: 'rgba(112,150,82,0.5)',
+  housing: 'rgba(104,128,78,0.5)',
   industrial: 'rgba(52,56,62,0.62)',
   company: 'rgba(206,214,224,0.3)',
   commercial: 'rgba(160,140,112,0.2)',
@@ -27,11 +27,11 @@ const ZONE_MINIMAP = {
 };
 
 const PALETTE = {
-  sidewalk: '#a3a49f',
+  sidewalk: '#9b9b95',
   sidewalkJoint: 'rgba(40,40,38,0.16)',
-  park: '#586b40',
+  park: '#566340',
   parkEdge: '#4d5f38',
-  road: '#36393c',
+  road: '#3a3b3d',
   apron: '#6d7073',
   marking: 'rgba(226,226,218,0.75)',
   centre: '#d4a62a',
@@ -48,19 +48,67 @@ function texture(ctx, name, base, speckles) {
   if (textures[name] !== undefined) return textures[name];
   textures[name] = base;
   if (typeof document === 'undefined') return base;
+  const SZ = 256;
   const c = document.createElement('canvas');
-  c.width = 128;
-  c.height = 128;
+  c.width = SZ;
+  c.height = SZ;
   const t = c.getContext('2d');
   t.fillStyle = base;
-  t.fillRect(0, 0, 128, 128);
+  t.fillRect(0, 0, SZ, SZ);
   let s = 12345 + name.length * 977;
   const rnd = () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296);
-  for (let i = 0; i < speckles; i++) {
+  // Large soft mottling (wear, stains, patchy growth) wrapped so the tile repeats
+  // without a seam, then fine grain on top.
+  const blotch = name === 'grass' ? 46 : name === 'asphalt' ? 30 : name === 'roof' ? 0 : 22;
+  for (let i = 0; i < blotch; i++) {
+    const r = 14 + rnd() * 46;
+    const x = rnd() * SZ;
+    const y = rnd() * SZ;
     const light = rnd() < 0.5;
-    t.fillStyle = light ? `rgba(255,255,255,${0.03 + rnd() * 0.07})` : `rgba(0,0,0,${0.04 + rnd() * 0.1})`;
+    const a = 0.03 + rnd() * 0.06;
+    for (const ox of [-SZ, 0, SZ]) {
+      for (const oy of [-SZ, 0, SZ]) {
+        const g = t.createRadialGradient(x + ox, y + oy, 0, x + ox, y + oy, r);
+        g.addColorStop(0, light ? `rgba(255,255,235,${a})` : `rgba(0,0,0,${a * 1.3})`);
+        g.addColorStop(1, 'rgba(0,0,0,0)');
+        t.fillStyle = g;
+        t.fillRect(x + ox - r, y + oy - r, r * 2, r * 2);
+      }
+    }
+  }
+  for (let i = 0; i < speckles * 4; i++) {
+    const light = rnd() < 0.5;
+    t.fillStyle = light ? `rgba(255,255,255,${0.03 + rnd() * 0.08})` : `rgba(0,0,0,${0.05 + rnd() * 0.12})`;
     const sz = rnd() < 0.85 ? 1 : 2;
-    t.fillRect((rnd() * 128) | 0, (rnd() * 128) | 0, sz, sz);
+    t.fillRect((rnd() * SZ) | 0, (rnd() * SZ) | 0, sz, sz);
+  }
+  if (name === 'grass') {
+    for (let i = 0; i < 900; i++) {
+      const x = rnd() * SZ;
+      const y = rnd() * SZ;
+      t.strokeStyle = rnd() < 0.5 ? 'rgba(150,175,90,0.22)' : 'rgba(30,50,22,0.3)';
+      t.lineWidth = 1;
+      t.beginPath();
+      t.moveTo(x, y);
+      t.lineTo(x + (rnd() - 0.5) * 3, y - 2 - rnd() * 3);
+      t.stroke();
+    }
+  }
+  if (name === 'asphalt') {
+    t.strokeStyle = 'rgba(0,0,0,0.22)';
+    t.lineWidth = 1;
+    for (let i = 0; i < 9; i++) {
+      let x = rnd() * SZ;
+      let y = rnd() * SZ;
+      t.beginPath();
+      t.moveTo(x, y);
+      for (let k = 0; k < 6; k++) {
+        x += (rnd() - 0.5) * 18;
+        y += (rnd() - 0.3) * 14;
+        t.lineTo(x, y);
+      }
+      t.stroke();
+    }
   }
   textures[name] = ctx.createPattern(c, 'repeat') ?? base;
   return textures[name];
@@ -219,6 +267,7 @@ export function render(ctx, state, cam, view, opts = {}) {
   ctx.restore();
 
   drawNight(ctx, state, W, H, z);
+  drawPhotoGrade(ctx, W, H, state.time);
   drawFloatingBars(ctx, state, cam, view);
   drawHydrantPrompt(ctx, state, cam, view);
   drawSelectedLabel(ctx, state, cam, view);
@@ -1315,6 +1364,23 @@ function crownSprite(kind, tone, r, variant) {
     const g = c.getContext('2d');
     g.scale(k, k);
     drawCrown(g, size / 2, size / 2, rb, kind, tone, variant * 191.3 + 7);
+    // Leaf texture and a soft top-left light, clipped to the crown's own shape.
+    g.globalCompositeOperation = 'source-atop';
+    const seed = variant * 53.1 + rb;
+    const n = Math.round(rb * rb * 0.9);
+    for (let i = 0; i < n; i++) {
+      const a = hash(seed + i * 1.7) * 6.283;
+      const d = Math.sqrt(hash(seed + i * 3.1 + 9)) * rb;
+      const lit = hash(seed + i * 5.3 + 2) < 0.5;
+      g.fillStyle = lit ? 'rgba(190,210,120,0.22)' : 'rgba(8,20,8,0.3)';
+      g.fillRect(size / 2 + Math.cos(a) * d, size / 2 + Math.sin(a) * d, 1.4, 1.4);
+    }
+    const sheen = g.createRadialGradient(size / 2 - rb * 0.35, size / 2 - rb * 0.4, 0, size / 2, size / 2, rb * 1.1);
+    sheen.addColorStop(0, 'rgba(255,250,200,0.16)');
+    sheen.addColorStop(1, 'rgba(0,0,20,0.22)');
+    g.fillStyle = sheen;
+    g.fillRect(0, 0, size, size);
+    g.globalCompositeOperation = 'source-over';
     sprite = { c, size, rb };
     crownSprites.set(key, sprite);
   }
@@ -1604,6 +1670,16 @@ function drawBuildingShadows(ctx, state, bounds) {
     }
   }
   ctx.fill();
+  // Ambient occlusion: a tight dark halo where walls meet the ground, fading out.
+  for (const [grow, alpha] of [[7, 0.07], [4, 0.09], [2, 0.12]]) {
+    ctx.fillStyle = `rgba(8,10,12,${alpha * fade})`;
+    ctx.beginPath();
+    for (const b of state.buildings) {
+      if (b.state === 'rubble' || !buildingVisible(b, bounds)) continue;
+      ctx.rect(b.x * TILE - grow, b.y * TILE - grow * 0.5, b.w * TILE + grow * 2, b.h * TILE + grow * 1.5);
+    }
+    ctx.fill();
+  }
 }
 
 function drawEntities(ctx, state, bounds, now, z) {
@@ -2187,18 +2263,29 @@ function drawFire(ctx, b, now, z) {
     const height = (16 + f * 34) * flick;
     const width = (7 + f * 10) * flick;
 
-    // Flame tongue: a teardrop leaning up and to the wind.
-    const tongue = ctx.createLinearGradient(px, py, px + 4, py - height);
-    tongue.addColorStop(0, 'rgba(210,60,12,0.8)');
-    tongue.addColorStop(0.35, 'rgba(255,120,24,0.78)');
-    tongue.addColorStop(0.7, 'rgba(255,190,70,0.55)');
-    tongue.addColorStop(1, 'rgba(255,200,90,0)');
+    // Flame tongue: ragged, licking upward and bending with the wind.
+    const sway = Math.sin(now * 5 + i * 2.3 + seed) * width * 0.5;
+    const tongue = ctx.createLinearGradient(px, py, px + sway, py - height);
+    tongue.addColorStop(0, 'rgba(150,40,8,0.85)');
+    tongue.addColorStop(0.3, 'rgba(235,98,18,0.8)');
+    tongue.addColorStop(0.65, 'rgba(250,165,50,0.55)');
+    tongue.addColorStop(1, 'rgba(255,190,80,0)');
     ctx.fillStyle = tongue;
     ctx.beginPath();
     ctx.moveTo(px - width, py);
-    ctx.bezierCurveTo(px - width * 1.05, py - height * 0.45, px - width * 0.3, py - height * 0.75, px + 3, py - height);
-    ctx.bezierCurveTo(px + width * 0.4, py - height * 0.72, px + width * 1.05, py - height * 0.4, px + width, py);
-    ctx.quadraticCurveTo(px + width * 0.2, py + width * 0.55, px - width, py);
+    const steps = 6;
+    for (let k = 1; k <= steps; k++) {
+      const u = k / steps;
+      const lean = sway * u * u;
+      const jag = (hash(seed + i * 9.1 + k * 3.7 + Math.floor(now * 8) * 0.31) - 0.5) * width * 0.7;
+      ctx.lineTo(px - width * (1 - u) * 0.9 + lean + jag, py - height * u);
+    }
+    for (let k = steps - 1; k >= 0; k--) {
+      const u = k / steps;
+      const lean = sway * u * u;
+      const jag = (hash(seed + i * 4.3 + k * 6.1 + Math.floor(now * 8) * 0.17) - 0.5) * width * 0.7;
+      ctx.lineTo(px + width * (1 - u) * 0.9 + lean + jag, py - height * u);
+    }
     ctx.closePath();
     ctx.fill();
 
@@ -2683,9 +2770,21 @@ function paint(ctx, x, y, w, h, r, color) {
   ctx.fillStyle = g;
   rr(ctx, x, y, w, h, r);
   ctx.fill();
-  ctx.strokeStyle = 'rgba(0,0,0,0.4)';
-  ctx.lineWidth = 0.8;
+  ctx.strokeStyle = 'rgba(0,0,0,0.18)';
+  ctx.lineWidth = 0.5;
   ctx.stroke();
+  // Clear-coat reflection: a thin bright band along the upper body panel.
+  ctx.save();
+  rr(ctx, x, y, w, h, r);
+  ctx.clip();
+  const sheen = ctx.createLinearGradient(0, y, 0, y + h);
+  sheen.addColorStop(0, 'rgba(255,255,255,0)');
+  sheen.addColorStop(0.18, 'rgba(255,255,255,0.22)');
+  sheen.addColorStop(0.3, 'rgba(255,255,255,0)');
+  sheen.addColorStop(1, 'rgba(0,0,0,0.12)');
+  ctx.fillStyle = sheen;
+  ctx.fillRect(x, y, w, h);
+  ctx.restore();
 }
 
 function tyres(ctx, xs, y) {
@@ -4203,6 +4302,48 @@ function drawMinimap(ctx, state, cam, view) {
     halfW * 2 * sx,
     halfH * 2 * sy,
   );
+}
+
+// A photographic finish over the world: colours pulled toward natural, a touch
+// more contrast, warm highlights and fine film grain. UI is drawn after it.
+let grainTile = null;
+function drawPhotoGrade(ctx, w, h, time) {
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  const cw = ctx.canvas.width;
+  const ch = ctx.canvas.height;
+  ctx.globalCompositeOperation = 'saturation';
+  ctx.fillStyle = 'rgba(128,128,128,0.2)';
+  ctx.fillRect(0, 0, cw, ch);
+  ctx.globalCompositeOperation = 'soft-light';
+  ctx.fillStyle = 'rgba(255,238,214,0.1)';
+  ctx.fillRect(0, 0, cw, ch);
+  if (typeof document !== 'undefined') {
+    if (!grainTile) {
+      const c = document.createElement('canvas');
+      c.width = 128;
+      c.height = 128;
+      const g = c.getContext('2d');
+      const img = g.createImageData(128, 128);
+      let sd = 99991;
+      for (let i = 0; i < img.data.length; i += 4) {
+        sd = (sd * 1664525 + 1013904223) >>> 0;
+        const v = (sd >>> 24) & 255;
+        img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
+        img.data[i + 3] = 255;
+      }
+      g.putImageData(img, 0, 0);
+      grainTile = ctx.createPattern(c, 'repeat');
+    }
+    if (grainTile) {
+      ctx.globalCompositeOperation = 'overlay';
+      ctx.globalAlpha = 0.07;
+      ctx.translate((Math.floor(time * 24) * 37) % 128, (Math.floor(time * 24) * 91) % 128);
+      ctx.fillStyle = grainTile;
+      ctx.fillRect(-128, -128, cw + 256, ch + 256);
+    }
+  }
+  ctx.restore();
 }
 
 let vignette = null;
