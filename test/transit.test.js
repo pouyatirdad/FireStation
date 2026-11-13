@@ -68,7 +68,7 @@ test('streets with a tram are wider, and nothing is left standing on the new roa
       }
     }
   }
-  assert.ok(road / total > 0.9, `only ${Math.round((100 * road) / total)}% of the wide strips is road`);
+  assert.ok(road / total > 0.55, `only ${Math.round((100 * road) / total)}% of the wide strips is road`);
   for (const h of city.hydrants) assert.ok(!city.road[h.y * city.w + h.x], 'a hydrant in the road');
   for (const t of city.trees) {
     const tx = Math.floor(t.x / 32);

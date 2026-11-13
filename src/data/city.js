@@ -1621,6 +1621,7 @@ function generateCity(seed = 7) {
   // Only free ground is taken, and any tree, hydrant or parked car on it goes.
   const wide = [];
   const widened = new Set();
+  const city_h = h;
   const seenStrip = new Set();
   for (const line of transit.lines) {
     if (line.kind !== 'tram') continue;
@@ -1639,6 +1640,9 @@ function generateCity(seed = 7) {
           if (!inb(x, y)) continue;
           const k = at(x, y);
           if (road[k] || blocked[k] || water[k] || woods[k] || apron[k]) continue;
+          // A roof is drawn up to two tiles above its building, so a building
+          // just south of the tile would look as if it stood in the road.
+          if (blocked[at(x, Math.min(city_h - 1, y + 1))] || blocked[at(x, Math.min(city_h - 1, y + 2))]) continue;
           road[k] = 1;
           widened.add(k);
         }
