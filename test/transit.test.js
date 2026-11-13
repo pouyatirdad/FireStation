@@ -48,5 +48,33 @@ test('trains run along the line, and are somewhere else a moment later', () => {
   }
   const rail = lines.find((l) => l.kind === 'rail');
   const end = pointAt(rail, rail.length);
-  assert.ok(Math.abs(end.x - (rail.pts[rail.pts.length - 1].x + 0.5)) < 1e-9);
+  assert.ok(Math.abs(end.x - (rail.pts[rail.pts.length - 1].x + 1)) < 1e-9);
+});
+
+test('streets with a tram are wider, and nothing is left standing on the new road', () => {
+  const trams = lines.filter((l) => l.kind === 'tram');
+  assert.ok(city.wide.length >= 4, 'no wide streets');
+  let road = 0;
+  let total = 0;
+  for (const r of city.wide) {
+    const w = r.x1 - r.x0 + 1;
+    const h = r.y1 - r.y0 + 1;
+    assert.ok(Math.min(w, h) === 4, `a boulevard ${Math.min(w, h)} tiles wide`);
+    for (let y = r.y0; y <= r.y1; y++) {
+      for (let x = r.x0; x <= r.x1; x++) {
+        total++;
+        if (city.road[y * city.w + x]) road++;
+        assert.ok(!city.blocked[y * city.w + x] || !city.road[y * city.w + x], 'road under a building');
+      }
+    }
+  }
+  assert.ok(road / total > 0.9, `only ${Math.round((100 * road) / total)}% of the wide strips is road`);
+  for (const h of city.hydrants) assert.ok(!city.road[h.y * city.w + h.x], 'a hydrant in the road');
+  for (const t of city.trees) {
+    const tx = Math.floor(t.x / 32);
+    const ty = Math.floor(t.y / 32);
+    if (!city.wide.some((r) => tx >= r.x0 && tx <= r.x1 && ty >= r.y0 && ty <= r.y1)) continue;
+    assert.ok(!city.road[ty * city.w + tx], 'a tree in the middle of a tram street');
+  }
+  assert.ok(trams.length === 2);
 });

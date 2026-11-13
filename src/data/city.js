@@ -1616,6 +1616,43 @@ function generateCity(seed = 7) {
   rebalanceSizes(buildings);
   const transit = buildTransit({ roadRuns, buildings });
 
+  // Streets with a tram are wider: a tile of pavement either side becomes road,
+  // so the trams run down the middle with a lane for traffic on each side.
+  // Only free ground is taken, and any tree, hydrant or parked car on it goes.
+  const wide = [];
+  const widened = new Set();
+  const seenStrip = new Set();
+  for (const line of transit.lines) {
+    if (line.kind !== 'tram') continue;
+    for (let i = 0; i + 1 < line.pts.length; i++) {
+      const a = line.pts[i];
+      const c = line.pts[i + 1];
+      const rect = a.y === c.y
+        ? { x0: Math.min(a.x, c.x), x1: Math.max(a.x, c.x) + 1, y0: a.y - 1, y1: a.y + 2 }
+        : { x0: a.x - 1, x1: a.x + 2, y0: Math.min(a.y, c.y), y1: Math.max(a.y, c.y) + 1 };
+      const key = `${rect.x0},${rect.y0},${rect.x1},${rect.y1}`;
+      if (seenStrip.has(key)) continue;
+      seenStrip.add(key);
+      wide.push(rect);
+      for (let y = rect.y0; y <= rect.y1; y++) {
+        for (let x = rect.x0; x <= rect.x1; x++) {
+          if (!inb(x, y)) continue;
+          const k = at(x, y);
+          if (road[k] || blocked[k] || water[k] || woods[k] || apron[k]) continue;
+          road[k] = 1;
+          widened.add(k);
+        }
+      }
+    }
+  }
+  if (widened.size > 0) {
+    const gone = (px, py) => widened.has(at(Math.floor(px / TILE), Math.floor(py / TILE)));
+    for (let i = trees.length - 1; i >= 0; i--) if (gone(trees[i].x, trees[i].y)) trees.splice(i, 1);
+    for (let i = cars.length - 1; i >= 0; i--) if (gone(cars[i].x, cars[i].y)) cars.splice(i, 1);
+    for (let i = hydrants.length - 1; i >= 0; i--) if (widened.has(at(hydrants[i].x, hydrants[i].y))) hydrants.splice(i, 1);
+    for (const k of widened) park[k] = 0;
+  }
+
   const bays1 = BAYS.map((b) => ({ x: b.x * TILE, y: b.y * TILE, station: 0 }));
   const bays2 = BAYS.map((b) => ({
     x: (b.x - APRON.x0 + apron2.x0) * TILE,
@@ -1671,6 +1708,7 @@ function generateCity(seed = 7) {
     hospitals: [hospital1, hospital2, ...regional.map((r) => r.hospital)],
     airfields,
     transit,
+    wide,
     spawn: { x: BAYS[0].x * TILE, y: BAYS[0].y * TILE, angle: Math.PI / 2 },
     startHour: START_HOUR,
   };

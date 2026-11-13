@@ -115,7 +115,8 @@ export function pointAt(line, s) {
   const b = pts[hi];
   const span = cum[hi] - cum[lo] || 1;
   const t = (d - cum[lo]) / span;
-  return { x: a.x + (b.x - a.x) * t + 0.5, y: a.y + (b.y - a.y) * t + 0.5, angle: Math.atan2(b.y - a.y, b.x - a.x) };
+  // Every vertex is a junction, so +1 puts the line on the centre of the street.
+  return { x: a.x + (b.x - a.x) * t + 1, y: a.y + (b.y - a.y) * t + 1, angle: Math.atan2(b.y - a.y, b.x - a.x) };
 }
 
 /**

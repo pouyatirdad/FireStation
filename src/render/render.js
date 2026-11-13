@@ -690,6 +690,7 @@ function drawGround(ctx, state, b, z) {
   drawTracks(ctx, state, b, z);
 
   drawAirfields(ctx, city, b, z);
+  drawBoulevards(ctx, state.city, b, z);
   drawTramRails(ctx, state, b, z);
 
   // The station apron and its parking bays.
@@ -813,7 +814,7 @@ const lineInView = (line, b) => {
 
 const tracePolyline = (ctx, line) => {
   ctx.beginPath();
-  line.pts.forEach((p, i) => (i === 0 ? ctx.moveTo((p.x + 0.5) * TILE, (p.y + 0.5) * TILE) : ctx.lineTo((p.x + 0.5) * TILE, (p.y + 0.5) * TILE)));
+  line.pts.forEach((p, i) => (i === 0 ? ctx.moveTo((p.x + 1) * TILE, (p.y + 1) * TILE) : ctx.lineTo((p.x + 1) * TILE, (p.y + 1) * TILE)));
 };
 
 /** One rounded car of a train, centred on (x, y) tiles and pointing along `angle`. */
@@ -868,6 +869,42 @@ function drawTramCar(ctx, car, color, head) {
   ctx.restore();
 }
 
+/** Tram streets are four tiles wide: new asphalt over the pavement, with a lane line each side of the tram. */
+function drawBoulevards(ctx, city, b, z) {
+  const wide = city.wide ?? [];
+  if (wide.length === 0) return;
+  const asphalt = texture(ctx, 'asphalt', PALETTE.road, 1800);
+  for (const r of wide) {
+    if (r.x1 < b.x0 - 1 || r.x0 > b.x1 + 1 || r.y1 < b.y0 - 1 || r.y0 > b.y1 + 1) continue;
+    const horizontal = r.x1 - r.x0 > r.y1 - r.y0;
+    // Only the tiles that really became road: the rest keeps its pavement.
+    ctx.fillStyle = asphalt;
+    for (let y = r.y0; y <= r.y1; y++) {
+      let run = -1;
+      for (let x = r.x0; x <= r.x1 + 1; x++) {
+        const on = x <= r.x1 && city.road[y * city.w + x] === 1;
+        if (on && run < 0) run = x;
+        if (!on && run >= 0) {
+          ctx.fillRect(run * TILE, y * TILE, (x - run) * TILE, TILE);
+          run = -1;
+        }
+      }
+    }
+    if (z < 0.3) continue;
+    ctx.strokeStyle = 'rgba(235,235,225,0.55)';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([14, 12]);
+    ctx.beginPath();
+    if (horizontal) {
+      for (const dy of [1, 3]) { ctx.moveTo(r.x0 * TILE, (r.y0 + dy) * TILE); ctx.lineTo((r.x1 + 1) * TILE, (r.y0 + dy) * TILE); }
+    } else {
+      for (const dx of [1, 3]) { ctx.moveTo((r.x0 + dx) * TILE, r.y0 * TILE); ctx.lineTo((r.x0 + dx) * TILE, (r.y1 + 1) * TILE); }
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+}
+
 /** The tram: two rails set into the street, with a platform at each stop. */
 function drawTramRails(ctx, state, b, z) {
   const lines = (state.city.transit?.lines ?? []).filter((l) => l.kind === 'tram');
@@ -894,8 +931,8 @@ function drawTramRails(ctx, state, b, z) {
         // The offset is across the direction of travel.
         const ox = dy !== 0 && dx === 0 ? off : 0;
         const oy = dx !== 0 && dy === 0 ? off : 0;
-        const px = (a.x + 0.5 + ox) * TILE;
-        const py = (a.y + 0.5 + oy) * TILE;
+        const px = (a.x + 1 + ox) * TILE;
+        const py = (a.y + 1 + oy) * TILE;
         if (i === 0) ctx.moveTo(px, py);
         else ctx.lineTo(px, py);
       }
@@ -906,7 +943,7 @@ function drawTramRails(ctx, state, b, z) {
       ctx.fillStyle = 'rgba(214,203,170,0.85)';
       ctx.strokeStyle = line.color;
       ctx.lineWidth = 3;
-      rr(ctx, (stop.x - 0.9) * TILE + 16, (stop.y - 0.9) * TILE + 16, 1.8 * TILE, 1.8 * TILE, 5);
+      rr(ctx, (stop.x + 1 - 0.9) * TILE, (stop.y + 1 - 0.9) * TILE, 1.8 * TILE, 1.8 * TILE, 5);
       ctx.fill();
       ctx.stroke();
     }
@@ -985,7 +1022,7 @@ function drawRail(ctx, state, b, z) {
     for (const stop of line.stops) {
       if (stop.x < b.x0 - 3 || stop.x > b.x1 + 3 || stop.y < b.y0 - 3 || stop.y > b.y1 + 3) continue;
       ctx.fillStyle = 'rgba(150,190,215,0.85)';
-      rr(ctx, (stop.x - 1.6) * TILE + 16, (stop.y - 1.6) * TILE + 16, 3.2 * TILE, 3.2 * TILE, 6);
+      rr(ctx, (stop.x + 1 - 1.6) * TILE, (stop.y + 1 - 1.6) * TILE, 3.2 * TILE, 3.2 * TILE, 6);
       ctx.fill();
       ctx.strokeStyle = '#2f6fa8';
       ctx.lineWidth = 3;
@@ -4254,7 +4291,7 @@ function miniStatic(state, mw, mh) {
     g.strokeStyle = line.kind === 'rail' ? '#d8d2c2' : line.color;
     g.globalAlpha = line.kind === 'rail' ? 0.95 : 0.8;
     g.beginPath();
-    line.pts.forEach((p, i) => (i === 0 ? g.moveTo((p.x + 0.5) * TILE * sx, (p.y + 0.5) * TILE * sy) : g.lineTo((p.x + 0.5) * TILE * sx, (p.y + 0.5) * TILE * sy)));
+    line.pts.forEach((p, i) => (i === 0 ? g.moveTo((p.x + 1) * TILE * sx, (p.y + 1) * TILE * sy) : g.lineTo((p.x + 1) * TILE * sx, (p.y + 1) * TILE * sy)));
     g.stroke();
   }
   g.globalAlpha = 1;

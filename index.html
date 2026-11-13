@@ -3146,7 +3146,8 @@ function pointAt(line, s) {
   const b = pts[hi];
   const span = cum[hi] - cum[lo] || 1;
   const t = (d - cum[lo]) / span;
-  return { x: a.x + (b.x - a.x) * t + 0.5, y: a.y + (b.y - a.y) * t + 0.5, angle: Math.atan2(b.y - a.y, b.x - a.x) };
+  // Every vertex is a junction, so +1 puts the line on the centre of the street.
+  return { x: a.x + (b.x - a.x) * t + 1, y: a.y + (b.y - a.y) * t + 1, angle: Math.atan2(b.y - a.y, b.x - a.x) };
 }
 
 /**
@@ -4797,6 +4798,43 @@ function generateCity(seed = 7) {
   rebalanceSizes(buildings);
   const transit = buildTransit({ roadRuns, buildings });
 
+  // Streets with a tram are wider: a tile of pavement either side becomes road,
+  // so the trams run down the middle with a lane for traffic on each side.
+  // Only free ground is taken, and any tree, hydrant or parked car on it goes.
+  const wide = [];
+  const widened = new Set();
+  const seenStrip = new Set();
+  for (const line of transit.lines) {
+    if (line.kind !== 'tram') continue;
+    for (let i = 0; i + 1 < line.pts.length; i++) {
+      const a = line.pts[i];
+      const c = line.pts[i + 1];
+      const rect = a.y === c.y
+        ? { x0: Math.min(a.x, c.x), x1: Math.max(a.x, c.x) + 1, y0: a.y - 1, y1: a.y + 2 }
+        : { x0: a.x - 1, x1: a.x + 2, y0: Math.min(a.y, c.y), y1: Math.max(a.y, c.y) + 1 };
+      const key = `${rect.x0},${rect.y0},${rect.x1},${rect.y1}`;
+      if (seenStrip.has(key)) continue;
+      seenStrip.add(key);
+      wide.push(rect);
+      for (let y = rect.y0; y <= rect.y1; y++) {
+        for (let x = rect.x0; x <= rect.x1; x++) {
+          if (!inb(x, y)) continue;
+          const k = at(x, y);
+          if (road[k] || blocked[k] || water[k] || woods[k] || apron[k]) continue;
+          road[k] = 1;
+          widened.add(k);
+        }
+      }
+    }
+  }
+  if (widened.size > 0) {
+    const gone = (px, py) => widened.has(at(Math.floor(px / TILE), Math.floor(py / TILE)));
+    for (let i = trees.length - 1; i >= 0; i--) if (gone(trees[i].x, trees[i].y)) trees.splice(i, 1);
+    for (let i = cars.length - 1; i >= 0; i--) if (gone(cars[i].x, cars[i].y)) cars.splice(i, 1);
+    for (let i = hydrants.length - 1; i >= 0; i--) if (widened.has(at(hydrants[i].x, hydrants[i].y))) hydrants.splice(i, 1);
+    for (const k of widened) park[k] = 0;
+  }
+
   const bays1 = BAYS.map((b) => ({ x: b.x * TILE, y: b.y * TILE, station: 0 }));
   const bays2 = BAYS.map((b) => ({
     x: (b.x - APRON.x0 + apron2.x0) * TILE,
@@ -4852,6 +4890,7 @@ function generateCity(seed = 7) {
     hospitals: [hospital1, hospital2, ...regional.map((r) => r.hospital)],
     airfields,
     transit,
+    wide,
     spawn: { x: BAYS[0].x * TILE, y: BAYS[0].y * TILE, angle: Math.PI / 2 },
     startHour: START_HOUR,
   };
@@ -12288,7 +12327,7 @@ function commandSellVehicle(state, id = null) {
 
 function serialize(state) {
   return {
-    version: 14,
+    version: 15,
     seed: state.seed,
     time: state.time,
     clock: state.clock,
@@ -13512,6 +13551,7 @@ function drawGround(ctx, state, b, z) {
   drawTracks(ctx, state, b, z);
 
   drawAirfields(ctx, city, b, z);
+  drawBoulevards(ctx, state.city, b, z);
   drawTramRails(ctx, state, b, z);
 
   // The station apron and its parking bays.
@@ -13635,7 +13675,7 @@ const lineInView = (line, b) => {
 
 const tracePolyline = (ctx, line) => {
   ctx.beginPath();
-  line.pts.forEach((p, i) => (i === 0 ? ctx.moveTo((p.x + 0.5) * TILE, (p.y + 0.5) * TILE) : ctx.lineTo((p.x + 0.5) * TILE, (p.y + 0.5) * TILE)));
+  line.pts.forEach((p, i) => (i === 0 ? ctx.moveTo((p.x + 1) * TILE, (p.y + 1) * TILE) : ctx.lineTo((p.x + 1) * TILE, (p.y + 1) * TILE)));
 };
 
 /** One rounded car of a train, centred on (x, y) tiles and pointing along `angle`. */
@@ -13690,6 +13730,42 @@ function drawTramCar(ctx, car, color, head) {
   ctx.restore();
 }
 
+/** Tram streets are four tiles wide: new asphalt over the pavement, with a lane line each side of the tram. */
+function drawBoulevards(ctx, city, b, z) {
+  const wide = city.wide ?? [];
+  if (wide.length === 0) return;
+  const asphalt = texture(ctx, 'asphalt', PALETTE.road, 1800);
+  for (const r of wide) {
+    if (r.x1 < b.x0 - 1 || r.x0 > b.x1 + 1 || r.y1 < b.y0 - 1 || r.y0 > b.y1 + 1) continue;
+    const horizontal = r.x1 - r.x0 > r.y1 - r.y0;
+    // Only the tiles that really became road: the rest keeps its pavement.
+    ctx.fillStyle = asphalt;
+    for (let y = r.y0; y <= r.y1; y++) {
+      let run = -1;
+      for (let x = r.x0; x <= r.x1 + 1; x++) {
+        const on = x <= r.x1 && city.road[y * city.w + x] === 1;
+        if (on && run < 0) run = x;
+        if (!on && run >= 0) {
+          ctx.fillRect(run * TILE, y * TILE, (x - run) * TILE, TILE);
+          run = -1;
+        }
+      }
+    }
+    if (z < 0.3) continue;
+    ctx.strokeStyle = 'rgba(235,235,225,0.55)';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([14, 12]);
+    ctx.beginPath();
+    if (horizontal) {
+      for (const dy of [1, 3]) { ctx.moveTo(r.x0 * TILE, (r.y0 + dy) * TILE); ctx.lineTo((r.x1 + 1) * TILE, (r.y0 + dy) * TILE); }
+    } else {
+      for (const dx of [1, 3]) { ctx.moveTo((r.x0 + dx) * TILE, r.y0 * TILE); ctx.lineTo((r.x0 + dx) * TILE, (r.y1 + 1) * TILE); }
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+}
+
 /** The tram: two rails set into the street, with a platform at each stop. */
 function drawTramRails(ctx, state, b, z) {
   const lines = (state.city.transit?.lines ?? []).filter((l) => l.kind === 'tram');
@@ -13716,8 +13792,8 @@ function drawTramRails(ctx, state, b, z) {
         // The offset is across the direction of travel.
         const ox = dy !== 0 && dx === 0 ? off : 0;
         const oy = dx !== 0 && dy === 0 ? off : 0;
-        const px = (a.x + 0.5 + ox) * TILE;
-        const py = (a.y + 0.5 + oy) * TILE;
+        const px = (a.x + 1 + ox) * TILE;
+        const py = (a.y + 1 + oy) * TILE;
         if (i === 0) ctx.moveTo(px, py);
         else ctx.lineTo(px, py);
       }
@@ -13728,7 +13804,7 @@ function drawTramRails(ctx, state, b, z) {
       ctx.fillStyle = 'rgba(214,203,170,0.85)';
       ctx.strokeStyle = line.color;
       ctx.lineWidth = 3;
-      rr(ctx, (stop.x - 0.9) * TILE + 16, (stop.y - 0.9) * TILE + 16, 1.8 * TILE, 1.8 * TILE, 5);
+      rr(ctx, (stop.x + 1 - 0.9) * TILE, (stop.y + 1 - 0.9) * TILE, 1.8 * TILE, 1.8 * TILE, 5);
       ctx.fill();
       ctx.stroke();
     }
@@ -13807,7 +13883,7 @@ function drawRail(ctx, state, b, z) {
     for (const stop of line.stops) {
       if (stop.x < b.x0 - 3 || stop.x > b.x1 + 3 || stop.y < b.y0 - 3 || stop.y > b.y1 + 3) continue;
       ctx.fillStyle = 'rgba(150,190,215,0.85)';
-      rr(ctx, (stop.x - 1.6) * TILE + 16, (stop.y - 1.6) * TILE + 16, 3.2 * TILE, 3.2 * TILE, 6);
+      rr(ctx, (stop.x + 1 - 1.6) * TILE, (stop.y + 1 - 1.6) * TILE, 3.2 * TILE, 3.2 * TILE, 6);
       ctx.fill();
       ctx.strokeStyle = '#2f6fa8';
       ctx.lineWidth = 3;
@@ -17076,7 +17152,7 @@ function miniStatic(state, mw, mh) {
     g.strokeStyle = line.kind === 'rail' ? '#d8d2c2' : line.color;
     g.globalAlpha = line.kind === 'rail' ? 0.95 : 0.8;
     g.beginPath();
-    line.pts.forEach((p, i) => (i === 0 ? g.moveTo((p.x + 0.5) * TILE * sx, (p.y + 0.5) * TILE * sy) : g.lineTo((p.x + 0.5) * TILE * sx, (p.y + 0.5) * TILE * sy)));
+    line.pts.forEach((p, i) => (i === 0 ? g.moveTo((p.x + 1) * TILE * sx, (p.y + 1) * TILE * sy) : g.lineTo((p.x + 1) * TILE * sx, (p.y + 1) * TILE * sy)));
     g.stroke();
   }
   g.globalAlpha = 1;
@@ -17949,7 +18025,7 @@ function sellApparatus(id) {
 
 // ------------------------------------------------------------------- save ---
 
-const SAVE_KEY = 'firestation.save.v14';
+const SAVE_KEY = 'firestation.save.v15';
 
 function hasSave() {
   try {
