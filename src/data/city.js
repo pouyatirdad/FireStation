@@ -120,20 +120,20 @@ export const buildingMass = (w, h, floors) => w * h * (0.7 + 0.15 * floors);
 export const sizeClassOf = (mass) => SIZE_CLASSES.find(([, max]) => mass < max)[0];
 
 const ROOFS = {
-  house: ['#7d5a4c', '#5f6368', '#6e5348', '#74706a'],
-  apartment: ['#85594a', '#8c7a68', '#6f5a4e'],
-  shop: ['#8a7358', '#7a6b5e', '#8c6a52'],
-  office: ['#59636d', '#646d76', '#4f5a64', '#6a6f74'],
-  hotel: ['#7d6a5c', '#8a786a', '#6f5f53'],
-  warehouse: ['#6a6f72', '#76796f', '#5d6569'],
+  house: ['#8f5a45', '#565b60', '#6e5348', '#7a746c'],
+  apartment: ['#6c6e70', '#8e8a80', '#55585b'],
+  shop: ['#8f8c84', '#696b6d', '#a39e92'],
+  office: ['#5a5f64', '#757a7d', '#4c5257', '#9a9c99'],
+  hotel: ['#84817a', '#9c988d', '#62656a'],
+  warehouse: ['#8b9196', '#7c8478', '#6f5750'],
   pharmacy: ['#cdd6d0', '#c4cfc8', '#d4dad4'],
   hospital: ['#d9dfe2', '#d0d8dc', '#dfe2e1'],
   station: ['#7e473d'],
-  villa: ['#8a4f3f', '#7d5a4c', '#94604a', '#6f4a3e'],
+  villa: ['#96563f', '#7d5a4c', '#a0664b', '#5b5f63'],
   tower: ['#4a5663', '#55616d', '#434e5a'],
   mall: ['#8d8f93', '#9a9c9f', '#7f8387'],
-  factory: ['#6c7276', '#797d79', '#5f676b'],
-  school: ['#8f6a52', '#9b7658', '#84624d'],
+  factory: ['#7b8287', '#8c8f89', '#5f676b'],
+  school: ['#7d7a74', '#908c83', '#6b6d6f'],
   tankfarm: ['#8a8f93', '#7b8286', '#969b9e'],
   terminal: ['#8d949b', '#7f8a93', '#98a0a6'],
   hangar: ['#6d7479', '#7a8085', '#646b70'],
@@ -1445,7 +1445,7 @@ function generateCity(seed = 7) {
 
   // --- parked cars -------------------------------------------------------
   const cars = [];
-  const CAR_COLORS = ['#c3c6c9', '#34404f', '#6e2b27', '#d8d4c8', '#3f4a43', '#8c7440', '#55595e'];
+  const CAR_COLORS = ['#c9ccce', '#2b3440', '#6e2b27', '#e4e3df', '#1e2023', '#8a8d8f', '#55595e'];
   const nearCrossStreet = (y) => H_ROADS.some((hy) => Math.abs(y - hy) < 2);
   const nearCrossAvenue = (x) => V_ROADS.some((vx) => Math.abs(x - vx) < 2);
 

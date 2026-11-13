@@ -10,15 +10,18 @@ import {
   V_ROADS, H_ROADS, APRON, SEA_Y, RIVER_HALF_WIDTH, riverCentre,
 } from '../data/city.js';
 import { pointAt, trainsAt } from '../data/transit.js';
+import { material, roofLines } from './materials.js';
 
 // What the ground of each kind of block looks like, painted over the pavement:
 // lawns round the houses, dark yards in industry, pale paving downtown.
 const ZONE_GROUND = {
-  housing: 'rgba(104,128,78,0.5)',
-  industrial: 'rgba(52,56,62,0.62)',
-  company: 'rgba(206,214,224,0.3)',
-  commercial: 'rgba(160,140,112,0.2)',
+  housing: 'lawn',
+  industrial: 'yard',
+  company: 'plaza',
+  commercial: 'paving',
 };
+// The strip of public pavement left between a block's own ground and the kerb.
+const WALKWAY = 11;
 const ZONE_MINIMAP = {
   housing: '#4b6a45',
   industrial: '#4a4a52',
@@ -33,86 +36,13 @@ const PALETTE = {
   parkEdge: '#4d5f38',
   road: '#3a3b3d',
   apron: '#6d7073',
-  marking: 'rgba(226,226,218,0.75)',
-  centre: '#d4a62a',
-  crosswalk: 'rgba(232,232,226,0.62)',
+  marking: 'rgba(214,214,206,0.6)',
+  centre: 'rgba(196,160,58,0.82)',
+  crosswalk: 'rgba(222,222,214,0.5)',
   shadow: 'rgba(12,17,22,0.22)',
   select: '#5fd0ff',
   fire: '#ff7a1f',
 };
-
-// Speckled tiles for asphalt, concrete and grass, painted once and repeated, so
-// large flat areas read as material instead of flat colour.
-const textures = {};
-function texture(ctx, name, base, speckles) {
-  if (textures[name] !== undefined) return textures[name];
-  textures[name] = base;
-  if (typeof document === 'undefined') return base;
-  const SZ = 256;
-  const c = document.createElement('canvas');
-  c.width = SZ;
-  c.height = SZ;
-  const t = c.getContext('2d');
-  t.fillStyle = base;
-  t.fillRect(0, 0, SZ, SZ);
-  let s = 12345 + name.length * 977;
-  const rnd = () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296);
-  // Large soft mottling (wear, stains, patchy growth) wrapped so the tile repeats
-  // without a seam, then fine grain on top.
-  const blotch = name === 'grass' ? 46 : name === 'asphalt' ? 30 : name === 'roof' ? 0 : 22;
-  for (let i = 0; i < blotch; i++) {
-    const r = 14 + rnd() * 46;
-    const x = rnd() * SZ;
-    const y = rnd() * SZ;
-    const light = rnd() < 0.5;
-    const a = 0.03 + rnd() * 0.06;
-    for (const ox of [-SZ, 0, SZ]) {
-      for (const oy of [-SZ, 0, SZ]) {
-        const g = t.createRadialGradient(x + ox, y + oy, 0, x + ox, y + oy, r);
-        g.addColorStop(0, light ? `rgba(255,255,235,${a})` : `rgba(0,0,0,${a * 1.3})`);
-        g.addColorStop(1, 'rgba(0,0,0,0)');
-        t.fillStyle = g;
-        t.fillRect(x + ox - r, y + oy - r, r * 2, r * 2);
-      }
-    }
-  }
-  for (let i = 0; i < speckles * 4; i++) {
-    const light = rnd() < 0.5;
-    t.fillStyle = light ? `rgba(255,255,255,${0.03 + rnd() * 0.08})` : `rgba(0,0,0,${0.05 + rnd() * 0.12})`;
-    const sz = rnd() < 0.85 ? 1 : 2;
-    t.fillRect((rnd() * SZ) | 0, (rnd() * SZ) | 0, sz, sz);
-  }
-  if (name === 'grass') {
-    for (let i = 0; i < 900; i++) {
-      const x = rnd() * SZ;
-      const y = rnd() * SZ;
-      t.strokeStyle = rnd() < 0.5 ? 'rgba(150,175,90,0.22)' : 'rgba(30,50,22,0.3)';
-      t.lineWidth = 1;
-      t.beginPath();
-      t.moveTo(x, y);
-      t.lineTo(x + (rnd() - 0.5) * 3, y - 2 - rnd() * 3);
-      t.stroke();
-    }
-  }
-  if (name === 'asphalt') {
-    t.strokeStyle = 'rgba(0,0,0,0.22)';
-    t.lineWidth = 1;
-    for (let i = 0; i < 9; i++) {
-      let x = rnd() * SZ;
-      let y = rnd() * SZ;
-      t.beginPath();
-      t.moveTo(x, y);
-      for (let k = 0; k < 6; k++) {
-        x += (rnd() - 0.5) * 18;
-        y += (rnd() - 0.3) * 14;
-        t.lineTo(x, y);
-      }
-      t.stroke();
-    }
-  }
-  textures[name] = ctx.createPattern(c, 'repeat') ?? base;
-  return textures[name];
-}
 
 // --------------------------------------------------------------- helpers ---
 
@@ -180,6 +110,7 @@ function visibleTiles(cam, view) {
 }
 // These two are replaced by the closure keeping the city size; kept simple by
 // storing the current city on the module while rendering.
+let currentZoom = 1;
 let cityW = 60;
 let cityH = 40;
 
@@ -234,6 +165,7 @@ export function render(ctx, state, cam, view, opts = {}) {
   ctx.fillRect(0, 0, W, H);
 
   const z = cam.zoom;
+  currentZoom = z;
   const bounds = visibleTiles(cam, view);
   currentDark = daylight(state.clock);
   currentSun = sunShadow(state.clock);
@@ -516,9 +448,9 @@ function drawGround(ctx, state, b, z) {
   const vr = V_ROADS.filter((vx) => vx + 2 >= b.x0 && vx <= b.x1 + 1);
   const hr = H_ROADS.filter((hy) => hy + 2 >= b.y0 && hy <= b.y1 + 1);
 
-  const concrete = texture(ctx, 'concrete', PALETTE.sidewalk, 900);
-  const asphalt = texture(ctx, 'asphalt', PALETTE.road, 1800);
-  const grass = texture(ctx, 'grass', PALETTE.park, 1400);
+  const concrete = material(ctx, 'concrete');
+  const asphalt = material(ctx, 'asphalt');
+  const grass = material(ctx, 'grass');
   ctx.fillStyle = concrete;
   ctx.fillRect(left, top, width, height);
 
@@ -540,11 +472,23 @@ function drawGround(ctx, state, b, z) {
     ctx.fillStyle = canopy(ctx, woods, z >= 0.7 ? 2 : z >= 0.24 ? 1 : 0.25);
     ctx.fill();
   }
+  // Each block's own ground (lawn, yard, paving) inside a strip of pavement,
+  // with a thin dark line where the two meet.
   for (const blk of city.blocks ?? []) {
-    const tint = ZONE_GROUND[blk.zone];
-    if (!tint || blk.x1 < b.x0 || blk.x0 > b.x1 || blk.y1 < b.y0 || blk.y0 > b.y1) continue;
-    ctx.fillStyle = tint;
-    ctx.fillRect(blk.x0 * TILE, blk.y0 * TILE, (blk.x1 - blk.x0 + 1) * TILE, (blk.y1 - blk.y0 + 1) * TILE);
+    const ground = ZONE_GROUND[blk.zone];
+    if (!ground || blk.x1 < b.x0 || blk.x0 > b.x1 || blk.y1 < b.y0 || blk.y0 > b.y1) continue;
+    const gx = blk.x0 * TILE + WALKWAY;
+    const gy = blk.y0 * TILE + WALKWAY;
+    const gw = (blk.x1 - blk.x0 + 1) * TILE - WALKWAY * 2;
+    const gh = (blk.y1 - blk.y0 + 1) * TILE - WALKWAY * 2;
+    if (gw <= 0 || gh <= 0) continue;
+    ctx.fillStyle = material(ctx, ground);
+    ctx.fillRect(gx, gy, gw, gh);
+    if (z >= 0.5) {
+      ctx.strokeStyle = blk.zone === 'housing' ? 'rgba(40,52,30,0.4)' : 'rgba(30,30,30,0.22)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(gx + 0.5, gy + 0.5, gw - 1, gh - 1);
+    }
   }
   ctx.fillStyle = grass;
   for (const p of city.parks) {
@@ -557,21 +501,10 @@ function drawGround(ctx, state, b, z) {
   }
   if (z >= 0.35) drawParkPaths(ctx, city.parks, b);
 
-  // Sidewalk joints — only worth drawing when they are a pixel apart.
-  if (z >= 0.8) {
-    ctx.beginPath();
-    ctx.strokeStyle = PALETTE.sidewalkJoint;
-    ctx.lineWidth = 1;
-    for (let x = b.x0; x <= b.x1 + 1; x++) {
-      ctx.moveTo(x * TILE, top);
-      ctx.lineTo(x * TILE, top + height);
-    }
-    for (let y = b.y0; y <= b.y1 + 1; y++) {
-      ctx.moveTo(left, y * TILE);
-      ctx.lineTo(left + width, y * TILE);
-    }
-    ctx.stroke();
-  }
+  // Broad, slow changes of tone over everything laid so far, so no surface
+  // looks printed from one tile.
+  ctx.fillStyle = material(ctx, 'mottle');
+  ctx.fillRect(left, top, width, height);
 
   drawWater(ctx, state, b, z);
 
@@ -597,24 +530,45 @@ function drawGround(ctx, state, b, z) {
   for (const r of vRuns) ctx.fillRect(r.line * TILE, r.a * TILE, 2 * TILE, (r.b - r.a + 1) * TILE);
   for (const r of hRuns) ctx.fillRect(r.a * TILE, r.line * TILE, (r.b - r.a + 1) * TILE, 2 * TILE);
 
-  // Kerbs: a dark gutter line along both sides of every street.
+  // Kerbs: a pale kerbstone on the pavement side, a dark gutter on the road
+  // side, and the grime that collects along it.
   if (z >= 0.5) {
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = 'rgba(20,20,20,0.35)';
+    const edges = (offset) => {
+      ctx.beginPath();
+      for (const r of vRuns) {
+        const y0 = r.a * TILE;
+        const y1 = (r.b + 1) * TILE;
+        ctx.moveTo(r.line * TILE + offset, y0); ctx.lineTo(r.line * TILE + offset, y1);
+        ctx.moveTo((r.line + 2) * TILE - offset, y0); ctx.lineTo((r.line + 2) * TILE - offset, y1);
+      }
+      for (const r of hRuns) {
+        const x0 = r.a * TILE;
+        const x1 = (r.b + 1) * TILE;
+        ctx.moveTo(x0, r.line * TILE + offset); ctx.lineTo(x1, r.line * TILE + offset);
+        ctx.moveTo(x0, (r.line + 2) * TILE - offset); ctx.lineTo(x1, (r.line + 2) * TILE - offset);
+      }
+      ctx.stroke();
+    };
+    ctx.lineWidth = 5;
+    ctx.strokeStyle = 'rgba(16,16,17,0.16)';
+    edges(3.5);
+    ctx.lineWidth = 1.6;
+    ctx.strokeStyle = 'rgba(12,12,13,0.5)';
+    edges(0.8);
+    ctx.strokeStyle = 'rgba(206,203,194,0.75)';
+    edges(-0.8);
+
+    // Where the wheels run the surface is polished darker; between them, and
+    // along the crown of the road, it stays pale and dusty.
+    ctx.fillStyle = 'rgba(10,10,11,0.085)';
     ctx.beginPath();
     for (const r of vRuns) {
-      const y0 = r.a * TILE;
-      const y1 = (r.b + 1) * TILE;
-      ctx.moveTo(r.line * TILE + 1, y0); ctx.lineTo(r.line * TILE + 1, y1);
-      ctx.moveTo((r.line + 2) * TILE - 1, y0); ctx.lineTo((r.line + 2) * TILE - 1, y1);
+      for (const o of [9, 21, 38, 50]) ctx.rect(r.line * TILE + o, r.a * TILE, 5, (r.b - r.a + 1) * TILE);
     }
     for (const r of hRuns) {
-      const x0 = r.a * TILE;
-      const x1 = (r.b + 1) * TILE;
-      ctx.moveTo(x0, r.line * TILE + 1); ctx.lineTo(x1, r.line * TILE + 1);
-      ctx.moveTo(x0, (r.line + 2) * TILE - 1); ctx.lineTo(x1, (r.line + 2) * TILE - 1);
+      for (const o of [9, 21, 38, 50]) ctx.rect(r.a * TILE, r.line * TILE + o, (r.b - r.a + 1) * TILE, 5);
     }
-    ctx.stroke();
+    ctx.fill();
   }
 
   // The curvy roads themselves, over the edges of the streets they join, with
@@ -647,7 +601,7 @@ function drawGround(ctx, state, b, z) {
   // the lines stop at the junction like they should.
   if (z >= 0.5) {
     ctx.strokeStyle = PALETTE.centre;
-    ctx.lineWidth = 1.6;
+    ctx.lineWidth = 1.1;
     ctx.beginPath();
     for (const r of vRuns) {
       const x = (r.line + 1) * TILE;
@@ -697,10 +651,10 @@ function drawGround(ctx, state, b, z) {
   for (const st of city.stations ?? [{ apron: APRON }]) {
     const a = st.apron;
     if (a.x1 < b.x0 || a.x0 > b.x1 || a.y1 < b.y0 || a.y0 > b.y1) continue;
-    ctx.fillStyle = PALETTE.apron;
+    ctx.fillStyle = material(ctx, 'apron');
     ctx.fillRect(a.x0 * TILE, a.y0 * TILE, (a.x1 - a.x0 + 1) * TILE, (a.y1 - a.y0 + 1) * TILE);
-    ctx.strokeStyle = 'rgba(232,200,90,0.45)';
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(214,188,96,0.42)';
+    ctx.lineWidth = 1.6;
     ctx.beginPath();
     for (let i = 1; i <= 3; i++) {
       const x = (a.x0 + i * 2.4) * TILE;
@@ -713,15 +667,22 @@ function drawGround(ctx, state, b, z) {
   // The staff car park beside the station.
   if (city.lot) {
     const lot = city.lot;
-    ctx.fillStyle = '#7d858d';
+    ctx.fillStyle = asphalt;
     ctx.fillRect(
       lot.x0 * TILE,
       lot.y0 * TILE,
       (lot.x1 - lot.x0 + 1) * TILE,
       (lot.y1 - lot.y0 + 1) * TILE,
     );
-    ctx.strokeStyle = 'rgba(232,232,226,0.4)';
-    ctx.lineWidth = 2;
+    ctx.fillStyle = 'rgba(150,150,146,0.16)';
+    ctx.fillRect(
+      lot.x0 * TILE,
+      lot.y0 * TILE,
+      (lot.x1 - lot.x0 + 1) * TILE,
+      (lot.y1 - lot.y0 + 1) * TILE,
+    );
+    ctx.strokeStyle = 'rgba(224,224,216,0.45)';
+    ctx.lineWidth = 1.4;
     ctx.beginPath();
     for (let i = 0; i < 4; i++) {
       const x = (lot.x0 + 1 + i * 1.45) * TILE;
@@ -873,7 +834,7 @@ function drawTramCar(ctx, car, color, head) {
 function drawBoulevards(ctx, city, b, z) {
   const wide = city.wide ?? [];
   if (wide.length === 0) return;
-  const asphalt = texture(ctx, 'asphalt', PALETTE.road, 1800);
+  const asphalt = material(ctx, 'asphalt');
   for (const r of wide) {
     if (r.x1 < b.x0 - 1 || r.x0 > b.x1 + 1 || r.y1 < b.y0 - 1 || r.y0 > b.y1 + 1) continue;
     const horizontal = r.x1 - r.x0 > r.y1 - r.y0;
@@ -1174,6 +1135,14 @@ function drawWater(ctx, state, b, z) {
     }
     ctx.fillStyle = seaGradient;
     ctx.fillRect(left, y0, right - left, y1 - y0);
+    // The surface itself, drifting slowly with the swell.
+    const ox = state.time * 3.5;
+    const oy = state.time * 1.2;
+    ctx.save();
+    ctx.translate(ox, oy);
+    ctx.fillStyle = material(ctx, 'water');
+    ctx.fillRect(left - ox, y0 - oy, right - left, y1 - y0);
+    ctx.restore();
     // The quay: a stone wall with a wet, dark foot.
     ctx.fillStyle = '#7b786c';
     ctx.fillRect(left, SEA_Y * TILE, right - left, 6);
@@ -1222,6 +1191,19 @@ function drawWater(ctx, state, b, z) {
     for (let i = midR.length - 1; i >= 0; i--) ctx.lineTo(midR[i][0], midR[i][1]);
     ctx.closePath();
     ctx.fill();
+    // Ripples carried down with the current.
+    ctx.save();
+    ctx.beginPath();
+    line(leftEdge);
+    for (let i = rightEdge.length - 1; i >= 0; i--) ctx.lineTo(rightEdge[i][0], rightEdge[i][1]);
+    ctx.closePath();
+    ctx.clip();
+    const drift = state.time * 5;
+    ctx.translate(0, drift);
+    ctx.globalAlpha = 0.7;
+    ctx.fillStyle = material(ctx, 'water');
+    ctx.fillRect(left, rowTop * TILE - drift, right - left, (rowBottom - rowTop + 1) * TILE);
+    ctx.restore();
     if (z >= 0.35) {
       ctx.strokeStyle = '#7b786c';
       ctx.lineWidth = 4;
@@ -1239,8 +1221,8 @@ function drawWater(ctx, state, b, z) {
   }
   if (z >= 0.55) {
     const t = state.time;
-    ctx.strokeStyle = 'rgba(210,235,250,0.22)';
-    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = 'rgba(210,235,250,0.08)';
+    ctx.lineWidth = 1;
     ctx.beginPath();
     for (let y = rowTop; y <= rowBottom; y += 2) {
       const c = riverCentre(y + 0.5);
@@ -1314,35 +1296,180 @@ function drawRoadWear(ctx, city, vr, hr, b) {
   }
 }
 
+// The three body styles on the street, as [half length, half width, cowl,
+// front of roof, back of roof, back of rear window]: saloon, estate/SUV, van.
+const CAR_BODIES = [
+  [20, 8, 10.5, 5, -7.5, -12],
+  [20.5, 8.4, 11, 6, -13, -16.5],
+  [21.5, 8.8, 15, 11, -19.5, -19.5],
+];
+const carKinds = new WeakMap();
+const carSprites = new Map();
+
+// One car from straight above, drawn once per colour and body style at three
+// times the size and stamped from then on: a body that rolls away to dark sills,
+// bonnet and boot, a glasshouse reflecting the sky, lamps and door mirrors.
+function carSprite(color, kind) {
+  const key = color + kind;
+  let sprite = carSprites.get(key);
+  if (sprite) return sprite;
+  const [L, W, cowl, roofF, roofB, glassB] = CAR_BODIES[kind];
+  const k = 3;
+  const c = document.createElement('canvas');
+  c.width = 52 * k;
+  c.height = 28 * k;
+  const g = c.getContext('2d');
+  g.scale(k, k);
+  g.translate(26, 14);
+  const body = () => {
+    g.beginPath();
+    g.moveTo(-L + 3, -W);
+    g.lineTo(L - 7, -W);
+    g.quadraticCurveTo(L - 0.5, -W, L, -W + 3.6);
+    g.lineTo(L, W - 3.6);
+    g.quadraticCurveTo(L - 0.5, W, L - 7, W);
+    g.lineTo(-L + 3, W);
+    g.quadraticCurveTo(-L, W, -L, W - 2.6);
+    g.lineTo(-L, -W + 2.6);
+    g.quadraticCurveTo(-L, -W, -L + 3, -W);
+    g.closePath();
+  };
+  // Paint: brightest along the centre line, falling away to the sills.
+  const across = g.createLinearGradient(0, -W, 0, W);
+  across.addColorStop(0, shadeRaw(color, -0.45));
+  across.addColorStop(0.16, shadeRaw(color, -0.06));
+  across.addColorStop(0.42, shadeRaw(color, 0.16));
+  across.addColorStop(0.6, shadeRaw(color, 0.1));
+  across.addColorStop(0.86, shadeRaw(color, -0.1));
+  across.addColorStop(1, shadeRaw(color, -0.5));
+  body();
+  g.fillStyle = across;
+  g.fill();
+  g.save();
+  body();
+  g.clip();
+  const along = g.createLinearGradient(-L, 0, L, 0);
+  along.addColorStop(0, 'rgba(0,0,0,0.38)');
+  along.addColorStop(0.1, 'rgba(0,0,0,0)');
+  along.addColorStop(0.86, 'rgba(0,0,0,0)');
+  along.addColorStop(1, 'rgba(0,0,0,0.3)');
+  g.fillStyle = along;
+  g.fillRect(-L, -W, L * 2, W * 2);
+  // Bonnet: a highlight where it curves over, and the shut lines.
+  const bonnet = g.createLinearGradient(cowl, 0, L, 0);
+  bonnet.addColorStop(0, 'rgba(255,255,255,0)');
+  bonnet.addColorStop(0.45, 'rgba(255,255,255,0.2)');
+  bonnet.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = bonnet;
+  g.fillRect(cowl, -W + 2, L - cowl, W * 2 - 4);
+  g.strokeStyle = 'rgba(0,0,0,0.3)';
+  g.lineWidth = 0.35;
+  g.beginPath();
+  g.moveTo(cowl + 1, -W + 1.6); g.lineTo(L - 2.5, -W + 2.4);
+  g.moveTo(cowl + 1, W - 1.6); g.lineTo(L - 2.5, W - 2.4);
+  if (kind === 0) { g.moveTo(glassB - 1, -W + 1.4); g.lineTo(glassB - 1, W - 1.4); }
+  g.stroke();
+  g.restore();
+
+  // Glasshouse: one dark shape for all the glass, the roof panel laid on it.
+  const gw = W - 1.3;
+  g.beginPath();
+  g.moveTo(cowl, -gw + 0.5);
+  g.lineTo(cowl, gw - 0.5);
+  g.quadraticCurveTo(cowl - 0.4, gw, cowl - 2, gw);
+  g.lineTo(glassB + 1.5, gw - 0.3);
+  g.quadraticCurveTo(glassB, gw - 0.3, glassB, gw - 2);
+  g.lineTo(glassB, -gw + 2);
+  g.quadraticCurveTo(glassB, -gw + 0.3, glassB + 1.5, -gw + 0.3);
+  g.lineTo(cowl - 2, -gw);
+  g.quadraticCurveTo(cowl - 0.4, -gw, cowl, -gw + 0.5);
+  g.closePath();
+  const glass = g.createLinearGradient(glassB, -gw, cowl, gw);
+  glass.addColorStop(0, '#3d566a');
+  glass.addColorStop(0.35, '#16212b');
+  glass.addColorStop(1, '#0b1117');
+  g.fillStyle = glass;
+  g.fill();
+  // Sky caught in the windscreen.
+  const screen = g.createLinearGradient(roofF, 0, cowl, 0);
+  screen.addColorStop(0, 'rgba(150,185,210,0.05)');
+  screen.addColorStop(1, 'rgba(170,200,222,0.42)');
+  g.fillStyle = screen;
+  g.beginPath();
+  g.moveTo(roofF + 0.4, -gw + 1.8); g.lineTo(cowl - 0.5, -gw + 1); g.lineTo(cowl - 0.5, gw - 1); g.lineTo(roofF + 0.4, gw - 1.8);
+  g.closePath();
+  g.fill();
+  // Roof.
+  const rw = gw - 1.5;
+  const roof = g.createLinearGradient(0, -rw, 0, rw);
+  roof.addColorStop(0, shadeRaw(color, -0.12));
+  roof.addColorStop(0.35, shadeRaw(color, 0.22));
+  roof.addColorStop(0.7, shadeRaw(color, 0.06));
+  roof.addColorStop(1, shadeRaw(color, -0.22));
+  g.fillStyle = roof;
+  rr(g, roofB, -rw, roofF - roofB, rw * 2, 1.8);
+  g.fill();
+  g.strokeStyle = 'rgba(0,0,0,0.28)';
+  g.lineWidth = 0.3;
+  g.stroke();
+  if (kind === 1) { // roof rails
+    g.strokeStyle = 'rgba(20,22,24,0.7)';
+    g.lineWidth = 0.6;
+    g.beginPath();
+    g.moveTo(roofB + 2, -rw + 0.9); g.lineTo(roofF - 2, -rw + 0.9);
+    g.moveTo(roofB + 2, rw - 0.9); g.lineTo(roofF - 2, rw - 0.9);
+    g.stroke();
+  }
+  // Pillars between the side windows.
+  g.fillStyle = shadeRaw(color, -0.25);
+  for (const px of kind === 2 ? [3] : [(roofF + roofB) / 2]) {
+    g.fillRect(px - 0.4, -gw + 0.2, 0.8, 1.5);
+    g.fillRect(px - 0.4, gw - 1.7, 0.8, 1.5);
+  }
+  // Lamps and mirrors.
+  g.fillStyle = '#eef1f0';
+  g.fillRect(L - 2.2, -W + 1.4, 1.6, 3);
+  g.fillRect(L - 2.2, W - 4.4, 1.6, 3);
+  g.fillStyle = '#8f1712';
+  g.fillRect(-L + 0.3, -W + 1.2, 1.1, 3.4);
+  g.fillRect(-L + 0.3, W - 4.6, 1.1, 3.4);
+  g.fillStyle = shadeRaw(color, -0.35);
+  rr(g, cowl - 2.2, -W - 1.5, 2, 1.7, 0.6);
+  g.fill();
+  rr(g, cowl - 2.2, W - 0.2, 2, 1.7, 0.6);
+  g.fill();
+  body();
+  g.strokeStyle = 'rgba(0,0,0,0.4)';
+  g.lineWidth = 0.4;
+  g.stroke();
+  carSprites.set(key, c);
+  return c;
+}
+
 function drawCar(ctx, car) {
+  let kind = carKinds.get(car);
+  if (kind === undefined) {
+    kind = Math.floor(hash(car.x * 0.131 + car.y * 0.717 + hashString(car.color)) * 9);
+    kind = kind < 4 ? 0 : kind < 8 ? 1 : 2;
+    carKinds.set(car, kind);
+  }
+  const [L, W] = CAR_BODIES[kind];
   ctx.save();
   ctx.translate(car.x, car.y);
-  ctx.fillStyle = 'rgba(10,14,18,0.28)';
-  ctx.beginPath();
-  ctx.ellipse(2, 3, 14, 8, 0, 0, Math.PI * 2);
-  ctx.fill();
+  // Shadow: a tight dark one under the sills and a soft one thrown by the sun.
+  const dim = 1 - currentDark * 0.85;
+  ctx.save();
+  ctx.translate(currentSun.dx * 3, currentSun.dy * 3 + 1);
   ctx.rotate(car.angle);
-  // Wheels peeking out, body, glasshouse with raked screens, bonnet highlight.
-  ctx.fillStyle = '#15171a';
-  ctx.fillRect(-15, -9.5, 8, 3); ctx.fillRect(7, -9.5, 8, 3);
-  ctx.fillRect(-15, 6.5, 8, 3); ctx.fillRect(7, 6.5, 8, 3);
-  ctx.fillStyle = shade(car.color, -0.18);
-  rr(ctx, -20, -8, 40, 16, 4);
+  ctx.fillStyle = `rgba(6,8,10,${0.16 * dim})`;
+  rr(ctx, -L - 2, -W - 2, L * 2 + 4, W * 2 + 4, 5);
   ctx.fill();
-  ctx.fillStyle = car.color;
-  rr(ctx, -19, -7, 38, 14, 4);
+  ctx.fillStyle = `rgba(6,8,10,${0.3 * dim})`;
+  rr(ctx, -L, -W, L * 2, W * 2, 3.5);
   ctx.fill();
-  ctx.fillStyle = '#1f2a33';
-  ctx.beginPath();
-  ctx.moveTo(10, -6); ctx.lineTo(10, 6); ctx.lineTo(6, 7); ctx.lineTo(-9, 7);
-  ctx.lineTo(-11, 5.5); ctx.lineTo(-11, -5.5); ctx.lineTo(-9, -7); ctx.lineTo(6, -7);
-  ctx.closePath();
-  ctx.fill();
-  ctx.fillStyle = car.color;
-  rr(ctx, -6, -5.5, 11, 11, 2); // roof
-  ctx.fill();
-  ctx.fillStyle = 'rgba(255,255,255,0.16)';
-  ctx.fillRect(11, -6, 7, 3);
+  ctx.restore();
+  ctx.rotate(car.angle);
+  ctx.drawImage(carSprite(car.color, kind), -26, -14, 52, 28);
   if (currentDark > 0.25) { // headlight beams
     ctx.globalCompositeOperation = 'lighter';
     const beam = ctx.createLinearGradient(19, 0, 52, 0);
@@ -1424,23 +1551,49 @@ function drawCrown(ctx, x, y, r, kind, tone, seed) {
     }
     return;
   }
+  // A broadleaf crown is a heap of leafy clumps: a dark mass underneath, then
+  // clumps that get lighter toward the sun (top left), then the lit tips.
   const birch = kind === 'birch';
-  const lobes = birch ? 5 : 7;
-  const spin = hash(seed) * 6.283;
-  const layers = [[1, 0, 0, -0.34], [0.8, -0.08, -0.1, 0], [0.5, -0.2, -0.24, 0.16]];
-  for (const [k, ox, oy, amt] of layers) {
-    ctx.fillStyle = shade(tone, amt);
+  const rnd = (k) => hash(seed + k * 1.618);
+  const n = birch ? 8 : 11;
+  ctx.fillStyle = shade(tone, -0.46);
+  ctx.beginPath();
+  ctx.moveTo(x + r * 0.62, y);
+  ctx.arc(x, y, r * 0.62, 0, Math.PI * 2);
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * Math.PI * 2 + rnd(i) * 0.6;
+    const d = r * (0.5 + 0.16 * rnd(i + 20));
+    const cr = r * (0.3 + 0.16 * rnd(i + 40)) * (birch ? 0.86 : 1);
+    ctx.moveTo(x + Math.cos(a) * d + cr, y + Math.sin(a) * d);
+    ctx.arc(x + Math.cos(a) * d, y + Math.sin(a) * d, cr, 0, Math.PI * 2);
+  }
+  ctx.fill();
+  const clumps = [];
+  const count = birch ? 13 : 18;
+  for (let i = 0; i < count; i++) {
+    const a = rnd(i + 60) * Math.PI * 2;
+    const d = r * 0.66 * Math.sqrt(rnd(i + 80));
+    const facing = -(Math.cos(a) * 0.6 + Math.sin(a) * 0.8) * (d / r);
+    clumps.push({
+      x: x + Math.cos(a) * d,
+      y: y + Math.sin(a) * d,
+      r: r * (0.2 + 0.15 * rnd(i + 100)),
+      lit: -0.16 + facing * 0.5 + (rnd(i + 120) - 0.5) * 0.14,
+    });
+  }
+  clumps.sort((p, q) => p.lit - q.lit);
+  for (const c of clumps) {
+    ctx.fillStyle = shade(tone, Math.round(c.lit * 25) / 25);
     ctx.beginPath();
-    const count = k < 0.6 ? 3 : lobes;
-    for (let i = 0; i < count; i++) {
-      const a = spin + (i / count) * Math.PI * 2 + (k < 0.6 ? 3.6 : 0);
-      const d = r * (k < 0.6 ? 0.22 : 0.4) * (birch ? 1.1 : 1);
-      const lr = r * k * (0.5 + 0.14 * hash(seed + i * 2.1 + k)) * (birch ? 0.86 : 1);
-      const cx = x + ox * r + Math.cos(a) * d;
-      const cy = y + oy * r + Math.sin(a) * d;
-      ctx.moveTo(cx + lr, cy);
-      ctx.arc(cx, cy, lr, 0, Math.PI * 2);
-    }
+    ctx.arc(c.x, c.y, c.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  for (let i = 0; i < (birch ? 4 : 6); i++) {
+    const a = -2.2 + (rnd(i + 140) - 0.5) * 2.4;
+    const d = r * (0.12 + 0.42 * rnd(i + 160));
+    ctx.fillStyle = shade(tone, 0.14 + Math.round(rnd(i + 180) * 4) / 25);
+    ctx.beginPath();
+    ctx.arc(x + Math.cos(a) * d, y + Math.sin(a) * d, r * (0.09 + 0.09 * rnd(i + 200)), 0, Math.PI * 2);
     ctx.fill();
   }
 }
@@ -1568,7 +1721,7 @@ function ruralJunction(city, vx, hy) {
 // Where a road runs past a forest, a grass verge and a dirt edge replace the
 // kerb, so it reads as a country road through the trees.
 function drawVerges(ctx, city, forests, z) {
-  const grassy = texture(ctx, 'verge', '#4b5a34', 900);
+  const grassy = material(ctx, 'verge');
   const vw = 8;
   const roadAt = (tx, ty) => tx >= 0 && ty >= 0 && tx < city.w && ty < city.h && city.road[ty * city.w + tx] === 1;
   for (const a of forests) {
@@ -1628,7 +1781,7 @@ function drawTracks(ctx, state, b, z) {
   const cut = state.cut;
   if (!cut || !state.cutCount) return;
   const w = state.city.w;
-  const dirt = texture(ctx, 'dirt', '#6b5a43', 1200);
+  const dirt = material(ctx, 'dirt');
   ctx.fillStyle = dirt;
   for (let y = b.y0; y <= b.y1; y++) {
     for (let x = b.x0; x <= b.x1; x++) {
@@ -1755,19 +1908,22 @@ function drawBuildingShadows(ctx, state, bounds) {
   if (fade <= 0.05) return;
   // Shadow of a block = its footprint swept along the shadow vector. Rects in
   // one path share a winding, so overlaps never double-darken.
-  ctx.fillStyle = `rgba(12,17,22,${0.3 * fade})`;
-  ctx.beginPath();
-  for (const b of state.buildings) {
-    if (b.state === 'rubble' || !buildingVisible(b, bounds)) continue;
-    const sx = sun.dx * b.elevation;
-    const sy = sun.dy * b.elevation + 4;
-    const steps = Math.min(14, Math.max(2, Math.ceil(Math.hypot(sx, sy) / 5)));
-    for (let i = 0; i <= steps; i++) {
-      const k = i / steps;
-      ctx.rect(b.x * TILE + sx * k, b.y * TILE + sy * k, b.w * TILE, b.h * TILE);
+  // Twice: a wider, fainter pass under the main one gives the edge a penumbra.
+  for (const [grow, alpha] of [[3, 0.13], [0, 0.3]]) {
+    ctx.fillStyle = `rgba(10,14,20,${alpha * fade})`;
+    ctx.beginPath();
+    for (const b of state.buildings) {
+      if (b.state === 'rubble' || !buildingVisible(b, bounds)) continue;
+      const sx = sun.dx * b.elevation * 1.25;
+      const sy = sun.dy * b.elevation * 1.25 + 4;
+      const steps = Math.min(14, Math.max(2, Math.ceil(Math.hypot(sx, sy) / 5)));
+      for (let i = 0; i <= steps; i++) {
+        const k = i / steps;
+        ctx.rect(b.x * TILE + sx * k - grow, b.y * TILE + sy * k - grow, b.w * TILE + grow * 2, b.h * TILE + grow * 2);
+      }
     }
+    ctx.fill();
   }
-  ctx.fill();
   // Ambient occlusion: a tight dark halo where walls meet the ground, fading out.
   for (const [grow, alpha] of [[7, 0.07], [4, 0.09], [2, 0.12]]) {
     ctx.fillStyle = `rgba(8,10,12,${alpha * fade})`;
@@ -1853,33 +2009,17 @@ function drawBuilding(ctx, state, b, now, z) {
     drawTrapped(ctx, b, x, facadeTop, w, e, now);
   }
 
-  // Roof. A light band on the north and west edges, a shadow on the south and
-  // east, reads as sunlight from the top-left without a gradient per frame.
-  ctx.fillStyle = b.roofColor;
-  ctx.fillRect(x, y - e, w, h);
-  if (detailed) {
-    // Gravel / membrane roofing grain over the colour.
-    ctx.fillStyle = texture(ctx, 'roof', 'rgba(0,0,0,0)', 1600);
-    ctx.fillRect(x, y - e, w, h);
-  }
-  ctx.fillStyle = 'rgba(255,255,255,0.11)';
-  ctx.fillRect(x, y - e, w, 3);
-  ctx.fillRect(x, y - e, 3, h);
-  ctx.fillStyle = 'rgba(0,0,0,0.14)';
-  ctx.fillRect(x, y - e + h - 4, w, 4);
-  ctx.fillRect(x + w - 4, y - e, 4, h);
+  // Roof: tiled and hipped on houses, sheet metal on sheds, a flat deck behind
+  // a parapet on everything else.
+  const kind = ROOF_KIND[b.type] ?? 'flat';
+  if (kind === 'pitched') drawPitchedRoof(ctx, b, x, y - e, w, h, detailed);
+  else if (kind === 'metal') drawMetalRoof(ctx, b, x, y - e, w, h, detailed);
+  else drawFlatRoof(ctx, b, x, y - e, w, h, detailed);
 
-  // Parapet line around the roof.
-  ctx.strokeStyle = 'rgba(0,0,0,0.22)';
-  ctx.lineWidth = 1;
-  ctx.strokeRect(x + 2.5, y - e + 2.5, w - 5, h - 5);
-
-  if (detailed && (b.type === 'house' || b.type === 'villa')) drawPitchedRoof(ctx, b, x, y - e, w, h);
-  if (detailed && (b.type === 'warehouse' || b.type === 'factory')) drawCorrugation(ctx, x, y - e, w, h);
   if (b.type === 'tankfarm') drawTankFarm(ctx, b, x, y - e, w, h);
   if (b.type === 'factory') drawStacks(ctx, b, x, y - e, w, h, e);
   if (b.type === 'tower') drawMast(ctx, b, x, y - e, w, h);
-  if (detailed) drawRoofDetails(ctx, b, x, y - e, w, h);
+  if (detailed && kind !== 'pitched') drawRoofDetails(ctx, b, x, y - e, w, h);
   if (b.type === 'terminal') drawTerminalRoof(ctx, x, y - e, w, h);
   if (b.type === 'hangar') drawHangarRoof(ctx, x, y - e, w, h);
   if (b.type === 'railstation') drawRailRoof(ctx, x, y - e, w, h);
@@ -1993,34 +2133,251 @@ function drawEntrance(ctx, b, x, y, w, h, z) {
   }
 }
 
-// A gabled roof: ridge along the long axis, the sun-facing (south) slope lit
-// and the north slope in shade, with shingle courses.
-function drawPitchedRoof(ctx, b, x, y, w, h) {
+const ROOF_KIND = {
+  house: 'pitched',
+  villa: 'pitched',
+  warehouse: 'metal',
+  factory: 'metal',
+  hangar: 'metal',
+  station: 'metal',
+};
+
+// How squarely a slope whose downhill side faces (nx, ny) meets the sun, -1..1.
+// The light comes from the side the shadows point away from.
+function sunlit(nx, ny) {
+  const len = Math.hypot(currentSun.dx, currentSun.dy) || 1;
+  return -(nx * currentSun.dx + ny * currentSun.dy) / len;
+}
+// Shades are remembered by amount, so keep the amounts to a few steps.
+const stepped = (v) => Math.round(v * 40) / 40;
+const daylit = () => 1 - currentDark * 0.8;
+
+// A tiled house roof seen from above: four slopes meeting at a ridge (or two
+// and a pair of gable ends), each as bright as the sun finds it, with tile
+// courses running along the eaves, a chimney and now and then solar panels.
+function drawPitchedRoof(ctx, b, x, y, w, h, detailed) {
+  const seed = hashString(b.id);
   const alongX = w >= h;
-  ctx.fillStyle = 'rgba(255,240,215,0.14)';
-  if (alongX) ctx.fillRect(x, y + h / 2, w, h / 2); else ctx.fillRect(x + w / 2, y, w / 2, h);
-  ctx.fillStyle = 'rgba(0,0,0,0.2)';
-  if (alongX) ctx.fillRect(x, y, w, h / 2); else ctx.fillRect(x, y, w / 2, h);
-  ctx.strokeStyle = 'rgba(0,0,0,0.16)';
+  if (!detailed) {
+    ctx.fillStyle = b.roofColor;
+    ctx.fillRect(x, y, w, h);
+    ctx.fillStyle = 'rgba(0,0,0,0.2)';
+    if (alongX) ctx.fillRect(x, y + h / 2, w, h / 2); else ctx.fillRect(x + (currentSun.dx > 0 ? w / 2 : 0), y, w / 2, h);
+    return;
+  }
+  const gable = hash(seed + 3) < 0.3;
+  const inset = gable ? 0 : Math.min(w, h) * 0.46;
+  const a = alongX ? [x + inset, y + h / 2] : [x + w / 2, y + inset];
+  const c = alongX ? [x + w - inset, y + h / 2] : [x + w / 2, y + h - inset];
+  const tl = [x, y];
+  const tr = [x + w, y];
+  const bl = [x, y + h];
+  const br = [x + w, y + h];
+  const slopes = [
+    [0, -1, 'h', alongX ? [tl, tr, c, a] : [tl, tr, a]],
+    [0, 1, 'h', alongX ? [bl, a, c, br] : [bl, c, br]],
+    [-1, 0, 'v', alongX ? [tl, a, bl] : [tl, a, c, bl]],
+    [1, 0, 'v', alongX ? [tr, br, c] : [tr, br, c, a]],
+  ];
+  for (const [nx, ny, dir, pts] of slopes) {
+    if (gable && (alongX ? nx !== 0 : ny !== 0)) continue;
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+    ctx.closePath();
+    ctx.fillStyle = shade(b.roofColor, stepped(0.02 + 0.2 * sunlit(nx, ny)));
+    ctx.fill();
+    ctx.fillStyle = roofLines(ctx, 'tile', dir);
+    ctx.fill();
+  }
+  // Hips and ridge: capping tiles catch the light.
   ctx.lineWidth = 1;
+  ctx.strokeStyle = 'rgba(0,0,0,0.22)';
   ctx.beginPath();
-  const step = 5;
-  if (alongX) for (let yy = y + step; yy < y + h; yy += step) { ctx.moveTo(x, yy); ctx.lineTo(x + w, yy); }
-  else for (let xx = x + step; xx < x + w; xx += step) { ctx.moveTo(xx, y); ctx.lineTo(xx, y + h); }
+  if (!gable) {
+    for (const [p, q] of [[tl, a], [bl, a], [tr, c], [br, c]]) { ctx.moveTo(p[0], p[1]); ctx.lineTo(q[0], q[1]); }
+    if (alongX) { ctx.moveTo(tl[0], tl[1]); ctx.lineTo(a[0], a[1]); }
+  }
   ctx.stroke();
-  ctx.strokeStyle = 'rgba(255,255,255,0.28)';
-  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = 'rgba(245,232,214,0.38)';
+  ctx.lineWidth = 1.3;
+  ctx.beginPath();
+  ctx.moveTo(a[0], a[1]);
+  ctx.lineTo(c[0], c[1]);
+  ctx.stroke();
+  // Eaves and gutter.
+  ctx.strokeStyle = 'rgba(20,18,16,0.5)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+
+  // Solar panels on the slope that faces away from the street side shadow.
+  if (hash(seed + 11) < 0.22 && Math.min(w, h) > 44) {
+    const pw = alongX ? Math.min(26, w * 0.34) : 9;
+    const ph = alongX ? 9 : Math.min(26, h * 0.34);
+    const px = alongX ? x + w * 0.5 - pw / 2 + (hash(seed + 12) - 0.5) * w * 0.2 : x + w * 0.2;
+    const py = alongX ? y + h * 0.2 : y + h * 0.5 - ph / 2 + (hash(seed + 12) - 0.5) * h * 0.2;
+    ctx.fillStyle = '#18222f';
+    ctx.fillRect(px, py, pw, ph);
+    ctx.strokeStyle = 'rgba(120,150,180,0.5)';
+    ctx.lineWidth = 0.6;
+    ctx.beginPath();
+    if (alongX) for (let k = 1; k < 4; k++) { ctx.moveTo(px + (pw * k) / 4, py); ctx.lineTo(px + (pw * k) / 4, py + ph); }
+    else for (let k = 1; k < 4; k++) { ctx.moveTo(px, py + (ph * k) / 4); ctx.lineTo(px + pw, py + (ph * k) / 4); }
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(200,215,230,0.55)';
+    ctx.strokeRect(px, py, pw, ph);
+  }
+  // Chimney, with its shadow lying down the slope.
+  const cx = x + w * (0.22 + 0.56 * hash(seed + 5));
+  const cy = y + h * (alongX ? 0.36 : 0.22 + 0.56 * hash(seed + 6));
+  ctx.fillStyle = `rgba(0,0,0,${0.34 * daylit()})`;
+  ctx.beginPath();
+  ctx.moveTo(cx - 3, cy - 3); ctx.lineTo(cx + 3, cy - 3);
+  ctx.lineTo(cx + 3 + currentSun.dx * 7, cy - 3 + currentSun.dy * 7);
+  ctx.lineTo(cx + 3 + currentSun.dx * 7, cy + 3 + currentSun.dy * 7);
+  ctx.lineTo(cx - 3 + currentSun.dx * 7, cy + 3 + currentSun.dy * 7);
+  ctx.lineTo(cx - 3, cy + 3);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = hash(seed + 7) < 0.5 ? '#8a6656' : '#85807a';
+  ctx.fillRect(cx - 3, cy - 3, 6, 6);
+  ctx.fillStyle = 'rgba(255,240,225,0.22)';
+  ctx.fillRect(cx - 3, cy - 3, 6, 1.2);
+  ctx.fillStyle = '#1c1917';
+  ctx.fillRect(cx - 1.3, cy - 1.3, 2.6, 2.6);
+}
+
+// A profiled sheet-metal roof: two shallow slopes off a ridge along the long
+// side, standing seams running down them, rooflight strips and rust.
+function drawMetalRoof(ctx, b, x, y, w, h, detailed) {
+  const seed = hashString(b.id);
+  const alongX = w >= h;
+  const lightA = stepped(0.03 + 0.1 * (alongX ? sunlit(0, -1) : sunlit(-1, 0)));
+  const lightB = stepped(0.03 + 0.1 * (alongX ? sunlit(0, 1) : sunlit(1, 0)));
+  ctx.fillStyle = shade(b.roofColor, lightA);
+  if (alongX) ctx.fillRect(x, y, w, h / 2); else ctx.fillRect(x, y, w / 2, h);
+  ctx.fillStyle = shade(b.roofColor, lightB);
+  if (alongX) ctx.fillRect(x, y + h / 2, w, h / 2); else ctx.fillRect(x + w / 2, y, w / 2, h);
+  if (!detailed) return;
+  ctx.fillStyle = roofLines(ctx, 'seam', alongX ? 'v' : 'h');
+  ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = material(ctx, 'roofing');
+  ctx.fillRect(x, y, w, h);
+  // Translucent rooflight sheets let into the slopes.
+  if (hash(seed + 21) < 0.65) {
+    ctx.fillStyle = 'rgba(214,224,222,0.4)';
+    const long = alongX ? w : h;
+    const n = Math.max(2, Math.floor(long / 56));
+    for (let i = 0; i < n; i++) {
+      const t = (i + 0.5) / n;
+      if (alongX) {
+        ctx.fillRect(x + w * t - 2, y + h * 0.1, 4, h * 0.3);
+        ctx.fillRect(x + w * t - 2, y + h * 0.6, 4, h * 0.3);
+      } else {
+        ctx.fillRect(x + w * 0.1, y + h * t - 2, w * 0.3, 4);
+        ctx.fillRect(x + w * 0.6, y + h * t - 2, w * 0.3, 4);
+      }
+    }
+  }
+  // Ridge capping and the gutters along the eaves.
+  ctx.strokeStyle = 'rgba(240,240,236,0.4)';
+  ctx.lineWidth = 2;
   ctx.beginPath();
   if (alongX) { ctx.moveTo(x, y + h / 2); ctx.lineTo(x + w, y + h / 2); } else { ctx.moveTo(x + w / 2, y); ctx.lineTo(x + w / 2, y + h); }
   ctx.stroke();
+  ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+  ctx.lineWidth = 0.8;
+  ctx.beginPath();
+  if (alongX) { ctx.moveTo(x, y + h / 2 + 1.4); ctx.lineTo(x + w, y + h / 2 + 1.4); } else { ctx.moveTo(x + w / 2 + 1.4, y); ctx.lineTo(x + w / 2 + 1.4, y + h); }
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(18,18,18,0.5)';
+  ctx.lineWidth = 1.2;
+  ctx.strokeRect(x + 0.6, y + 0.6, w - 1.2, h - 1.2);
 }
 
-function drawCorrugation(ctx, x, y, w, h) {
-  ctx.strokeStyle = 'rgba(0,0,0,0.13)';
+// A flat roof: a weathered deck of felt, gravel or membrane behind a parapet
+// that throws its shadow across the deck on the sunny side.
+function drawFlatRoof(ctx, b, x, y, w, h, detailed) {
+  ctx.fillStyle = b.roofColor;
+  ctx.fillRect(x, y, w, h);
+  if (!detailed) {
+    // From far off: the weathering and the pale parapet, or just two edges
+    // once the whole district is on screen.
+    if (currentZoom >= 0.3) {
+      ctx.fillStyle = material(ctx, 'roofing');
+      ctx.fillRect(x, y, w, h);
+      ctx.strokeStyle = shade(b.roofColor, 0.26);
+      ctx.lineWidth = 3;
+      ctx.strokeRect(x + 1.5, y + 1.5, w - 3, h - 3);
+    } else {
+      ctx.fillStyle = 'rgba(255,255,255,0.1)';
+      ctx.fillRect(x, y, w, 3);
+      ctx.fillStyle = 'rgba(0,0,0,0.14)';
+      ctx.fillRect(x, y + h - 4, w, 4);
+    }
+    return;
+  }
+  ctx.fillStyle = material(ctx, 'roofing');
+  ctx.fillRect(x, y, w, h);
+  const seed = hashString(b.id);
+  // Laps between the sheets of roofing, across the short side.
+  ctx.strokeStyle = 'rgba(0,0,0,0.08)';
   ctx.lineWidth = 1;
   ctx.beginPath();
-  for (let xx = x + 4; xx < x + w; xx += 4) { ctx.moveTo(xx, y); ctx.lineTo(xx, y + h); }
+  const lap = 20 + Math.floor(hash(seed + 31) * 3) * 6;
+  if (w >= h) for (let xx = x + lap; xx < x + w - 4; xx += lap) { ctx.moveTo(xx, y + 3); ctx.lineTo(xx, y + h - 3); }
+  else for (let yy = y + lap; yy < y + h - 4; yy += lap) { ctx.moveTo(x + 3, yy); ctx.lineTo(x + w - 3, yy); }
   ctx.stroke();
+
+  const p = Math.max(2, Math.min(4, Math.min(w, h) * 0.07));
+  const sx = currentSun.dx;
+  const sy = currentSun.dy;
+  ctx.fillStyle = `rgba(6,8,10,${0.32 * daylit()})`;
+  ctx.fillRect(x + p, y + p, w - p * 2, Math.min(7, 1.5 + sy * 6));
+  const side = Math.min(8, Math.abs(sx) * 6);
+  if (sx > 0.06) ctx.fillRect(x + p, y + p, side, h - p * 2);
+  else if (sx < -0.06) ctx.fillRect(x + w - p - side, y + p, side, h - p * 2);
+  // The coping on top of the parapet, paler than the deck, edged both sides.
+  ctx.strokeStyle = shade(b.roofColor, 0.3);
+  ctx.lineWidth = p;
+  ctx.strokeRect(x + p / 2, y + p / 2, w - p, h - p);
+  ctx.strokeStyle = 'rgba(0,0,0,0.32)';
+  ctx.lineWidth = 0.7;
+  ctx.strokeRect(x + p, y + p, w - p * 2, h - p * 2);
+  ctx.strokeStyle = 'rgba(0,0,0,0.42)';
+  ctx.strokeRect(x + 0.4, y + 0.4, w - 0.8, h - 0.8);
+
+  // A stair head or lift room on the taller blocks.
+  if (b.floors >= 3 && Math.min(w, h) > 70 && b.type !== 'hospital' && b.type !== 'pharmacy' && b.type !== 'tower') {
+    const bw = 16;
+    const bh = 13;
+    const bx = x + p + 6 + hash(seed + 41) * (w - bw - p * 2 - 12);
+    const by = y + p + 6 + hash(seed + 42) * (h - bh - p * 2 - 12);
+    roofBox(ctx, bx, by, bw, bh, 9, shade(b.roofColor, 0.16));
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.fillRect(bx + bw * 0.35, by + bh - 2, 4, 2);
+  }
+}
+
+// Something box-shaped standing on a roof: its shadow thrown by the sun, then
+// its lid with a lit edge.
+function roofBox(ctx, x, y, w, h, tall, color) {
+  const ox = currentSun.dx * tall * 0.55;
+  const oy = currentSun.dy * tall * 0.55;
+  ctx.fillStyle = `rgba(4,6,8,${0.36 * daylit()})`;
+  ctx.beginPath();
+  ctx.moveTo(x, y); ctx.lineTo(x + w, y);
+  ctx.lineTo(x + w + ox, y + oy); ctx.lineTo(x + w + ox, y + h + oy);
+  ctx.lineTo(x + ox, y + h + oy); ctx.lineTo(x, y + h);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = color;
+  ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = 'rgba(255,255,255,0.2)';
+  ctx.fillRect(x, y, w, 1);
+  ctx.strokeStyle = 'rgba(0,0,0,0.4)';
+  ctx.lineWidth = 0.6;
+  ctx.strokeRect(x, y, w, h);
 }
 
 function drawFacadeWindows(ctx, b, x, y, w, h) {  const seed = hashString(b.id);
@@ -2253,28 +2610,91 @@ function drawMast(ctx, b, x, y, w, h) {
   ctx.fill();
 }
 
+// Plant on the roof at its real size: packaged air-conditioning units with
+// their fans, flue cowls, glazed rooflights and water tanks, each casting a
+// shadow. A big roof gets a row of units rather than one giant one.
 function drawRoofDetails(ctx, b, x, y, w, h) {
   if (b.type === 'pharmacy' || b.type === 'hospital' || b.type === 'tankfarm') return;
+  const shadow = `rgba(4,6,8,${0.36 * daylit()})`;
   for (const d of b.details) {
     const dx = x + d.u * w;
     const dy = y + d.v * h;
-    const dw = Math.max(4, d.w * w);
-    const dh = Math.max(3, d.h * h);
-    ctx.fillStyle = 'rgba(0,0,0,0.2)';
-    ctx.fillRect(dx + 2, dy + 2, dw, dh);
+    const fw = Math.max(5, d.w * w);
+    const fh = Math.max(4, d.h * h);
     if (d.kind === 'tank') {
-      ctx.fillStyle = '#6d747c';
+      const r = Math.min(8, Math.min(fw, fh) / 2);
+      const cx = dx + r;
+      const cy = dy + r;
+      ctx.fillStyle = shadow;
       ctx.beginPath();
-      ctx.arc(dx + dw / 2, dy + dh / 2, Math.min(dw, dh) / 2, 0, Math.PI * 2);
+      ctx.arc(cx + currentSun.dx * 6, cy + currentSun.dy * 6, r, 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = '#565d64';
-      ctx.lineWidth = 1.5;
+      const g = ctx.createRadialGradient(cx - r * 0.3, cy - r * 0.35, r * 0.1, cx, cy, r);
+      g.addColorStop(0, '#c3c7c8');
+      g.addColorStop(1, '#73797d');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,0.4)';
+      ctx.lineWidth = 0.7;
       ctx.stroke();
+      ctx.fillStyle = '#4c5154';
+      ctx.fillRect(cx - 1, cy - 1, 2, 2);
+    } else if (d.kind === 'skylight') {
+      const sw = Math.min(22, fw);
+      const sh = Math.min(13, fh);
+      ctx.fillStyle = shadow;
+      ctx.fillRect(dx + currentSun.dx * 2, dy + currentSun.dy * 2, sw, sh);
+      ctx.fillStyle = '#c4c7c5';
+      ctx.fillRect(dx, dy, sw, sh);
+      const g = ctx.createLinearGradient(dx, dy, dx + sw, dy + sh);
+      g.addColorStop(0, '#9cb7c4');
+      g.addColorStop(0.45, '#56707f');
+      g.addColorStop(1, '#3b505e');
+      ctx.fillStyle = g;
+      ctx.fillRect(dx + 1.2, dy + 1.2, sw - 2.4, sh - 2.4);
+      ctx.strokeStyle = 'rgba(210,214,212,0.8)';
+      ctx.lineWidth = 0.7;
+      ctx.beginPath();
+      ctx.moveTo(dx + sw / 2, dy + 1); ctx.lineTo(dx + sw / 2, dy + sh - 1);
+      ctx.stroke();
+    } else if (d.kind === 'vent') {
+      const n = Math.min(3, Math.max(1, Math.floor(fw / 12)));
+      for (let i = 0; i < n; i++) {
+        const cx = dx + 3 + i * 9;
+        const cy = dy + 3;
+        ctx.fillStyle = shadow;
+        ctx.beginPath();
+        ctx.arc(cx + currentSun.dx * 4, cy + currentSun.dy * 4, 3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#a4a8a9';
+        ctx.beginPath();
+        ctx.arc(cx, cy, 3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#5b6063';
+        ctx.beginPath();
+        ctx.arc(cx, cy, 1.3, 0, Math.PI * 2);
+        ctx.fill();
+      }
     } else {
-      ctx.fillStyle = d.kind === 'skylight' ? '#8fb4c4' : '#6c737b';
-      ctx.fillRect(dx, dy, dw, dh);
-      ctx.fillStyle = 'rgba(255,255,255,0.18)';
-      ctx.fillRect(dx, dy, dw, 2);
+      const uw = 13;
+      const uh = 10;
+      const n = Math.min(4, Math.max(1, Math.floor(fw / (uw + 4))));
+      for (let i = 0; i < n; i++) {
+        const ux = dx + i * (uw + 4);
+        roofBox(ctx, ux, dy, uw, uh, 6, '#b3b6b6');
+        ctx.fillStyle = '#34383b';
+        ctx.beginPath();
+        ctx.arc(ux + uw * 0.36, dy + uh / 2, 3.2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#6d7275';
+        ctx.beginPath();
+        ctx.arc(ux + uw * 0.36, dy + uh / 2, 1.1, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(0,0,0,0.28)';
+        for (let k = 0; k < 3; k++) ctx.fillRect(ux + uw * 0.68, dy + 2 + k * 2.4, uw * 0.24, 1);
+      }
     }
   }
 }
@@ -2333,6 +2753,24 @@ function drawRubble(ctx, b) {
 
 // ------------------------------------------------------------------ fire ---
 
+let flameSprite = null;
+let charSprite = null;
+function flamePuff() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 64;
+  canvas.height = 64;
+  const g = canvas.getContext('2d');
+  const grad = g.createRadialGradient(32, 36, 0, 32, 32, 32);
+  grad.addColorStop(0, 'rgba(255,248,214,1)');
+  grad.addColorStop(0.2, 'rgba(255,208,96,0.95)');
+  grad.addColorStop(0.48, 'rgba(246,122,26,0.72)');
+  grad.addColorStop(0.76, 'rgba(188,52,10,0.3)');
+  grad.addColorStop(1, 'rgba(120,20,0,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 64, 64);
+  return canvas;
+}
+
 function drawFire(ctx, b, now, z) {
   const f = b.fire;
   const x = b.x * TILE;
@@ -2355,46 +2793,31 @@ function drawFire(ctx, b, now, z) {
   ctx.fillRect(cx - glowR, cy - glowR, glowR * 2, glowR * 2);
   ctx.globalCompositeOperation = 'source-over';
 
+  // Each seat of fire is a hole burnt through the roof with flame rolling out
+  // of it: soft, shapeless bodies of fire that churn and flicker, not tongues.
+  if (!flameSprite) {
+    flameSprite = flamePuff();
+    charSprite = puff('14,10,8');
+  }
   const count = 2 + Math.round(f * 5);
+  const R = 9 + f * 20;
   for (let i = 0; i < count; i++) {
     const px = x + (0.1 + hash(seed + i * 13.7) * 0.8) * w;
     const py = y + (0.12 + hash(seed + i * 7.3 + 40) * 0.8) * h;
-    const flick = 0.72 + 0.28 * Math.sin(now * 9 + i * 1.9 + seed);
-    const height = (16 + f * 34) * flick;
-    const width = (7 + f * 10) * flick;
-
-    // Flame tongue: ragged, licking upward and bending with the wind.
-    const sway = Math.sin(now * 5 + i * 2.3 + seed) * width * 0.5;
-    const tongue = ctx.createLinearGradient(px, py, px + sway, py - height);
-    tongue.addColorStop(0, 'rgba(150,40,8,0.85)');
-    tongue.addColorStop(0.3, 'rgba(235,98,18,0.8)');
-    tongue.addColorStop(0.65, 'rgba(250,165,50,0.55)');
-    tongue.addColorStop(1, 'rgba(255,190,80,0)');
-    ctx.fillStyle = tongue;
-    ctx.beginPath();
-    ctx.moveTo(px - width, py);
-    const steps = 6;
-    for (let k = 1; k <= steps; k++) {
-      const u = k / steps;
-      const lean = sway * u * u;
-      const jag = (hash(seed + i * 9.1 + k * 3.7 + Math.floor(now * 8) * 0.31) - 0.5) * width * 0.7;
-      ctx.lineTo(px - width * (1 - u) * 0.9 + lean + jag, py - height * u);
+    ctx.globalAlpha = 0.8;
+    ctx.drawImage(charSprite, px - R * 1.5, py - R * 1.25, R * 3, R * 2.5);
+    for (let k = 0; k < 5; k++) {
+      const ph = seed + i * 7.1 + k * 3.3;
+      const a = hash(ph) * 6.283 + now * (1.2 + hash(ph + 1) * 2.2) * (k % 2 ? 1 : -1);
+      const d = R * 0.55 * hash(ph + 2);
+      const flick = 0.6 + 0.4 * Math.sin(now * (9 + k * 2.3) + ph);
+      const r = R * (0.5 + 0.45 * hash(ph + 3)) * flick;
+      const lift = R * 0.35 * flick;
+      ctx.globalAlpha = 0.5 + 0.45 * flick;
+      ctx.drawImage(flameSprite, px + Math.cos(a) * d - r, py + Math.sin(a) * d * 0.8 - lift - r * 1.15, r * 2, r * 2.3);
     }
-    for (let k = steps - 1; k >= 0; k--) {
-      const u = k / steps;
-      const lean = sway * u * u;
-      const jag = (hash(seed + i * 4.3 + k * 6.1 + Math.floor(now * 8) * 0.17) - 0.5) * width * 0.7;
-      ctx.lineTo(px + width * (1 - u) * 0.9 + lean + jag, py - height * u);
-    }
-    ctx.closePath();
-    ctx.fill();
-
-    // Hot core.
-    ctx.fillStyle = `rgba(255,246,205,${0.55 * f})`;
-    ctx.beginPath();
-    ctx.ellipse(px + 1, py - height * 0.22, width * 0.32, height * 0.22, 0, 0, Math.PI * 2);
-    ctx.fill();
   }
+  ctx.globalAlpha = 1;
 
   // Flames coming out of the ground-floor windows.
   if (f > 0.3) {
@@ -2864,14 +3287,17 @@ function drawHelicopter(ctx, e, now) {
 // with a thin dark seam so panels read as sheet metal.
 function paint(ctx, x, y, w, h, r, color) {
   const g = ctx.createLinearGradient(0, y, 0, y + h);
-  g.addColorStop(0, shade(color, 0.2));
-  g.addColorStop(0.45, color);
-  g.addColorStop(1, shade(color, -0.3));
+  g.addColorStop(0, shade(color, -0.34));
+  g.addColorStop(0.1, shade(color, 0.04));
+  g.addColorStop(0.4, shade(color, 0.14));
+  g.addColorStop(0.75, color);
+  g.addColorStop(0.92, shade(color, -0.16));
+  g.addColorStop(1, shade(color, -0.42));
   ctx.fillStyle = g;
   rr(ctx, x, y, w, h, r);
   ctx.fill();
-  ctx.strokeStyle = 'rgba(0,0,0,0.18)';
-  ctx.lineWidth = 0.5;
+  ctx.strokeStyle = 'rgba(0,0,0,0.38)';
+  ctx.lineWidth = 0.6;
   ctx.stroke();
   // Clear-coat reflection: a thin bright band along the upper body panel.
   ctx.save();
@@ -2887,14 +3313,15 @@ function paint(ctx, x, y, w, h, r, color) {
   ctx.restore();
 }
 
+const BODY_SLIM = 0.84;
+
+// From above only the shoulders of the tyres show past the bodywork.
 function tyres(ctx, xs, y) {
+  ctx.fillStyle = '#0c0d0f';
   for (const wx of xs) {
     for (const s of [-1, 1]) {
-      ctx.fillStyle = '#0d0f11';
-      rr(ctx, wx - 7, s * y - 4.5, 14, 9, 3);
+      rr(ctx, wx - 7, s * y - 3.2, 14, 6.4, 2.4);
       ctx.fill();
-      ctx.fillStyle = '#2a2e32';
-      ctx.fillRect(wx - 4, s * y - 2, 8, 4);
     }
   }
 }
@@ -2918,6 +3345,17 @@ function cab(ctx, x0, w, color) {
   ctx.fill();
   ctx.fillStyle = 'rgba(255,255,255,0.18)';
   ctx.fillRect(x0 + w - 9, -12, 1.5, 24);
+  // Roof hatch and the aerial on the cab.
+  ctx.fillStyle = 'rgba(0,0,0,0.16)';
+  rr(ctx, x0 + 3.5, -5.5, 6, 11, 1.5);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.16)';
+  ctx.lineWidth = 0.6;
+  ctx.stroke();
+  ctx.fillStyle = '#16191c';
+  ctx.beginPath();
+  ctx.arc(x0 + 5, -11.5, 1, 0, Math.PI * 2);
+  ctx.fill();
   ctx.fillStyle = '#16191c';
   ctx.fillRect(x0 + w - 12, -20.5, 4, 3.5);
   ctx.fillRect(x0 + w - 12, 17, 4, 3.5);
@@ -2974,23 +3412,25 @@ function lockers(ctx, x0, x1) {
   ctx.stroke();
 }
 
-// Rear chevrons: red and fluorescent yellow, the way real appliances are marked.
-function chevrons(ctx, x, w = 5) {
-  ctx.save();
+// The rear step: a strip of tread plate across the tail with the lamp clusters
+// at its corners (the chevrons are on the vertical face, out of sight from above).
+function rearStep(ctx, x, w = 5) {
+  ctx.fillStyle = '#7f858a';
+  ctx.fillRect(x, -16, w, 32);
+  ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+  ctx.lineWidth = 0.6;
   ctx.beginPath();
-  ctx.rect(x, -17, w, 34);
-  ctx.clip();
-  for (let i = -3; i < 7; i++) {
-    ctx.fillStyle = i % 2 ? '#d62d24' : '#e8e04a';
-    ctx.beginPath();
-    ctx.moveTo(x, -17 + i * 6);
-    ctx.lineTo(x + w, -17 + i * 6 + w);
-    ctx.lineTo(x + w, -17 + i * 6 + w + 6);
-    ctx.lineTo(x, -17 + i * 6 + 6);
-    ctx.closePath();
-    ctx.fill();
-  }
-  ctx.restore();
+  for (let yy = -15; yy < 16; yy += 2.5) { ctx.moveTo(x, yy); ctx.lineTo(x + w, yy + 1.2); }
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(0,0,0,0.4)';
+  ctx.lineWidth = 0.6;
+  ctx.strokeRect(x, -16, w, 32);
+  ctx.fillStyle = '#b3241c';
+  ctx.fillRect(x - 0.6, -16, 1.6, 4);
+  ctx.fillRect(x - 0.6, 12, 1.6, 4);
+  ctx.fillStyle = '#d9a52a';
+  ctx.fillRect(x - 0.6, -11.5, 1.6, 2);
+  ctx.fillRect(x - 0.6, 9.5, 1.6, 2);
 }
 
 // Coiled hose in a hose bed.
@@ -3040,15 +3480,20 @@ function drawEngine(ctx, e, now) {
 
   // Ground shadow, thrown by the sun and rotated with the vehicle.
   ctx.save();
-  ctx.translate(currentSun.dx * 9 + 3, currentSun.dy * 9 + 4);
+  ctx.translate(currentSun.dx * 8 + 1, currentSun.dy * 8 + 2);
   ctx.rotate(e.angle);
-  ctx.fillStyle = `rgba(10,14,18,${0.3 * (1 - currentDark * 0.85)})`;
-  rr(ctx, -42, -19, 84, 38, 7);
+  ctx.fillStyle = `rgba(6,8,10,${0.15 * (1 - currentDark * 0.85)})`;
+  rr(ctx, -45, -19, 90, 38, 9);
+  ctx.fill();
+  ctx.fillStyle = `rgba(6,8,10,${0.3 * (1 - currentDark * 0.85)})`;
+  rr(ctx, -42, -16, 84, 32, 5);
   ctx.fill();
   ctx.restore();
 
   ctx.rotate(e.angle);
-  tyres(ctx, [-27, 20], 18.5);
+  // Real appliances are long and narrow: draw the art at five-sixths width.
+  ctx.scale(1, BODY_SLIM);
+  tyres(ctx, [-27, 20], 16.8);
 
   // Small and large relatives of the ambulance reuse its art, scaled.
   if (type === 'medcar') ctx.scale(0.62, 0.78);
@@ -3057,14 +3502,23 @@ function drawEngine(ctx, e, now) {
 
   if (type === 'ambulance' || type === 'medcar' || type === 'ambubus') {
     paint(ctx, -41, -17, 59, 34, 5, '#f4f3ee');
-    ctx.fillStyle = '#d3382f';
-    ctx.fillRect(-41, -17, 59, 3.5);
-    ctx.fillRect(-41, 13.5, 59, 3.5);
-    ctx.fillStyle = '#e5de45';
+    ctx.fillStyle = '#c23229';
+    ctx.fillRect(-41, -17, 59, 1.8);
+    ctx.fillRect(-41, 15.2, 59, 1.8);
+    ctx.fillStyle = '#d8d24a';
     for (let x = -41; x < 18; x += 8) {
-      ctx.fillRect(x, -17, 4, 3.5);
-      ctx.fillRect(x + 4, 13.5, 4, 3.5);
+      ctx.fillRect(x, -17, 4, 1.8);
+      ctx.fillRect(x + 4, 15.2, 4, 1.8);
     }
+    // Roof vents and the box's ribbed roof skin.
+    ctx.strokeStyle = 'rgba(0,0,0,0.07)';
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    for (let x = -36; x < 14; x += 6) { ctx.moveTo(x, -14); ctx.lineTo(x, 14); }
+    ctx.stroke();
+    ctx.fillStyle = '#9da3a6';
+    rr(ctx, 4, -11, 7, 6, 1.5);
+    ctx.fill();
     ctx.fillStyle = '#d3382f';
     ctx.fillRect(-18, -8, 7, 16);
     ctx.fillRect(-22.5, -3.5, 16, 7);
@@ -3079,7 +3533,7 @@ function drawEngine(ctx, e, now) {
     ctx.stroke();
     cab(ctx, 15, 27, '#eceae3');
     lightBar(ctx, 21, busy, now);
-    chevrons(ctx, -41, 3);
+    rearStep(ctx, -41, 3);
   } else if (type === 'rapid') {
     // A small red utility car: tool lockers behind the cab, a hose reel on the roof.
     paint(ctx, -41, -17, 58, 34, 7, '#c4281f');
@@ -3100,7 +3554,7 @@ function drawEngine(ctx, e, now) {
     }
     cab(ctx, 15, 27, '#a8221b');
     lightBar(ctx, 21, busy, now);
-    chevrons(ctx, -41, 3);
+    rearStep(ctx, -41, 3);
   } else if (type === 'rescue') {
     paint(ctx, -41, -17, 58, 34, 5, '#e9e4d8');
     ctx.fillStyle = '#d97a2b';
@@ -3116,7 +3570,7 @@ function drawEngine(ctx, e, now) {
     lockers(ctx, -40, 12);
     cab(ctx, 15, 27, '#b7601c');
     lightBar(ctx, 21, busy, now);
-    chevrons(ctx, -41, 4);
+    rearStep(ctx, -41, 4);
   } else if (type === 'tanker') {
     const tg = ctx.createLinearGradient(0, -16, 0, 16);
     tg.addColorStop(0, '#8e969d');
@@ -3146,7 +3600,7 @@ function drawEngine(ctx, e, now) {
     ctx.fillRect(-42, -7, 4, 14);
     cab(ctx, 16, 25, '#a8281f');
     lightBar(ctx, 22, busy, now);
-    chevrons(ctx, -42, 3);
+    rearStep(ctx, -42, 3);
   } else {
     // Pump / ladder: red body, aluminium walkway, hose bed, lockers, ladders.
     paint(ctx, -42, -19, 58, 38, 5, '#b3241d');
@@ -3158,7 +3612,7 @@ function drawEngine(ctx, e, now) {
     hoseBed(ctx, -35, -8, 22, 16);
     cab(ctx, 15, 26, '#9d211b');
     lightBar(ctx, 21, busy, now);
-    chevrons(ctx, -42, 4);
+    rearStep(ctx, -42, 4);
 
     if (type === 'ladder') {
       ctx.fillStyle = '#5b6168';
@@ -3211,8 +3665,9 @@ function drawEngine(ctx, e, now) {
   }
 
   // Unit number on the roof.
-  ctx.fillStyle = 'rgba(255,255,255,0.9)';
-  ctx.font = 'bold 9px "Segoe UI", system-ui, sans-serif';
+  ctx.scale(1, 1 / BODY_SLIM);
+  ctx.fillStyle = 'rgba(244,244,238,0.82)';
+  ctx.font = 'bold 8px "Segoe UI", system-ui, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(label, type === 'ladder' || type === 'tanker' ? -30 : -22, type === 'ladder' ? 13 : 0);
@@ -3292,10 +3747,11 @@ function drawCrew(ctx, c, now) {
 
   ctx.fillStyle = `rgba(10,14,18,${0.3 * (1 - currentDark * 0.85)})`;
   ctx.beginPath();
-  ctx.ellipse(currentSun.dx * 4 + 1, currentSun.dy * 4 + 3, 8.5, 5, 0, 0, Math.PI * 2);
+  ctx.ellipse(currentSun.dx * 5 + 0.5, currentSun.dy * 5 + 1.5, 6.5, 4, Math.atan2(currentSun.dy, currentSun.dx), 0, Math.PI * 2);
   ctx.fill();
 
   ctx.rotate(c.angle + Math.PI / 2);
+  ctx.scale(0.8, 0.8);
 
   // A person seen from above: arms swinging, shoulders, kit on the back and a
   // helmet. Firefighters in tan turnout gear, paramedics in white and green,
@@ -3460,13 +3916,15 @@ function drawBlockade(ctx, b, now, z) {
       ctx.save();
       ctx.translate(b.x + (i === 0 ? -14 : 16), b.y + (i === 0 ? 6 : -8));
       ctx.rotate(0.5 + i * 1.7 + hash(seed) * 0.4);
-      ctx.fillStyle = 'rgba(10,14,18,0.3)';
-      ctx.fillRect(-19, -6, 40, 16);
-      ctx.fillStyle = i === 0 ? '#8f2f27' : '#3d4d63';
-      rr(ctx, -20, -8, 40, 16, 4);
+      ctx.fillStyle = 'rgba(6,8,10,0.3)';
+      rr(ctx, -19, -6, 40, 17, 4);
       ctx.fill();
-      ctx.fillStyle = 'rgba(0,0,0,0.3)';
-      ctx.fillRect(-8, -6, 14, 12);
+      ctx.drawImage(carSprite(i === 0 ? '#8f2f27' : '#3d4d63', i), -26, -14, 52, 28);
+      ctx.fillStyle = 'rgba(14,12,10,0.45)'; // the crumpled, scorched front
+      ctx.beginPath();
+      ctx.moveTo(7, -8); ctx.lineTo(20, -8); ctx.lineTo(20, 8); ctx.lineTo(10, 8); ctx.lineTo(13, 1);
+      ctx.closePath();
+      ctx.fill();
       ctx.restore();
     }
   }
@@ -3508,8 +3966,9 @@ function drawCivilian(ctx, person, now) {
 
   ctx.fillStyle = `rgba(10,14,18,${0.26 * (1 - currentDark * 0.85)})`;
   ctx.beginPath();
-  ctx.ellipse(currentSun.dx * 3 + 1, currentSun.dy * 3 + 3, 6, 3.4, 0, 0, Math.PI * 2);
+  ctx.ellipse(currentSun.dx * 4 + 0.5, currentSun.dy * 4 + 1.5, 5.4, 3, Math.atan2(currentSun.dy, currentSun.dx), 0, Math.PI * 2);
   ctx.fill();
+  ctx.scale(0.85, 0.85);
 
   const stride = Math.sin(now * 10 + person.phase) * 2;
   ctx.fillStyle = shade(person.color, -0.4); // arms
