@@ -126,10 +126,12 @@ export function requestEmergencyFunding(state) {
   }
   const b = CONFIG.career.bankruptcy;
   const fin = state.campaign.finance;
-  earn(state, b.emergencyAmount, 'emergency');
+  // Enough to clear the debt and leave a cushion, so one bailout is never swallowed by the next hour's bills.
+  const amount = Math.min(b.emergencyMax, Math.max(b.emergencyAmount, Math.ceil((-state.credits + b.cushion) / 500) * 500));
+  earn(state, amount, 'emergency');
   state.campaign.reputation = Math.max(0, state.campaign.reputation - b.repPenalty);
   fin.lastEmergencyAt = state.campaign.shifts;
-  addEvent(state, `Emergency funding — the city pays ${money(b.emergencyAmount)}, reputation −${b.repPenalty}`, 'warn');
+  addEvent(state, `Emergency funding — the city pays ${money(amount)}, reputation −${b.repPenalty}`, 'warn');
   return true;
 }
 
@@ -137,8 +139,9 @@ export function requestEmergencyFunding(state) {
 
 export const BONUS = { S: 3000, A: 1800, B: 900, C: 300, D: 0 };
 
-export function payShiftBonus(state, grade) {
-  const amount = BONUS[grade] ?? 0;
+/** The performance bonus for a grade, scaled by how much of the shift was played. */
+export function payShiftBonus(state, grade, share = 1) {
+  const amount = Math.round(((BONUS[grade] ?? 0) * Math.max(0, Math.min(1, share))) / 50) * 50;
   if (amount > 0) {
     earn(state, amount, 'bonus');
     addEvent(state, `Performance bonus for a grade ${grade} shift — ${money(amount)}`, 'good');

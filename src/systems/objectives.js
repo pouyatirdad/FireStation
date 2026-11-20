@@ -72,7 +72,8 @@ export function progressOf(state, def) {
 }
 
 export function isDone(state, id) {
-  return Boolean(state.campaign.objectives.completed[id]);
+  // The value is the shift it was completed in, which is 0 for the first one: test for the key, not the value.
+  return Object.hasOwn(state.campaign.objectives.completed, id);
 }
 
 /** Every objective for the screen: group, progress and whether it is done. */

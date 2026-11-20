@@ -22,8 +22,6 @@ import { SCENARIOS_START } from '../data/startScenarios.js';
 
 export const CAMPAIGN_VERSION = 1;
 
-export const levelDef = (id) => CONFIG.career.levels.find((l) => l.id === id) ?? CONFIG.career.levels[0];
-
 export function createCampaign({ name = 'Harbor City Fire Department', scenario = 'harbor', seed = null } = {}) {
   const start = SCENARIOS_START[scenario] ?? SCENARIOS_START.harbor;
   const useSeed = seed ?? start.seed;
@@ -66,7 +64,7 @@ export function seedRoster(state) {
 export function levelProgress(campaign) {
   const next = CONFIG.career.levels.find((l) => l.id === campaign.level + 1) ?? null;
   return {
-    current: levelDef(campaign.level),
+    current: CONFIG.career.levels.find((l) => l.id === campaign.level) ?? CONFIG.career.levels[0],
     next,
     repNeeded: next ? next.rep : null,
     shiftsNeeded: next ? next.shifts : null,
@@ -163,10 +161,22 @@ export function readiness(state) {
  * reputation, add the shift to the career totals, give everyone experience and
  * check for promotion. Safe to call twice; the second call returns the first result.
  */
+/** Why the shift cannot be filed yet, or null. A shift must run at least half its length. */
+export function shiftBlock(state) {
+  const needed = CONFIG.career.shiftLength * CONFIG.career.minShiftShare;
+  if (state.shiftDue || state.time >= needed) return null;
+  return `File the shift after ${Math.ceil((needed - state.time) / 60)} more minute(s): a shift must run at least half its length`;
+}
+
 export function endShift(state) {
   if (!isCareer(state)) return null;
   if (state.shiftSummary) return state.shiftSummary;
   const c = state.campaign;
+  const block = shiftBlock(state);
+  if (block) {
+    addEvent(state, block, 'warn');
+    return null;
+  }
   const report = buildReport(state);
   const s = shiftDelta(state);
 
@@ -198,7 +208,7 @@ export function endShift(state) {
   c.reputation = clamp(c.reputation * 0.7 + target * 0.3, 0, 100);
 
   c.shifts += 1;
-  payShiftBonus(state, report.rating.grade);
+  payShiftBonus(state, report.rating.grade, state.time / CONFIG.career.shiftLength);
   closeShiftForPersonnel(state);
   updateObjectives(state, 0, true);
   const leveled = checkLevelUp(state);

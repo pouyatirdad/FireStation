@@ -4,7 +4,7 @@
 // code can ask "how fast does this crew work?" without depending on career mode.
 // In Quick Response there are no personnel records and every answer is 1.
 
-import { CONFIG, TILE } from '../core/config.js';
+import { CONFIG } from '../core/config.js';
 import { clamp } from '../core/math.js';
 
 export const isCareer = (state) => state.mode === 'career' && Boolean(state.campaign);
@@ -93,4 +93,3 @@ export function hazmatProtected(state, crew, engine) {
   return Boolean(person?.certs?.includes('hazmat'));
 }
 
-export const tilesToPx = (t) => t * TILE;

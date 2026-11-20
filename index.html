@@ -2046,6 +2046,18 @@ p.form-error { padding-left: 10px; }
 }
 
 
+.start-status { margin: 10px 0 0; padding: 8px 12px; border-radius: 5px; background: rgba(212, 80, 76, 0.16); color: #ffb0a8; font-size: 12.5px; line-height: 1.5; }
+.recover { margin-top: 10px; font-size: 12px; }
+.recover summary { cursor: pointer; color: var(--muted); }
+.recover[open] summary { margin-bottom: 6px; }
+
+/* The mode cards must shrink on a phone: a long option in the starting-point list may not widen them. */
+.mode { min-width: 0; }
+.mode select, .mode input { width: 100%; max-width: 100%; text-overflow: ellipsis; }
+@media (max-width: 900px), (max-height: 520px) {
+  .modes { grid-template-columns: minmax(0, 1fr); }
+}
+
 </style>
 <!-- build:css:end -->
 </head>
@@ -2205,18 +2217,6 @@ p.form-error { padding-left: 10px; }
           keeps catching fire. Answer the calls, send ambulances and divers, and spend what
           you earn on more apparatus, boats and aircraft.
         </p>
-        <div class="menu__grid">
-          <div><b>Respond</b><span><span class="only-mouse">Select a vehicle (1–8), right-click a fire. It finds the road route.</span><span class="only-touch">Tap a vehicle, then press and hold on a fire (or use Order). It finds the road route.</span></span></div>
-          <div><b>Deploy</b><span>The crew ride along. On scene they dismount and attack.</span></div>
-          <div><b>Tank</b><span><span class="only-mouse">The tank runs dry. Park beside a hydrant and press G to connect, or refill at the station.</span><span class="only-touch">The tank runs dry. Park beside a hydrant and tap Connect hydrant, or refill at the station.</span></span></div>
-          <div><b>Hose</b><span>Water only flows within the vehicle's hose range (12–16 tiles).</span></div>
-          <div><b>Rescue</b><span>People still inside show on the building. A crew at the building brings them out before it comes down.</span></div>
-          <div><b>Medical</b><span><span class="only-mouse">People hurt lie on the street on a clock. Send an ambulance; critical cases ride to a hospital (K). Restock kits at a pharmacy (P).</span><span class="only-touch">People hurt lie on the street on a clock. Send an ambulance; critical cases ride to a hospital. Restock kits at a pharmacy. Both are buttons on the ambulance's card.</span></span></div>
-          <div><b>Roads</b><span>Wrecks and debris block streets and traffic queues behind them. Send a crew to clear them; rescue units are fastest.</span></div>
-          <div><b>Wind</b><span>Fire runs downwind. Check the wind in the top bar before you choose where to hold the line.</span></div>
-          <div><b>Water</b><span>People fall in the river and the harbour. Divers by road or boat bring them out; fireboats and air tankers fight fire from the water.</span></div>
-          <div><b>Apparatus</b><span>Knockdowns and rescues pay credits. Press B to buy pumps, ladders, tankers, rescue units or ambulances — and sell them back.</span></div>
-        </div>
         <div class="modes">
           <div class="mode">
             <h3>Quick Response</h3>
@@ -2238,6 +2238,24 @@ p.form-error { padding-left: 10px; }
             <button type="button" id="btn-play" class="btn btn--primary btn--wide">Challenges &amp; scenarios</button>
           </div>
         </div>
+        <div class="menu__grid">
+          <div><b>Respond</b><span><span class="only-mouse">Select a vehicle (1–8), right-click a fire. It finds the road route.</span><span class="only-touch">Tap a vehicle, then press and hold on a fire (or use Order). It finds the road route.</span></span></div>
+          <div><b>Deploy</b><span>The crew ride along. On scene they dismount and attack.</span></div>
+          <div><b>Tank</b><span><span class="only-mouse">The tank runs dry. Park beside a hydrant and press G to connect, or refill at the station.</span><span class="only-touch">The tank runs dry. Park beside a hydrant and tap Connect hydrant, or refill at the station.</span></span></div>
+          <div><b>Hose</b><span>Water only flows within the vehicle's hose range (12–16 tiles).</span></div>
+          <div><b>Rescue</b><span>People still inside show on the building. A crew at the building brings them out before it comes down.</span></div>
+          <div><b>Medical</b><span><span class="only-mouse">People hurt lie on the street on a clock. Send an ambulance; critical cases ride to a hospital (K). Restock kits at a pharmacy (P).</span><span class="only-touch">People hurt lie on the street on a clock. Send an ambulance; critical cases ride to a hospital. Restock kits at a pharmacy. Both are buttons on the ambulance's card.</span></span></div>
+          <div><b>Roads</b><span>Wrecks and debris block streets and traffic queues behind them. Send a crew to clear them; rescue units are fastest.</span></div>
+          <div><b>Wind</b><span>Fire runs downwind. Check the wind in the top bar before you choose where to hold the line.</span></div>
+          <div><b>Water</b><span>People fall in the river and the harbour. Divers by road or boat bring them out; fireboats and air tankers fight fire from the water.</span></div>
+          <div><b>Apparatus</b><span>Knockdowns and rescues pay credits. Press B to buy pumps, ladders, tankers, rescue units or ambulances — and sell them back.</span></div>
+        </div>
+        <details class="recover" id="recover" hidden>
+          <summary>Recover an earlier save</summary>
+          <p class="menu__hint">Backups the game keeps when it upgrades, replaces or cannot read a save. Restoring one keeps the save it replaces.</p>
+          <div id="recover-list"></div>
+        </details>
+        <p class="start-status" id="start-status" role="status" hidden></p>
         <div class="menu__cta">
           <p class="menu__hint">
             <span class="only-mouse">Drag to pan · Scroll to zoom · Space pauses · F1 controls</span>
@@ -2625,9 +2643,10 @@ const CONFIG = {
       { id: 3, name: 'City Department', rep: 45, shifts: 3, vehicles: ['rescue', 'ambubus'], stations: 3, upgradeCap: 3 },
       { id: 4, name: 'Regional Department', rep: 60, shifts: 5, vehicles: ['rescueboat', 'fireboat', 'hazmat'], stations: 5, upgradeCap: 4 },
       { id: 5, name: 'Advanced Department', rep: 75, shifts: 8, vehicles: ['helicopter'], stations: 7, upgradeCap: 5 },
-      { id: 6, name: 'National Emergency Service', rep: 90, shifts: 12, vehicles: ['airtanker'], stations: 99, upgradeCap: 5 },
+      { id: 6, name: 'National Emergency Service', rep: 85, shifts: 12, vehicles: ['airtanker'], stations: 99, upgradeCap: 5 },
     ],
     shiftLength: 960, // seconds of play in a career shift (a game day is 16 minutes)
+    minShiftShare: 0.5, // a shift can be filed once this share of it has been played (no instant-file bonus farming)
     reputation: {
       start: 20,
       weights: { response: 0.25, rescue: 0.2, outcome: 0.2, safety: 0.15, finance: 0.1, readiness: 0.1 },
@@ -2639,7 +2658,9 @@ const CONFIG = {
     maintenance: { station: 30, vehicle: 8, upgradeLevel: 6 },
     funding: { baseMonthly: 4000, perRep: 60 }, // government funding paid at the start of each month
     monthDays: 4, // game days in a "month" for the finance summaries
-    bankruptcy: { warnAt: 1500, emergencyAt: -4000, emergencyAmount: 12000, repPenalty: 8, cooldownDays: 4 },
+    // Emergency funding covers the debt plus a cushion (at least `emergencyAmount`, at most `emergencyMax`), costs
+    // reputation and can be asked for again only after `cooldownDays` shifts.
+    bankruptcy: { warnAt: 1500, emergencyAt: -4000, emergencyAmount: 12000, emergencyMax: 40000, cushion: 4000, repPenalty: 8, cooldownDays: 4 },
     objectiveRefresh: 1, // game days between daily objectives
   },
 
@@ -3136,7 +3157,7 @@ const CHALLENGES = [
       { at: 150, kind: 'building-fire', location: { kind: 'type', type: 'office' }, intensity: 0.3, trapped: 2, injured: 1 },
     ],
     timeLimit: 600,
-    success: { resolveAll: true },
+    success: { resolveAll: true, maxCasualties: 4 },
     failure: { maxLost: 3 },
   },
   {
@@ -3156,10 +3177,11 @@ const CHALLENGES = [
     rules: { random: false },
     incidents: [
       { at: 8, kind: 'pileup', location: { kind: 'auto' }, intensity: 0.5, trapped: 0, injured: 0 },
-      { at: 90, kind: 'crash', location: { kind: 'auto' }, intensity: 0.4, trapped: 0, injured: 0 },
+      { at: 70, kind: 'crash', location: { kind: 'auto' }, intensity: 0.4, trapped: 0, injured: 0 },
+      { at: 130, kind: 'scene', scene: 'tanker', location: { kind: 'auto' }, intensity: 0.5, trapped: 0, injured: 0 },
     ],
-    timeLimit: 480,
-    success: { resolveAll: true },
+    timeLimit: 420,
+    success: { resolveAll: true, maxCasualties: 2 },
     failure: { maxCasualties: 4 },
   },
   {
@@ -3169,7 +3191,7 @@ const CHALLENGES = [
     rules: { random: false },
     incidents: [{ at: 5, kind: 'disaster', disaster: 'siege', location: { kind: 'auto' }, intensity: 0.5, trapped: 0, injured: 0 }],
     timeLimit: 720,
-    success: { resolveAll: true },
+    success: { resolveAll: true, maxCasualties: 2 },
     failure: { maxLost: 6 },
   },
   {
@@ -3188,12 +3210,15 @@ const CHALLENGES = [
     start: { clock: 14 * 60, credits: 2500, fleet: [d('ambulance'), d('ambulance'), d('ambulance'), d('ambubus'), d('rescue'), d('medcar'), d('medcar')] },
     rules: { random: false },
     incidents: [
-      { at: 8, kind: 'collapse', location: { kind: 'type', type: 'apartment' }, intensity: 0.2, trapped: 5, injured: 6 },
-      { at: 70, kind: 'medical', location: { kind: 'auto' }, intensity: 0.8, trapped: 0, injured: 3 },
+      { at: 8, kind: 'collapse', location: { kind: 'type', type: 'apartment' }, intensity: 0.2, trapped: 6, injured: 8 },
+      { at: 50, kind: 'medical', location: { kind: 'auto' }, intensity: 0.8, trapped: 0, injured: 5 },
+      { at: 110, kind: 'collapse', location: { kind: 'type', type: 'house' }, intensity: 0.2, trapped: 4, injured: 4 },
+      { at: 170, kind: 'collapse', location: { kind: 'type', type: 'office' }, intensity: 0.2, trapped: 5, injured: 6 },
+      { at: 230, kind: 'medical', location: { kind: 'auto' }, intensity: 1, trapped: 0, injured: 6 },
     ],
     timeLimit: 600,
-    success: { resolveAll: true },
-    failure: { maxCasualties: 5 },
+    success: { resolveAll: true, maxCasualties: 3 },
+    failure: { maxCasualties: 6 },
   },
   {
     id: 'industrial', name: 'Industrial Emergency', version: 1, builtin: true,
@@ -3204,9 +3229,10 @@ const CHALLENGES = [
       { at: 8, kind: 'scene', scene: 'dust', location: { kind: 'auto' }, intensity: 0.5, trapped: 0, injured: 0 },
       { at: 40, kind: 'scene', scene: 'toxicleak', location: { kind: 'auto' }, intensity: 0.5, trapped: 0, injured: 0 },
       { at: 90, kind: 'scene', scene: 'tankvent', location: { kind: 'auto' }, intensity: 0.5, trapped: 0, injured: 0 },
+      { at: 140, kind: 'scene', scene: 'ammonia', location: { kind: 'auto' }, intensity: 0.5, trapped: 0, injured: 0 },
     ],
     timeLimit: 600,
-    success: { resolveAll: true },
+    success: { resolveAll: true, maxCasualties: 3 },
     failure: { maxCasualties: 5 },
   },
 ];
@@ -3296,14 +3322,14 @@ function validateScenario(input, city = null) {
       if (!loc.buildingId) return errors.push(`${tag}: choose a building`);
       if (city && !city.buildings.some((b) => b.id === loc.buildingId)) return errors.push(`${tag}: that building does not exist`);
     }
-    if (it.kind === 'scene' && !SCENES.some((s) => s.id === it.scene && !s.site)) return errors.push(`${tag}: unknown scene`);
+    if (it.kind === 'scene' && !SCENES.some((s) => s.id === it.scene)) return errors.push(`${tag}: unknown scene`);
     if (it.kind === 'disaster' && !DISASTER_KINDS.includes(it.disaster)) return errors.push(`${tag}: unknown disaster`);
     incidents.push({
       at: it.at, kind: it.kind, location: { ...loc }, intensity, trapped, injured,
       ...(it.kind === 'scene' ? { scene: it.scene } : {}), ...(it.kind === 'disaster' ? { disaster: it.disaster } : {}),
     });
   });
-  if (incidents.length === 0 && !rules.random) errors.push('Add an incident, or turn on random calls');
+  if (list.length === 0 && !rules.random) errors.push('Add an incident, or turn on random calls');
 
   const s = input.success ?? {};
   const success = { resolveAll: Boolean(s.resolveAll), surviveTime: Boolean(s.surviveTime) };
@@ -3314,7 +3340,7 @@ function validateScenario(input, city = null) {
   }
   if (!success.resolveAll && !success.surviveTime) errors.push('Choose a success condition: resolve everything, or survive the time limit');
   if (success.surviveTime && timeLimit == null) errors.push('Survive the time limit needs a time limit');
-  if (success.resolveAll && incidents.length === 0) errors.push('Resolve everything needs at least one scripted incident');
+  if (success.resolveAll && list.length === 0) errors.push('Resolve everything needs at least one scripted incident');
 
   const f = input.failure ?? {};
   const failure = {};
@@ -7646,7 +7672,7 @@ return { findVictim, spawnVictim, restoreVictims, nearestVictim, rescueVictim, u
 
 // ---- src/systems/modifiers.js ----
 __m["src/systems/modifiers.js"] = (function () {
-const { CONFIG, TILE } = __m["src/core/config.js"];
+const { CONFIG } = __m["src/core/config.js"];
 const { clamp } = __m["src/core/math.js"];
 // How people, stations and support agencies change what the simulation does.
 //
@@ -7743,9 +7769,8 @@ function hazmatProtected(state, crew, engine) {
   return Boolean(person?.certs?.includes('hazmat'));
 }
 
-const tilesToPx = (t) => t * TILE;
 
-return { isCareer, personOf, fatigueFactor, skillBonus, workRate, upgradeLevel, stationOfEngine, supportAt, speedMod, clearRate, hazmatProtected, tilesToPx };
+return { isCareer, personOf, fatigueFactor, skillBonus, workRate, upgradeLevel, stationOfEngine, supportAt, speedMod, clearRate, hazmatProtected };
 })();
 
 // ---- src/systems/units.js ----
@@ -11674,7 +11699,9 @@ function buildReport(state) {
     property: saved + destroyed === 0 ? 0.8 : saved / (saved + destroyed),
     finance: net >= 0 ? 1 : clamp(1 + net / 6000, 0, 1),
   };
-  const score = scoreShift(parts);
+  // A shift with nothing to do shows nothing about the department: it cannot earn a top grade.
+  const quiet = resolved + failed + open === 0;
+  const score = quiet ? Math.min(scoreShift(parts), 70) : scoreShift(parts);
 
   const vehicles = Object.values(report.vehicles).map((v) => ({
     ...v, avgResponse: v.responses ? v.responseSum / v.responses : null,
@@ -11712,11 +11739,8 @@ return { createReport, restoreReport, observe, GRADES, gradeOf, scoreShift, buil
 
 // ---- src/systems/careerStats.js ----
 __m["src/systems/careerStats.js"] = (function () {
-const { CONFIG } = __m["src/core/config.js"];
 // Career totals: what the department has done over all its shifts, including the
 // shift in progress. Objectives and reputation read this.
-
-
 
 const SPECIAL = ['rescue', 'hazmat', 'helicopter', 'airtanker', 'fireboat', 'rescueboat', 'ambubus'];
 
@@ -11776,12 +11800,306 @@ function liveTotals(state) {
   };
 }
 
-const personnelTotals = (state) => ({
-  roster: state.campaign.personnel.length,
-  maxRoster: CONFIG.personnel.maxRoster,
-});
 
-return { emptyTotals, shiftDelta, liveTotals, personnelTotals };
+return { emptyTotals, shiftDelta, liveTotals };
+})();
+
+// ---- src/systems/stations.js ----
+__m["src/systems/stations.js"] = (function () {
+const { CONFIG, TILE } = __m["src/core/config.js"];
+const { addEvent } = __m["src/systems/events.js"];
+const { spend, money } = __m["src/systems/economy.js"];
+const { on } = __m["src/systems/hooks.js"];
+const { isCareer, upgradeLevel } = __m["src/systems/modifiers.js"];
+const { ownsStation } = __m["src/systems/units.js"];
+const { districtName } = __m["src/systems/places.js"];
+// Stations as facilities: upgrades with real effects, department-level gating,
+// coverage of the city's districts and a comparison between stations.
+//
+//   garage      more bays          (units.js `stationCapacity`)
+//   training    more trainees, faster courses   (personnel.js)
+//   medical     faster recovery from fatigue and injury   (personnel.js)
+//   workshop    cheaper vehicle maintenance     (finance.js)
+//   comms       responders drive faster          (modifiers.js `speedMod`)
+//   storage     more tools in every vehicle locker  (applyStationEffects below)
+//   tower       forest fires start smaller within range (the 'wildfire:start' hook)
+
+
+
+
+
+
+
+
+
+const UPGRADE_KEYS = ['garage', 'training', 'medical', 'workshop', 'comms', 'storage', 'tower'];
+
+const levelInfo = (campaign) => CONFIG.career.levels.find((l) => l.id === campaign.level) ?? CONFIG.career.levels[0];
+
+function stationRecord(state, index) {
+  const stations = state.campaign.stations;
+  if (!stations[index]) stations[index] = { level: 1, upgrades: {}, budget: 0, spentMonth: 0 };
+  return stations[index];
+}
+
+const stationLevel = (state, index) => {
+  const r = state.campaign.stations[index];
+  if (!r) return 1;
+  return 1 + Object.values(r.upgrades ?? {}).reduce((a, b) => a + b, 0);
+};
+
+const upgradeCost = (key, nextLevel) => CONFIG.upgrades[key].cost * nextLevel;
+
+/** Why an upgrade cannot be bought, or null if it can. */
+function upgradeBlock(state, station, key) {
+  const def = CONFIG.upgrades[key];
+  if (!def || !UPGRADE_KEYS.includes(key)) return 'Unknown upgrade';
+  if (!ownsStation(state, station)) return 'You do not own that station';
+  if (state.city.stations[station]?.sea) return 'Not available at the dock';
+  const level = upgradeLevel(state, station, key);
+  if (level >= def.max) return 'Fully upgraded';
+  const cap = levelInfo(state.campaign).upgradeCap;
+  if (level >= cap) return `Needs a higher department level (cap ${cap})`;
+  const cost = upgradeCost(key, level + 1);
+  if (state.credits < cost) return `Needs ${money(cost)}`;
+  return stationBudgetBlock(state, station, cost);
+}
+
+function buyUpgrade(state, station, key) {
+  if (!isCareer(state)) return false;
+  const block = upgradeBlock(state, station, key);
+  if (block) {
+    addEvent(state, `${CONFIG.upgrades[key]?.label ?? 'Upgrade'}: ${block}`, 'warn');
+    return false;
+  }
+  const level = upgradeLevel(state, station, key) + 1;
+  spend(state, upgradeCost(key, level), 'upgrade');
+  chargeStation(state, station, upgradeCost(key, level));
+  const rec = stationRecord(state, station);
+  rec.upgrades[key] = level;
+  rec.level = stationLevel(state, station);
+  applyStationEffects(state);
+  addEvent(state, `${state.city.stations[station].name}: ${CONFIG.upgrades[key].label} level ${level}`, 'good');
+  return true;
+}
+
+/** Locker space: each storage level adds one of every tool a vehicle already carries. */
+function applyStationEffects(state) {
+  if (!isCareer(state)) return;
+  for (const e of state.engines) {
+    const base = e.base?.tools;
+    if (!base) continue;
+    const i = state.city.bays[e.bayIndex]?.station ?? 0;
+    const extra = CONFIG.upgrades.storage.per * upgradeLevel(state, i, 'storage');
+    e.spec.tools = Object.fromEntries(Object.entries(base).map(([k, n]) => [k, n + extra]));
+  }
+}
+
+// ----------------------------------------------------------------- gating ---
+
+function vehicleUnlocked(state, type) {
+  if (!isCareer(state)) return true;
+  const level = state.campaign.level;
+  return CONFIG.career.levels.some((l) => l.id <= level && l.vehicles.includes(type));
+}
+
+/** Why a vehicle type cannot be bought in a career yet, or null. */
+function vehicleBlock(state, type) {
+  if (vehicleUnlocked(state, type)) return null;
+  const need = CONFIG.career.levels.find((l) => l.vehicles.includes(type));
+  return need ? `Unlocked at ${need.name}` : 'Not available';
+}
+
+function stationsAllowed(state) {
+  return isCareer(state) ? levelInfo(state.campaign).stations : Infinity;
+}
+
+function ownedStationCount(state) {
+  return state.city.stations.filter((st, i) => !st.sea && state.ownedStations[i]).length;
+}
+
+/** Why another station cannot be opened yet, or null. */
+function stationBlock(state) {
+  if (!isCareer(state)) return null;
+  if (ownedStationCount(state) >= stationsAllowed(state)) return `Your department level allows ${stationsAllowed(state)} station${stationsAllowed(state) === 1 ? '' : 's'}`;
+  return null;
+}
+
+// --------------------------------------------------------------- coverage ---
+
+/** Travel seconds a typical engine needs for a straight run of `tiles`, allowing for street detours. */
+const secondsFor = (tiles) => (tiles * 1.35) / CONFIG.vehicles.engine.speed;
+
+/**
+ * For each named district: the nearest owned station and the expected travel
+ * time to it. Districts over `limit` seconds are underserved.
+ */
+function coverage(state, limit = 75) {
+  const owned = [];
+  state.city.stations.forEach((st, i) => {
+    if (!ownsStation(state, i) || st.sea) return;
+    owned.push({ i, st, x: st.building.x + st.building.w / 2, y: st.building.y + st.building.h / 2 });
+  });
+  const rows = [];
+  for (const d of state.city.districts ?? []) {
+    const cx = d.x / TILE;
+    const cy = d.y / TILE;
+    let best = null;
+    let bestD = Infinity;
+    for (const s of owned) {
+      const dd = Math.hypot(s.x - cx, s.y - cy);
+      if (dd < bestD) {
+        bestD = dd;
+        best = s;
+      }
+    }
+    if (!best) continue;
+    const seconds = secondsFor(bestD);
+    rows.push({ district: districtName(state, d.x, d.y) ?? d.name, station: best.st.name, tiles: bestD, seconds, underserved: seconds > limit });
+  }
+  rows.sort((a, b) => b.seconds - a.seconds);
+  let covered = 0;
+  for (const b of state.buildings) {
+    const bx = b.x + b.w / 2;
+    const by = b.y + b.h / 2;
+    if (owned.some((s) => secondsFor(Math.hypot(s.x - bx, s.y - by)) <= limit)) covered += 1;
+  }
+  return { rows, underserved: rows.filter((r) => r.underserved), share: state.buildings.length ? covered / state.buildings.length : 1 };
+}
+
+/** One row per owned station for the comparison table. */
+function compareStations(state) {
+  const report = state.report?.stations ?? {};
+  const fin = state.campaign?.finance;
+  const rows = [];
+  state.city.stations.forEach((st, i) => {
+    if (!state.ownedStations[i]) return;
+    const rec = state.campaign?.stations?.[i];
+    const r = report[i];
+    rows.push({
+      index: i,
+      name: st.name,
+      level: rec ? stationLevel(state, i) : 1,
+      vehicles: state.engines.filter((e) => state.city.bays[e.bayIndex]?.station === i).length,
+      staff: (state.campaign?.personnel ?? []).filter((p) => p.station === i && p.vehicleId).length,
+      incidents: r?.incidents ?? 0,
+      resolved: r?.resolved ?? 0,
+      avgResponse: r && r.responses ? r.responseSum / r.responses : null,
+      cost: fin?.stationCosts?.[i] ?? 0,
+      budget: rec?.budget ?? 0,
+      spentMonth: rec?.spentMonth ?? 0,
+    });
+  });
+  return rows;
+}
+
+const MAX_BUDGET = 1000000;
+
+/**
+ * Station budgets. Each station has a monthly allowance (0 means unlimited). What a
+ * station costs this month is tracked in `spentMonth`: its upkeep as it is charged,
+ * and what is bought for it (vehicles, upgrades, training). Mandatory upkeep is always
+ * paid, but a purchase that would take the station over its budget is refused.
+ */
+function setStationBudget(state, index, amount) {
+  const n = Math.floor(Number(amount));
+  if (!Number.isFinite(n) || n < 0 || n > MAX_BUDGET || !state.ownedStations[index]) return false;
+  const rec = stationRecord(state, index);
+  rec.budget = n;
+  rec.warned = false;
+  rec.warnedNear = false;
+  addEvent(state, n > 0 ? `${state.city.stations[index].name}: monthly budget set to ${money(n)}` : `${state.city.stations[index].name}: budget limit removed`, 'info');
+  if (n > 0 && (rec.spentMonth ?? 0) > n) {
+    rec.warned = true;
+    addEvent(state, `${state.city.stations[index].name} has already spent ${money(rec.spentMonth)} this month, over the new budget — purchases wait until next month`, 'warn');
+  }
+  return true;
+}
+
+/** Why spending `amount` for this station would break its budget, or null. */
+function stationBudgetBlock(state, station, amount) {
+  if (!isCareer(state)) return null;
+  const rec = state.campaign.stations[station];
+  if (!rec || !(rec.budget > 0)) return null;
+  const after = (rec.spentMonth ?? 0) + amount;
+  if (after <= rec.budget) return null;
+  return `Over ${state.city.stations[station]?.name ?? 'the station'}'s budget (${money(after)} of ${money(rec.budget)}) — raise it in Stations`;
+}
+
+/** Record money spent for a station this month, and warn as it nears and passes its budget. */
+function chargeStation(state, station, amount) {
+  if (!isCareer(state) || !(amount > 0)) return;
+  const rec = stationRecord(state, station);
+  rec.spentMonth = (rec.spentMonth ?? 0) + amount;
+  if (!(rec.budget > 0)) return;
+  const name = state.city.stations[station]?.name ?? 'The station';
+  if (rec.spentMonth > rec.budget && !rec.warned) {
+    rec.warned = true;
+    addEvent(state, `${name} is over its monthly budget (${money(rec.spentMonth)} of ${money(rec.budget)}) — only upkeep is paid until next month`, 'warn');
+  } else if (rec.spentMonth >= rec.budget * 0.8 && !rec.warnedNear && !rec.warned) {
+    rec.warnedNear = true;
+    addEvent(state, `${name} has used ${Math.round((rec.spentMonth / rec.budget) * 100)}% of its monthly budget`, 'warn');
+  }
+}
+
+/** A vehicle sold back reduces what the station has spent (never below nothing). */
+function refundStation(state, station, amount) {
+  if (!isCareer(state) || !(amount > 0)) return;
+  const rec = stationRecord(state, station);
+  rec.spentMonth = Math.max(0, (rec.spentMonth ?? 0) - amount);
+}
+
+/** Allocated against expected funding, and each station's use of its budget. */
+function budgetSummary(state) {
+  let allocated = 0;
+  const rows = [];
+  state.city.stations.forEach((st, i) => {
+    if (!state.ownedStations[i]) return;
+    const rec = state.campaign.stations[i];
+    const budget = rec?.budget ?? 0;
+    allocated += budget;
+    rows.push({ index: i, name: st.name, budget, spent: rec?.spentMonth ?? 0 });
+  });
+  return { allocated, rows };
+}
+
+// ------------------------------------------------------------------ hooks ---
+
+/** Wire the station effects that happen on events. Called once per game. */
+function wireStations(state) {
+  // A fire watch tower spots a forest fire early, so it starts smaller.
+  on(state, 'wildfire:start', (st, wf) => {
+    if (!isCareer(st)) return;
+    let best = null;
+    st.city.stations.forEach((station, i) => {
+      if (!ownsStation(st, i)) return;
+      const level = upgradeLevel(st, i, 'tower');
+      if (!level) return;
+      const b = station.building;
+      const d = Math.hypot((b.x + b.w / 2) * TILE - wf.x, (b.y + b.h / 2) * TILE - wf.y) / TILE;
+      if (d <= CONFIG.upgrades.towerRange && (!best || level > best.level)) best = { level, name: station.name };
+    });
+    if (!best) return;
+    const cut = 1 - CONFIG.upgrades.tower.per * best.level;
+    wf.radius *= cut;
+    wf.intensity = Math.max(0.2, wf.intensity - 0.08 * best.level);
+    addEvent(st, `${best.name}'s watch tower spotted the fire early — it is smaller than it would have been`, 'good');
+  });
+  // Station budgets: tally maintenance as it is charged, warn when over.
+  on(state, 'finance:hour', (st, data) => {
+    for (const [i, v] of Object.entries(data.perStation)) chargeStation(st, Number(i), v);
+  });
+  on(state, 'finance:month', (st) => {
+    for (const rec of Object.values(st.campaign.stations)) {
+      rec.spentMonth = 0;
+      rec.warned = false;
+      rec.warnedNear = false;
+    }
+  });
+}
+
+
+return { UPGRADE_KEYS, levelInfo, stationRecord, stationLevel, upgradeCost, upgradeBlock, buyUpgrade, applyStationEffects, vehicleUnlocked, vehicleBlock, stationsAllowed, ownedStationCount, stationBlock, coverage, compareStations, setStationBudget, stationBudgetBlock, chargeStation, refundStation, budgetSummary, wireStations };
 })();
 
 // ---- src/systems/personnel.js ----
@@ -11793,12 +12111,14 @@ const { addEvent } = __m["src/systems/events.js"];
 const { spend } = __m["src/systems/economy.js"];
 const { isCareer, personOf, stationOfEngine, upgradeLevel } = __m["src/systems/modifiers.js"];
 const { addCrewMember, crewOf, ownsStation, removeCrewMember } = __m["src/systems/units.js"];
+const { chargeStation, stationBudgetBlock } = __m["src/systems/stations.js"];
 // The department's people: hiring, staffing vehicles, fatigue, injuries,
 // experience and training. Career mode only; Quick Response has anonymous crews.
 //
 // A person is a record in `state.campaign.personnel`. When they crew a vehicle
 // their crew unit (`state.crew`) carries `personId`, and `modifiers.workRate`
 // reads the record, so skills and tiredness change what the crew actually does.
+
 
 
 
@@ -11835,22 +12155,29 @@ function newPersonId(state) {
   return `p${c.nextPersonId++}`;
 }
 
-/** Keep a short list of people looking for a job; the list turns over now and then. */
+/**
+ * Keep a short list of people looking for a job. The whole list turns over when it
+ * expires; between turnovers a hire only leaves a gap that is filled with one new face
+ * (so hiring cannot be used to re-roll the list).
+ */
 function refreshCandidates(state, force = false) {
   const c = state.campaign;
   if (!c) return [];
-  if (!force && c.candidates?.length >= P().candidates && state.time < (c.candidatesUntil ?? 0)) return c.candidates;
+  const expired = state.time >= (c.candidatesUntil ?? 0);
+  if (!force && !expired && c.candidates?.length >= P().candidates) return c.candidates;
   const rng = campaignRng(state);
   const rep = clamp((c.reputation ?? 0) / 100, 0, 1);
-  c.candidates = [];
-  for (let i = 0; i < P().candidates; i++) {
+  if (force || expired) {
+    c.candidates = [];
+    c.candidatesUntil = state.time + P().candidateLife;
+  }
+  while (c.candidates.length < P().candidates) {
     const person = makePerson(rng, newPersonId(state), 0.25 + 0.6 * rep);
     person.status = 'candidate';
     // Better people ask for more.
     person.askingFee = Math.round((P().hireCost * (0.8 + 0.07 * Object.values(person.skills).reduce((a, b) => a + b, 0) / 5)) / 10) * 10;
     c.candidates.push(person);
   }
-  c.candidatesUntil = state.time + P().candidateLife;
   return c.candidates;
 }
 
@@ -12019,7 +12346,7 @@ function trainingBlock(state, person, courseId) {
   if (!ownsStation(state, station)) return 'No station to train at';
   if (trainees(state, station).length >= trainingSlots(state, station)) return 'The training centre is full';
   if (state.credits < course.cost) return `Needs ${money(course.cost)}`;
-  return null;
+  return stationBudgetBlock(state, station, course.cost);
 }
 
 function startTraining(state, personId, courseId) {
@@ -12033,6 +12360,7 @@ function startTraining(state, personId, courseId) {
   const course = courseOf(courseId);
   const station = person.station ?? 0;
   spend(state, course.cost, 'training');
+  chargeStation(state, station, course.cost);
   const speed = 1 + 0.25 * upgradeLevel(state, station, 'training');
   unassignPerson(state, personId);
   person.status = 'training';
@@ -12058,6 +12386,7 @@ function updatePersonnel(state, dt) {
   if (!isCareer(state)) return;
   const f = P().fatigue;
   const pending = [];
+  refreshCandidates(state);
 
   for (const crew of state.crew) {
     const person = personOf(state, crew);
@@ -12301,10 +12630,12 @@ function requestEmergencyFunding(state) {
   }
   const b = CONFIG.career.bankruptcy;
   const fin = state.campaign.finance;
-  earn(state, b.emergencyAmount, 'emergency');
+  // Enough to clear the debt and leave a cushion, so one bailout is never swallowed by the next hour's bills.
+  const amount = Math.min(b.emergencyMax, Math.max(b.emergencyAmount, Math.ceil((-state.credits + b.cushion) / 500) * 500));
+  earn(state, amount, 'emergency');
   state.campaign.reputation = Math.max(0, state.campaign.reputation - b.repPenalty);
   fin.lastEmergencyAt = state.campaign.shifts;
-  addEvent(state, `Emergency funding — the city pays ${money(b.emergencyAmount)}, reputation −${b.repPenalty}`, 'warn');
+  addEvent(state, `Emergency funding — the city pays ${money(amount)}, reputation −${b.repPenalty}`, 'warn');
   return true;
 }
 
@@ -12312,8 +12643,9 @@ function requestEmergencyFunding(state) {
 
 const BONUS = { S: 3000, A: 1800, B: 900, C: 300, D: 0 };
 
-function payShiftBonus(state, grade) {
-  const amount = BONUS[grade] ?? 0;
+/** The performance bonus for a grade, scaled by how much of the shift was played. */
+function payShiftBonus(state, grade, share = 1) {
+  const amount = Math.round(((BONUS[grade] ?? 0) * Math.max(0, Math.min(1, share))) / 50) * 50;
   if (amount > 0) {
     earn(state, amount, 'bonus');
     addEvent(state, `Performance bonus for a grade ${grade} shift — ${money(amount)}`, 'good');
@@ -12531,7 +12863,8 @@ function progressOf(state, def) {
 }
 
 function isDone(state, id) {
-  return Boolean(state.campaign.objectives.completed[id]);
+  // The value is the shift it was completed in, which is 0 for the first one: test for the key, not the value.
+  return Object.hasOwn(state.campaign.objectives.completed, id);
 }
 
 /** Every objective for the screen: group, progress and whether it is done. */
@@ -12564,247 +12897,6 @@ function updateObjectives(state, dt, force = false) {
 
 
 return { OBJECTIVES, DAILY_POOL, objectiveDef, createObjectives, issueDaily, progressOf, isDone, listObjectives, updateObjectives };
-})();
-
-// ---- src/systems/stations.js ----
-__m["src/systems/stations.js"] = (function () {
-const { CONFIG, TILE } = __m["src/core/config.js"];
-const { addEvent } = __m["src/systems/events.js"];
-const { spend, money } = __m["src/systems/economy.js"];
-const { on } = __m["src/systems/hooks.js"];
-const { isCareer, upgradeLevel } = __m["src/systems/modifiers.js"];
-const { ownsStation } = __m["src/systems/units.js"];
-const { districtName } = __m["src/systems/places.js"];
-// Stations as facilities: upgrades with real effects, department-level gating,
-// coverage of the city's districts and a comparison between stations.
-//
-//   garage      more bays          (units.js `stationCapacity`)
-//   training    more trainees, faster courses   (personnel.js)
-//   medical     faster recovery from fatigue and injury   (personnel.js)
-//   workshop    cheaper vehicle maintenance     (finance.js)
-//   comms       responders drive faster          (modifiers.js `speedMod`)
-//   storage     more tools in every vehicle locker  (applyStationEffects below)
-//   tower       forest fires start smaller within range (the 'wildfire:start' hook)
-
-
-
-
-
-
-
-
-
-const UPGRADE_KEYS = ['garage', 'training', 'medical', 'workshop', 'comms', 'storage', 'tower'];
-
-const levelInfo = (campaign) => CONFIG.career.levels.find((l) => l.id === campaign.level) ?? CONFIG.career.levels[0];
-
-function stationRecord(state, index) {
-  const stations = state.campaign.stations;
-  if (!stations[index]) stations[index] = { level: 1, upgrades: {}, budget: 0, spentMonth: 0 };
-  return stations[index];
-}
-
-const stationLevel = (state, index) => {
-  const r = state.campaign.stations[index];
-  if (!r) return 1;
-  return 1 + Object.values(r.upgrades ?? {}).reduce((a, b) => a + b, 0);
-};
-
-const upgradeCost = (key, nextLevel) => CONFIG.upgrades[key].cost * nextLevel;
-
-/** Why an upgrade cannot be bought, or null if it can. */
-function upgradeBlock(state, station, key) {
-  const def = CONFIG.upgrades[key];
-  if (!def || !UPGRADE_KEYS.includes(key)) return 'Unknown upgrade';
-  if (!ownsStation(state, station)) return 'You do not own that station';
-  if (state.city.stations[station]?.sea) return 'Not available at the dock';
-  const level = upgradeLevel(state, station, key);
-  if (level >= def.max) return 'Fully upgraded';
-  const cap = levelInfo(state.campaign).upgradeCap;
-  if (level >= cap) return `Needs a higher department level (cap ${cap})`;
-  const cost = upgradeCost(key, level + 1);
-  if (state.credits < cost) return `Needs ${money(cost)}`;
-  return null;
-}
-
-function buyUpgrade(state, station, key) {
-  if (!isCareer(state)) return false;
-  const block = upgradeBlock(state, station, key);
-  if (block) {
-    addEvent(state, `${CONFIG.upgrades[key]?.label ?? 'Upgrade'}: ${block}`, 'warn');
-    return false;
-  }
-  const level = upgradeLevel(state, station, key) + 1;
-  spend(state, upgradeCost(key, level), 'upgrade');
-  const rec = stationRecord(state, station);
-  rec.upgrades[key] = level;
-  rec.level = stationLevel(state, station);
-  applyStationEffects(state);
-  addEvent(state, `${state.city.stations[station].name}: ${CONFIG.upgrades[key].label} level ${level}`, 'good');
-  return true;
-}
-
-/** Locker space: each storage level adds one of every tool a vehicle already carries. */
-function applyStationEffects(state) {
-  if (!isCareer(state)) return;
-  for (const e of state.engines) {
-    const base = e.base?.tools;
-    if (!base) continue;
-    const i = state.city.bays[e.bayIndex]?.station ?? 0;
-    const extra = CONFIG.upgrades.storage.per * upgradeLevel(state, i, 'storage');
-    e.spec.tools = Object.fromEntries(Object.entries(base).map(([k, n]) => [k, n + extra]));
-  }
-}
-
-// ----------------------------------------------------------------- gating ---
-
-function vehicleUnlocked(state, type) {
-  if (!isCareer(state)) return true;
-  const level = state.campaign.level;
-  return CONFIG.career.levels.some((l) => l.id <= level && l.vehicles.includes(type));
-}
-
-/** Why a vehicle type cannot be bought in a career yet, or null. */
-function vehicleBlock(state, type) {
-  if (vehicleUnlocked(state, type)) return null;
-  const need = CONFIG.career.levels.find((l) => l.vehicles.includes(type));
-  return need ? `Unlocked at ${need.name}` : 'Not available';
-}
-
-function stationsAllowed(state) {
-  return isCareer(state) ? levelInfo(state.campaign).stations : Infinity;
-}
-
-function ownedStationCount(state) {
-  return state.city.stations.filter((st, i) => !st.sea && state.ownedStations[i]).length;
-}
-
-/** Why another station cannot be opened yet, or null. */
-function stationBlock(state) {
-  if (!isCareer(state)) return null;
-  if (ownedStationCount(state) >= stationsAllowed(state)) return `Your department level allows ${stationsAllowed(state)} station${stationsAllowed(state) === 1 ? '' : 's'}`;
-  return null;
-}
-
-// --------------------------------------------------------------- coverage ---
-
-/** Travel seconds a typical engine needs for a straight run of `tiles`, allowing for street detours. */
-const secondsFor = (tiles) => (tiles * 1.35) / CONFIG.vehicles.engine.speed;
-
-/**
- * For each named district: the nearest owned station and the expected travel
- * time to it. Districts over `limit` seconds are underserved.
- */
-function coverage(state, limit = 75) {
-  const owned = [];
-  state.city.stations.forEach((st, i) => {
-    if (!ownsStation(state, i) || st.sea) return;
-    owned.push({ i, st, x: st.building.x + st.building.w / 2, y: st.building.y + st.building.h / 2 });
-  });
-  const rows = [];
-  for (const d of state.city.districts ?? []) {
-    const cx = d.x / TILE;
-    const cy = d.y / TILE;
-    let best = null;
-    let bestD = Infinity;
-    for (const s of owned) {
-      const dd = Math.hypot(s.x - cx, s.y - cy);
-      if (dd < bestD) {
-        bestD = dd;
-        best = s;
-      }
-    }
-    if (!best) continue;
-    const seconds = secondsFor(bestD);
-    rows.push({ district: districtName(state, d.x, d.y) ?? d.name, station: best.st.name, tiles: bestD, seconds, underserved: seconds > limit });
-  }
-  rows.sort((a, b) => b.seconds - a.seconds);
-  let covered = 0;
-  for (const b of state.buildings) {
-    const bx = b.x + b.w / 2;
-    const by = b.y + b.h / 2;
-    if (owned.some((s) => secondsFor(Math.hypot(s.x - bx, s.y - by)) <= limit)) covered += 1;
-  }
-  return { rows, underserved: rows.filter((r) => r.underserved), share: state.buildings.length ? covered / state.buildings.length : 1 };
-}
-
-/** One row per owned station for the comparison table. */
-function compareStations(state) {
-  const report = state.report?.stations ?? {};
-  const fin = state.campaign?.finance;
-  const rows = [];
-  state.city.stations.forEach((st, i) => {
-    if (!state.ownedStations[i]) return;
-    const rec = state.campaign?.stations?.[i];
-    const r = report[i];
-    rows.push({
-      index: i,
-      name: st.name,
-      level: rec ? stationLevel(state, i) : 1,
-      vehicles: state.engines.filter((e) => state.city.bays[e.bayIndex]?.station === i).length,
-      staff: (state.campaign?.personnel ?? []).filter((p) => p.station === i && p.vehicleId).length,
-      incidents: r?.incidents ?? 0,
-      resolved: r?.resolved ?? 0,
-      avgResponse: r && r.responses ? r.responseSum / r.responses : null,
-      cost: fin?.stationCosts?.[i] ?? 0,
-      budget: rec?.budget ?? 0,
-      spentMonth: rec?.spentMonth ?? 0,
-    });
-  });
-  return rows;
-}
-
-function setStationBudget(state, index, amount) {
-  const n = Math.floor(Number(amount));
-  if (!Number.isFinite(n) || n < 0 || !state.ownedStations[index]) return false;
-  stationRecord(state, index).budget = n;
-  return true;
-}
-
-// ------------------------------------------------------------------ hooks ---
-
-/** Wire the station effects that happen on events. Called once per game. */
-function wireStations(state) {
-  // A fire watch tower spots a forest fire early, so it starts smaller.
-  on(state, 'wildfire:start', (st, wf) => {
-    if (!isCareer(st)) return;
-    let best = null;
-    st.city.stations.forEach((station, i) => {
-      if (!ownsStation(st, i)) return;
-      const level = upgradeLevel(st, i, 'tower');
-      if (!level) return;
-      const b = station.building;
-      const d = Math.hypot((b.x + b.w / 2) * TILE - wf.x, (b.y + b.h / 2) * TILE - wf.y) / TILE;
-      if (d <= CONFIG.upgrades.towerRange && (!best || level > best.level)) best = { level, name: station.name };
-    });
-    if (!best) return;
-    const cut = 1 - CONFIG.upgrades.tower.per * best.level;
-    wf.radius *= cut;
-    wf.intensity = Math.max(0.2, wf.intensity - 0.08 * best.level);
-    addEvent(st, `${best.name}'s watch tower spotted the fire early — it is smaller than it would have been`, 'good');
-  });
-  // Station budgets: tally maintenance as it is charged, warn when over.
-  on(state, 'finance:hour', (st, data) => {
-    for (const [i, v] of Object.entries(data.perStation)) {
-      const rec = st.campaign.stations[i];
-      if (!rec) continue;
-      rec.spentMonth = (rec.spentMonth ?? 0) + v;
-      if (rec.budget > 0 && rec.spentMonth > rec.budget && !rec.warned) {
-        rec.warned = true;
-        addEvent(st, `${st.city.stations[i].name} is over its monthly budget (${money(rec.spentMonth)} of ${money(rec.budget)})`, 'warn');
-      }
-    }
-  });
-  on(state, 'finance:month', (st) => {
-    for (const rec of Object.values(st.campaign.stations)) {
-      rec.spentMonth = 0;
-      rec.warned = false;
-    }
-  });
-}
-
-
-return { UPGRADE_KEYS, levelInfo, stationRecord, stationLevel, upgradeCost, upgradeBlock, buyUpgrade, applyStationEffects, vehicleUnlocked, vehicleBlock, stationsAllowed, ownedStationCount, stationBlock, coverage, compareStations, setStationBudget, wireStations };
 })();
 
 // ---- src/data/startScenarios.js ----
@@ -12884,8 +12976,6 @@ const { SCENARIOS_START } = __m["src/data/startScenarios.js"];
 
 const CAMPAIGN_VERSION = 1;
 
-const levelDef = (id) => CONFIG.career.levels.find((l) => l.id === id) ?? CONFIG.career.levels[0];
-
 function createCampaign({ name = 'Harbor City Fire Department', scenario = 'harbor', seed = null } = {}) {
   const start = SCENARIOS_START[scenario] ?? SCENARIOS_START.harbor;
   const useSeed = seed ?? start.seed;
@@ -12928,7 +13018,7 @@ function seedRoster(state) {
 function levelProgress(campaign) {
   const next = CONFIG.career.levels.find((l) => l.id === campaign.level + 1) ?? null;
   return {
-    current: levelDef(campaign.level),
+    current: CONFIG.career.levels.find((l) => l.id === campaign.level) ?? CONFIG.career.levels[0],
     next,
     repNeeded: next ? next.rep : null,
     shiftsNeeded: next ? next.shifts : null,
@@ -13025,10 +13115,22 @@ function readiness(state) {
  * reputation, add the shift to the career totals, give everyone experience and
  * check for promotion. Safe to call twice; the second call returns the first result.
  */
+/** Why the shift cannot be filed yet, or null. A shift must run at least half its length. */
+function shiftBlock(state) {
+  const needed = CONFIG.career.shiftLength * CONFIG.career.minShiftShare;
+  if (state.shiftDue || state.time >= needed) return null;
+  return `File the shift after ${Math.ceil((needed - state.time) / 60)} more minute(s): a shift must run at least half its length`;
+}
+
 function endShift(state) {
   if (!isCareer(state)) return null;
   if (state.shiftSummary) return state.shiftSummary;
   const c = state.campaign;
+  const block = shiftBlock(state);
+  if (block) {
+    addEvent(state, block, 'warn');
+    return null;
+  }
   const report = buildReport(state);
   const s = shiftDelta(state);
 
@@ -13060,7 +13162,7 @@ function endShift(state) {
   c.reputation = clamp(c.reputation * 0.7 + target * 0.3, 0, 100);
 
   c.shifts += 1;
-  payShiftBonus(state, report.rating.grade);
+  payShiftBonus(state, report.rating.grade, state.time / CONFIG.career.shiftLength);
   closeShiftForPersonnel(state);
   updateObjectives(state, 0, true);
   const leveled = checkLevelUp(state);
@@ -13086,7 +13188,7 @@ function openShift(state) {
   issueDaily(state);
 }
 
-return { CAMPAIGN_VERSION, levelDef, createCampaign, seedRoster, levelProgress, checkLevelUp, repChange, wireCareer, readiness, endShift, openShift };
+return { CAMPAIGN_VERSION, createCampaign, seedRoster, levelProgress, checkLevelUp, repChange, wireCareer, readiness, shiftBlock, endShift, openShift };
 })();
 
 // ---- src/systems/saves.js ----
@@ -13264,26 +13366,16 @@ const parse = (raw) => {
 };
 
 /**
- * Read a slot. Returns `{ status, ... }`:
- *   none       nothing saved
+ * Look at the raw text of a save without touching storage. Returns `{ status, ... }`:
  *   ok         `{ kind, shift, campaign }` ready for loadState
  *   migrated   as ok, but an older save that was upgraded (`from`)
  *   newer      written by a newer version of the game; left alone
- *   corrupt    unreadable; kept under `<key>.corrupt`
+ *   corrupt    unreadable
  */
-function readSlot(storage, key) {
-  let raw = null;
-  try {
-    raw = storage.getItem(key);
-  } catch {
-    return { status: 'error', error: 'Storage is blocked' };
-  }
-  if (raw == null) return { status: 'none' };
-
+function inspectRaw(raw) {
   const p = parse(raw);
   if (!p.ok || p.value == null || typeof p.value !== 'object') {
-    keepCopy(storage, `${key}.corrupt`, raw);
-    return { status: 'corrupt', error: 'The save could not be read; a copy was kept' };
+    return { status: 'corrupt', error: 'The save could not be read' };
   }
   let value = p.value;
   let legacy = false;
@@ -13297,22 +13389,15 @@ function readSlot(storage, key) {
   const migrated = migrateShift(value.shift);
   if (!migrated.ok) {
     if (migrated.newer) return { status: 'newer', error: 'This save was made by a newer version of the game' };
-    keepCopy(storage, `${key}.corrupt`, raw);
     return { status: 'corrupt', error: migrated.error };
   }
   const n = normalizeShift(migrated.data);
-  if (!n.ok) {
-    keepCopy(storage, `${key}.corrupt`, raw);
-    return { status: 'corrupt', error: n.errors[0] };
-  }
+  if (!n.ok) return { status: 'corrupt', error: n.errors[0] };
 
   let campaign = null;
   if (value.kind === 'career') {
     campaign = normalizeCampaign(value.campaign);
-    if (!campaign) {
-      keepCopy(storage, `${key}.corrupt`, raw);
-      return { status: 'corrupt', error: 'The career data is missing' };
-    }
+    if (!campaign) return { status: 'corrupt', error: 'The career data is missing' };
     if (campaign.newer) return { status: 'newer', error: 'This career was made by a newer version of the game' };
   }
   return {
@@ -13324,6 +13409,80 @@ function readSlot(storage, key) {
     warnings: n.errors,
     savedAt: value.savedAt ?? null,
   };
+}
+
+/**
+ * Read a slot: `none` if nothing is saved, otherwise what `inspectRaw` says. An
+ * unreadable save is copied to `<key>.corrupt` (never deleted).
+ */
+function readSlot(storage, key) {
+  let raw = null;
+  try {
+    raw = storage.getItem(key);
+  } catch {
+    return { status: 'error', error: 'Storage is blocked' };
+  }
+  if (raw == null) return { status: 'none' };
+  const result = inspectRaw(raw);
+  if (result.status === 'corrupt') {
+    keepCopy(storage, `${key}.corrupt`, raw);
+    result.error = `${result.error}; a copy was kept`;
+  }
+  return result;
+}
+
+// ------------------------------------------------------------ recovery ---
+
+const BACKUP_SUFFIXES = {
+  '.bak': 'the Quick Response save from before it was upgraded',
+  '.prev': 'the career that was replaced by a new one',
+  '.replaced': 'the save that was replaced by a restore',
+  '.corrupt': 'a save that could not be read',
+};
+
+/**
+ * The backups kept beside each slot (an old-format save, a replaced career, an unreadable
+ * save), with whether each one could be loaded as it stands.
+ */
+function listBackups(storage) {
+  const out = [];
+  for (const [slot, key] of Object.entries({ quick: KEYS.quick, career: KEYS.career, challenge: KEYS.challenge })) {
+    for (const [suffix, about] of Object.entries(BACKUP_SUFFIXES)) {
+      let raw = null;
+      try {
+        raw = storage.getItem(key + suffix);
+      } catch {
+        continue;
+      }
+      if (raw == null) continue;
+      const info = inspectRaw(raw);
+      out.push({
+        key: key + suffix, target: key, slot, suffix: suffix.slice(1), about,
+        loadable: info.status === 'ok' || info.status === 'migrated',
+        status: info.status, kind: info.kind ?? slot, savedAt: info.savedAt ?? null, error: info.error ?? null,
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * Put a backup back as the live save. The save it replaces is kept under `<slot>.replaced`
+ * and the backup itself is left in place, so nothing is ever lost by restoring.
+ */
+function restoreBackup(storage, backupKey) {
+  try {
+    const entry = listBackups(storage).find((b) => b.key === backupKey);
+    if (!entry) return { ok: false, error: 'There is no such backup' };
+    if (!entry.loadable) return { ok: false, error: 'That backup cannot be loaded' };
+    const raw = storage.getItem(backupKey);
+    const current = storage.getItem(entry.target);
+    if (current != null && current !== raw) storage.setItem(`${entry.target}.replaced`, current);
+    storage.setItem(entry.target, raw);
+    return { ok: true, slot: entry.slot };
+  } catch {
+    return { ok: false, error: 'Could not restore — the browser blocked storage' };
+  }
 }
 
 function keepCopy(storage, key, raw) {
@@ -13342,7 +13501,8 @@ function writeSlot(storage, key, { kind, shift, campaign = null }) {
     if (existing != null) {
       const p = parse(existing);
       if (p.ok && p.value && typeof p.value === 'object') {
-        if ((p.value.format ?? 1) > ENVELOPE_FORMAT || Number(p.value.version) > SHIFT_VERSION) {
+        if ((p.value.format ?? 1) > ENVELOPE_FORMAT || Number(p.value.version) > SHIFT_VERSION
+          || Number(p.value.shift?.version) > SHIFT_VERSION || Number(p.value.campaign?.version) > CAMPAIGN_VERSION) {
           return { ok: false, reason: 'newer', error: 'A newer save is stored here; it was not overwritten' };
         }
         if (p.value.format == null) keepCopy(storage, `${key}.bak`, existing);
@@ -13353,6 +13513,21 @@ function writeSlot(storage, key, { kind, shift, campaign = null }) {
     return { ok: true };
   } catch (e) {
     return { ok: false, reason: 'storage', error: 'Could not save — the browser blocked storage' };
+  }
+}
+
+/**
+ * Copy whatever is in a slot to `<key><suffix>` (an older copy there is replaced). Used
+ * before a save is overwritten by something that is not its own continuation.
+ */
+function archiveSlot(storage, key, suffix = '.replaced') {
+  try {
+    const raw = storage.getItem(key);
+    if (raw == null) return false;
+    storage.setItem(key + suffix, raw);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -13410,7 +13585,7 @@ function storeScenarioLibrary(storage, list) {
   }
 }
 
-return { ENVELOPE_FORMAT, SHIFT_VERSION, OLDEST_SHIFT, KEYS, migrateShift, normalizeShift, normalizeCampaign, readSlot, writeSlot, hasSlot, loadResults, recordResult, loadScenarioLibrary, storeScenarioLibrary };
+return { ENVELOPE_FORMAT, SHIFT_VERSION, OLDEST_SHIFT, KEYS, migrateShift, normalizeShift, normalizeCampaign, inspectRaw, readSlot, listBackups, restoreBackup, writeSlot, archiveSlot, hasSlot, loadResults, recordResult, loadScenarioLibrary, storeScenarioLibrary };
 })();
 
 // ---- src/systems/contracts.js ----
@@ -14145,10 +14320,8 @@ function containLeak(state, b) {
   b.incidentLabel = null;
 }
 
-/** Hazard zones that people ought to be moved out of (used by evacuation and the incident card). */
-const zonesNeedingEvacuation = (state) => (state.hazards ?? []).filter((z) => z.level >= 0.3);
 
-return { isLeaking, hasHazard, hazardZones, zoneAt, startLeak, updateHazards, zonesNeedingEvacuation };
+return { isLeaking, hasHazard, hazardZones, zoneAt, startLeak, updateHazards };
 })();
 
 // ---- src/systems/incidents.js ----
@@ -15157,7 +15330,7 @@ function scenarioScore(state, won) {
   let score = 1000 + 120 * s.saved + 60 * s.rescued + 40 * (s.treated ?? 0) - 400 * s.casualties - 200 * s.lost + Math.round(state.credits / 10);
   if (won && def.timeLimit) score += Math.max(0, Math.round((def.timeLimit - state.time) * 2));
   if (!won) score = Math.round(score * 0.5);
-  return Math.max(0, Math.round(score));
+  return Math.max(won ? 100 : 0, Math.round(score));
 }
 
 function thresholds(state, success) {
@@ -15234,7 +15407,7 @@ const { CONFIG, TILE } = __m["src/core/config.js"];
 const { Rng, formatClock } = __m["src/core/math.js"];
 const { createCity } = __m["src/data/city.js"];
 const { buildNav } = __m["src/systems/grid.js"];
-const { activeEngine, buildingOf, buyVehicle, createUnits, deployCrew, dispatchEngine, engineForUnit, orderAmbulanceToPatient, orderCrew, orderEngine, orderEngineToWildfire, orderEngineToBlockade, pickAmbulanceFor, pickEngineForBlockade, recallCrew, repathEngines, restoreFleet, sellVehicle, sendEngineHome, sendToHospital, sendToPharmacy, toggleHydrant, updateUnits, isFirefighter, unstaffed, boatCanReach, diveVehiclesFor, orderEngineToVictim, canDive, crewForTool, cutList, equipCrew, orderCut, restoreCuts } = __m["src/systems/units.js"];
+const { activeEngine, buildingOf, buyVehicle, freeBay, createUnits, deployCrew, dispatchEngine, engineForUnit, orderAmbulanceToPatient, orderCrew, orderEngine, orderEngineToWildfire, orderEngineToBlockade, pickAmbulanceFor, pickEngineForBlockade, recallCrew, repathEngines, restoreFleet, sellVehicle, sendEngineHome, sendToHospital, sendToPharmacy, toggleHydrant, updateUnits, isFirefighter, unstaffed, boatCanReach, diveVehiclesFor, orderEngineToVictim, canDive, crewForTool, cutList, equipCrew, orderCut, restoreCuts } = __m["src/systems/units.js"];
 const { findVictim, nearestVictim, restoreVictims, updateVictims } = __m["src/systems/water.js"];
 const { repayLoan, takeLoan, toggleInsurance } = __m["src/systems/economy.js"];
 const { acceptContract, createContracts, restoreContracts, updateContracts } = __m["src/systems/contracts.js"];
@@ -15251,7 +15424,7 @@ const { spawnDebris, updateEffects } = __m["src/systems/effects.js"];
 const { updateFleeing } = __m["src/systems/civilians.js"];
 const { updateIncidents } = __m["src/systems/incidents.js"];
 const { restoreWildfires, updateWildfires } = __m["src/systems/wildfire.js"];
-const { applyStationEffects, stationBlock, vehicleBlock } = __m["src/systems/stations.js"];
+const { applyStationEffects, chargeStation, refundStation, stationBlock, stationBudgetBlock, vehicleBlock } = __m["src/systems/stations.js"];
 const { createReport, observe, restoreReport } = __m["src/systems/report.js"];
 const { defaultPresets, restorePresets } = __m["src/systems/presets.js"];
 const { createSupport, restoreSupport, updateSupport } = __m["src/systems/agencies.js"];
@@ -15263,7 +15436,7 @@ const { updatePersonnel, releaseVehicle, staffVehicle } = __m["src/systems/perso
 const { updateCareerFinance } = __m["src/systems/finance.js"];
 const { updateObjectives } = __m["src/systems/objectives.js"];
 const { updateScenario } = __m["src/systems/challenges.js"];
-const { isCareer } = __m["src/systems/modifiers.js"];
+const { isCareer, stationOfEngine } = __m["src/systems/modifiers.js"];
 const { setWeather } = __m["src/systems/weather.js"];
 // The shift: one city, one engine, one crew, and a district that keeps catching
 // fire. This module owns the tick order (alarms, units, fire, effects), the
@@ -15321,6 +15494,7 @@ function createGame(seed = CONFIG.city.seed) {
     over: false,
     speed: 1,
     incidentsEnabled: true,
+    rngSeed: seed * 7919 + 13, // the seed of this shift's calls; a career gives every shift its own
     rng: new Rng(seed * 7919 + 13),
     rating: CONFIG.rating.start,
     credits: CONFIG.economy.start,
@@ -15865,9 +16039,21 @@ function commandBuyVehicle(state, type = 'engine', station = null) {
     addEvent(state, `${CONFIG.vehicles[type]?.label ?? type}: ${block}`, 'warn');
     return null;
   }
+  // A career station only buys what its monthly budget allows.
+  const spec = CONFIG.vehicles[type];
+  if (spec && isCareer(state)) {
+    const bay = freeBay(state, spec.boat ? 2 : station, Boolean(spec.boat));
+    const home = bay >= 0 ? state.city.bays[bay].station : null;
+    const over = home != null ? stationBudgetBlock(state, home, spec.cost) : null;
+    if (over) {
+      addEvent(state, `${spec.label}: ${over}`, 'warn');
+      return null;
+    }
+  }
   const engine = buyVehicle(state, type, station);
   if (engine) {
     if (isCareer(state)) {
+      chargeStation(state, stationOfEngine(state, engine), engine.spec.cost);
       staffVehicle(state, engine);
       applyStationEffects(state);
       if (engine.spec.crew > 0 && engine.crewIds.length < engine.spec.crew) {
@@ -15927,7 +16113,10 @@ function commandSellVehicle(state, id = null) {
     ? state.engines.find((e) => e.id === id)
     : engineForUnit(state, getSelected(state)) ?? activeEngine(state);
   if (engine) releaseVehicle(state, engine);
-  return sellVehicle(state, engine);
+  const home = engine ? stationOfEngine(state, engine) : null;
+  const refund = sellVehicle(state, engine);
+  if (refund && home != null) refundStation(state, home, refund);
+  return refund;
 }
 
 // Re-exported so the UI has one module to talk to for orders.
@@ -16041,6 +16230,7 @@ function serializeExtras(state) {
     scenario: copy(state.scenario),
     shiftDue: Boolean(state.shiftDue),
     incidentPace: state.incidentPace ?? 1,
+    rngSeed: state.rngSeed,
     buildingExtras: state.buildings
       .filter((b) => b.leak || b.collapse || b.utilityCut || b.evacZone)
       .map((b) => ({ id: b.id, leak: b.leak ?? 0, collapse: copy(b.collapse ?? null), utilityCut: Boolean(b.utilityCut), evacZone: b.evacZone ?? null, evacOccupants: b.evacOccupants ?? null })),
@@ -16060,6 +16250,9 @@ function restoreExtras(state, data, campaign) {
   state.scenario = state.mode === 'challenge' ? data.scenario : null;
   state.shiftDue = Boolean(data.shiftDue);
   state.incidentPace = data.incidentPace ?? 1;
+  // A loaded shift carries on with fresh luck instead of replaying the calls it started with.
+  if (Number.isFinite(data.rngSeed)) state.rngSeed = data.rngSeed;
+  state.rng = new Rng(state.rngSeed + Math.floor(state.time) * 31 + 1);
   if (data.weather?.kind) setWeather(state, data.weather.kind);
   const byId = new Map(state.buildings.map((b) => [b.id, b]));
   for (const e of data.buildingExtras ?? []) {
@@ -16131,6 +16324,8 @@ return { createGame, startShift, shiftTime, update, getSelected, selectWildfire,
 __m["src/systems/modes.js"] = (function () {
 const { CONFIG } = __m["src/core/config.js"];
 const { createGame, loadState, serialize } = __m["src/systems/game.js"];
+const { Rng } = __m["src/core/math.js"];
+const { createWind } = __m["src/systems/wind.js"];
 const { addVehicle, clearFleet, removeCrewMember } = __m["src/systems/units.js"];
 const { createCampaign, endShift, openShift, seedRoster, wireCareer } = __m["src/systems/campaign.js"];
 const { assignPerson, autoStaff, dismissPerson, hirePerson, openShiftForPersonnel, refreshCandidates, startTraining, unassignPerson } = __m["src/systems/personnel.js"];
@@ -16142,7 +16337,6 @@ const { isCareer } = __m["src/systems/modifiers.js"];
 const { applyPreset, cancelDispatch, createPreset, deletePreset, redirectDispatch, updatePreset } = __m["src/systems/presets.js"];
 const { callAgency } = __m["src/systems/agencies.js"];
 const { evacuateIncident } = __m["src/systems/evacuation.js"];
-const { startDisaster } = __m["src/systems/disasters.js"];
 const { addEvent } = __m["src/systems/events.js"];
 // Game modes and the orders the new screens give.
 //
@@ -16170,6 +16364,7 @@ const { addEvent } = __m["src/systems/events.js"];
 
 
 
+
 // ------------------------------------------------------------------ career ---
 
 /** Build a shift from the campaign: its city, money, fleet, stations and people. */
@@ -16177,6 +16372,10 @@ function buildCareerShift(campaign, first = false) {
   const state = createGame(campaign.seed);
   state.mode = 'career';
   state.campaign = campaign;
+  // Every shift of a career has its own calls and its own wind (the city stays the same).
+  state.rngSeed = campaign.seed * 7919 + 13 + (campaign.shifts + 1) * 1000003;
+  state.rng = new Rng(state.rngSeed);
+  state.wind = createWind(new Rng(state.rngSeed + 104729));
   state.credits = campaign.balance;
   state.ownedStations = campaign.ownedStations
     ? state.city.stations.map((_, i) => Boolean(campaign.ownedStations[i] ?? i === 0))
@@ -16274,9 +16473,8 @@ const commandCancelDispatch = (state, engineId) => cancelDispatch(state, engineI
 const commandRedirect = (state, engineId, target) => redirectDispatch(state, engineId, target);
 const commandAgency = (state, agency, target) => callAgency(state, agency, target);
 const commandEvacuate = (state, kind, id) => evacuateIncident(state, kind, id);
-const commandDisaster = (state, id) => startDisaster(state, id);
 
-return { buildCareerShift, createCareer, nextCareerShift, loadCareerSlot, careerSlotData, createScenarioGame, scenarioSlotData, commandHire, commandDismiss, commandAssign, commandUnassign, commandTrain, commandUpgrade, commandBudget, commandStationBudget, commandEmergencyFunding, commandPreset, commandSavePreset, commandDeletePreset, commandCancelDispatch, commandRedirect, commandAgency, commandEvacuate, commandDisaster };
+return { buildCareerShift, createCareer, nextCareerShift, loadCareerSlot, careerSlotData, createScenarioGame, scenarioSlotData, commandHire, commandDismiss, commandAssign, commandUnassign, commandTrain, commandUpgrade, commandBudget, commandStationBudget, commandEmergencyFunding, commandPreset, commandSavePreset, commandDeletePreset, commandCancelDispatch, commandRedirect, commandAgency, commandEvacuate };
 })();
 
 // ---- src/ui/command.js ----
@@ -16285,7 +16483,7 @@ const { CONFIG, TILE } = __m["src/core/config.js"];
 const { SKILL_EFFECT, SKILL_LABEL, SKILLS, overall, rankLabel, salaryOf } = __m["src/data/personnel.js"];
 const { CHALLENGES, DISASTER_KINDS, INCIDENT_KINDS, LOCATION_TYPES, deleteScenarioFrom, findChallenge, newScenarioTemplate, saveScenarioTo } = __m["src/data/scenarios.js"];
 const { WEATHER } = __m["src/systems/weather.js"];
-const { buildingScenes } = __m["src/systems/scenes.js"];
+const { SCENES } = __m["src/systems/scenes.js"];
 const { INCIDENT_KINDS: PRESET_KINDS, availableVehicles, nearestStations, planPreset, recommendedPresets } = __m["src/systems/presets.js"];
 const { currentTarget, formatEta, incidentEtas } = __m["src/systems/eta.js"];
 const { incidentIntel } = __m["src/systems/intel.js"];
@@ -16293,10 +16491,10 @@ const { allAgencies } = __m["src/systems/agencies.js"];
 const { evacuationAdvice } = __m["src/systems/evacuation.js"];
 const { buildReport, formatDuration } = __m["src/systems/report.js"];
 const { isCareer } = __m["src/systems/modifiers.js"];
-const { levelProgress, readiness } = __m["src/systems/campaign.js"];
+const { levelProgress, readiness, shiftBlock } = __m["src/systems/campaign.js"];
 const { listObjectives } = __m["src/systems/objectives.js"];
 const { courseOf, payrollPerHour, people, rosterSummary, trainees, trainingBlock, trainingSlots } = __m["src/systems/personnel.js"];
-const { UPGRADE_KEYS, compareStations, coverage, levelInfo, stationLevel, upgradeBlock, upgradeCost } = __m["src/systems/stations.js"];
+const { UPGRADE_KEYS, budgetSummary, compareStations, coverage, levelInfo, stationLevel, upgradeBlock, upgradeCost } = __m["src/systems/stations.js"];
 const { financialReport } = __m["src/systems/finance.js"];
 const { stationCapacity } = __m["src/systems/units.js"];
 const { KEYS, hasSlot, loadResults, loadScenarioLibrary, recordResult, storeScenarioLibrary } = __m["src/systems/saves.js"];
@@ -16366,8 +16564,6 @@ function init(storage) {
     ui.results = {};
   }
 }
-
-const refreshResults = () => { if (ui.storage) ui.results = loadResults(ui.storage); };
 
 function noteResult(id, result) {
   if (!ui.storage) return null;
@@ -16606,7 +16802,8 @@ function stationsTab(state) {
         level >= def.max ? '<em>Complete</em>' : btn(`Upgrade ${money(upgradeCost(key, level + 1))}`, 'upgrade', `data-station="${i}" data-key="${key}"${block ? ` disabled title="${esc(block)}"` : ''}`, 'btn btn--small btn--primary')}</div>`;
     }).join('');
     return `<div class="station-card"><header><b>${esc(st.name)}</b><span>level ${stationLevel(state, i)} · ${used}/${stationCapacity(state, i)} bays · ${(state.campaign.personnel).filter((p) => p.station === i && p.vehicleId).length} crew</span></header>${ups}
-      <label class="field field--inline"><span>Monthly budget</span><input type="number" min="0" step="100" id="stbudget-${i}" value="${rec?.budget ?? 0}"><button type="button" class="btn btn--small" data-action="station-budget" data-station="${i}">Set</button></label></div>`;
+      ${rec?.budget > 0 ? `<div class="intel__row"><span>Spent this month</span><b data-tone="${(rec.spentMonth ?? 0) > rec.budget ? 'bad' : ''}">${money(rec.spentMonth ?? 0)} of ${money(rec.budget)}</b>${bar((rec.spentMonth ?? 0) / rec.budget, (rec.spentMonth ?? 0) > rec.budget ? 'bar--fire' : '')}</div>` : `<div class="intel__row"><span>Spent this month</span><b>${money(rec?.spentMonth ?? 0)}</b><span>no limit</span></div>`}
+      <label class="field field--inline"><span>Monthly budget (0 = no limit)</span><input type="number" min="0" step="100" id="stbudget-${i}" value="${rec?.budget ?? 0}"><button type="button" class="btn btn--small" data-action="station-budget" data-station="${i}">Set</button></label></div>`;
   }).join('');
 
   const rows = compareStations(state).map((r) => `<tr><td>${esc(r.name)}</td><td>${r.level}</td><td>${r.vehicles}</td><td>${r.staff}</td><td>${r.resolved}/${r.incidents}</td><td>${formatDuration(r.avgResponse)}</td><td>${money(r.cost)}</td></tr>`).join('');
@@ -16614,7 +16811,11 @@ function stationsTab(state) {
     ? cov.underserved.slice(0, 6).map((d) => `<div class="intel__row"><span>${esc(d.district)}</span><b>${Math.round(d.seconds)} s from ${esc(d.station)}</b></div>`).join('')
     : '<p class="budget__total">Every district is within reach.</p>';
 
+  const alloc = budgetSummary(state);
+  const funding = financialReport(state).funding;
+  const allocNote = `Budgets allocated: ${money(alloc.allocated)} of about ${money(funding)} in monthly funding${alloc.allocated > funding ? ' — you have promised more than the city pays' : ''}. A station over its budget still pays its upkeep but cannot buy vehicles, upgrades or training until next month.`;
   return `<p class="station__note">Department level ${state.campaign.level} lets you run ${levelInfo(state.campaign).stations === 99 ? 'any number of' : levelInfo(state.campaign).stations} station${levelInfo(state.campaign).stations === 1 ? '' : 's'} and upgrade to level ${levelInfo(state.campaign).upgradeCap}. Open new stations in the Fleet tab.</p>` +
+    section('Station budgets', '<p class="budget__total">' + allocNote + '</p>') +
     stations +
     section(`Coverage — ${pct(cov.share)} of the city's buildings are within a minute and a quarter`, under, 'Districts a vehicle needs longer than that to reach:') +
     section('Station comparison', `<table class="cmd-table"><thead><tr><th>Station</th><th>Lvl</th><th>Veh</th><th>Crew</th><th>Done</th><th>Resp.</th><th>Upkeep</th></tr></thead><tbody>${rows}</tbody></table>`);
@@ -16641,7 +16842,7 @@ function careerTab(state) {
 
   const shiftBox = summary
     ? `<p class="station__note">Shift ${summary.shiftNumber} is filed. ${summary.leveled ? `<b>Promoted to ${esc(summary.leveled.name)}.</b>` : ''}</p>${reportHtml(state, summary.report)}<div class="finance__buttons">${btn('Start the next shift', 'next-shift', '', 'btn btn--primary')}</div>`
-    : `<p class="station__note">${state.shiftDue ? '<b>The shift is over.</b> ' : `${formatDuration(left)} left in this shift. `}File the report when you are ready: it pays the performance bonus, moves your reputation and gives everyone experience.</p><div class="finance__buttons">${btn('End shift and file the report', 'end-shift', '', 'btn btn--primary')}${btn('Save', 'save-game')}</div>`;
+    : `<p class="station__note">${state.shiftDue ? '<b>The shift is over.</b> ' : `${formatDuration(left)} left in this shift. `}File the report when you are ready: it pays the performance bonus, moves your reputation and gives everyone experience.</p><div class="finance__buttons">${btn('End shift and file the report', 'end-shift', shiftBlock(state) ? `disabled title="${esc(shiftBlock(state))}"` : '', 'btn btn--primary')}${btn('Save', 'save-game')}</div>`;
 
   return `<div class="station__balance">${esc(c.name)}<span>${esc(lp.current.name)} · reputation ${Math.round(c.reputation)}/100 · shift ${c.shifts + 1} · readiness ${pct(readiness(state))}</span></div>` +
     bar(c.reputation / 100, 'bar--health') + `<p class="station__note">${next}</p>` + shiftBox +
@@ -16723,7 +16924,7 @@ const select = (path, options, value, type = 'text') => `<select data-path="${pa
 
 function scenarioEditor() {
   const d = ui.scenario;
-  const sceneOptions = buildingScenes().map((s) => [s.id, s.label]);
+  const sceneOptions = SCENES.map((s) => [s.id, s.label]);
   const counts = {};
   for (const f of d.start.fleet) counts[f.type] = (counts[f.type] ?? 0) + 1;
   const fleet = GROUND_TYPES().map((t) => `<label class="field field--num"><span>${esc(vehicleLabel(t))}</span><input type="number" min="0" max="16" value="${counts[t] ?? 0}" data-fleet="${t}"></label>`).join('');
@@ -16913,7 +17114,7 @@ function handle(action, data, state, api) {
 }
 
 
-return { init, refreshResults, noteResult, tabsFor, isEditing, selectedIncident, incidentSignature, incidentExtras, dispatchTab, peopleTab, stationsTab, careerTab, reportHtml, reportTab, careerFinanceHtml, playTab, renderTab, onChange, handle };
+return { init, noteResult, tabsFor, isEditing, selectedIncident, incidentSignature, incidentExtras, dispatchTab, peopleTab, stationsTab, careerTab, reportHtml, reportTab, careerFinanceHtml, playTab, renderTab, onChange, handle };
 })();
 
 // ---- src/ui/hud.js ----
@@ -17321,7 +17522,7 @@ function update(state, force = false) {
   updateToasts(state);
   updateTooltip(state);
   updateGameOver(state);
-  if (!$('screen-station').hidden) updateStation(state);
+  if (!$('screen-station').hidden) updateStationThrottled(state);
 }
 
 /** Career shift clock or the scenario's name and time left; hidden in Quick Response. */
@@ -18027,7 +18228,21 @@ function contractsTab(state) {
     '<p class="budget__total">Completed ' + c.completed + ' · failed ' + c.failed + '</p>';
 }
 
+let lastStationAt = 0;
+
+/**
+ * The open Headquarters panel is rebuilt a few times a second while the game runs and
+ * hardly at all while it is paused behind it (nothing changes). Orders call
+ * `updateStation` directly and always rebuild.
+ */
+function updateStationThrottled(state) {
+  const now = performance.now();
+  if (now - lastStationAt < (state.paused ? 700 : 250)) return;
+  updateStation(state);
+}
+
 function updateStation(state) {
+  lastStationAt = performance.now();
   // Rebuilding the panel under someone who is typing or choosing would lose their place.
   if (command.isEditing($('station-body'))) return;
   const list = command.tabsFor(state);
@@ -18047,7 +18262,7 @@ function updateStation(state) {
     '<p class="station__saved">' + (state.saveStatus ? 'Saved at ' + state.saveStatus : 'Autosaves every 30 seconds') + '</p>' +
     '<p class="station__keys"><kbd>B</kbd> headquarters · <kbd>D</kbd> dispatch · <kbd>A</kbd> dispatch all · <kbd>Z</kbd> back all · <kbd>E</kbd> deploy · <kbd>R</kbd> pack up · <kbd>G</kbd> hydrant · <kbd>P</kbd> pharmacy · <kbd>K</kbd> hospital · <kbd>Tab</kbd> next incident · <kbd>M</kbd> sound · <kbd>F1</kbd> controls</p>';
 
-  const html = '<p class="menu__eyebrow">Headquarters</p>' + tabs + body + footer;
+  const html = '<p class="menu__eyebrow">Headquarters</p>' + tabs + body + soundPanel() + footer;
   // Rebuilding the DOM under the pointer swallows clicks, so only touch it on a change.
   if (html === lastStationHtml) return;
   const box = $('station-body');
@@ -18055,6 +18270,25 @@ function updateStation(state) {
   box.innerHTML = html;
   if (box.parentElement) box.parentElement.scrollTop = scroll;
   lastStationHtml = html;
+}
+
+let soundSettings = null;
+
+/** The sound panel (volume and what is switched off) lives in the Headquarters footer. */
+function setSoundSettings(settings) {
+  soundSettings = settings;
+  lastStationHtml = '';
+}
+
+const SOUND_LABEL = { alerts: 'Alerts', radio: 'Radio', sirens: 'Sirens', ambience: 'Ambience', effects: 'Effects' };
+
+function soundPanel() {
+  if (!soundSettings) return '';
+  const cats = Object.entries(SOUND_LABEL).map(([id, label]) =>
+    '<label class="field field--check"><input type="checkbox" data-sound-cat="' + id + '"' + (soundSettings.categories[id] !== false ? ' checked' : '') + '><span>' + label + '</span></label>').join('');
+  return '<div class="station__sound"><p class="menu__eyebrow">Sound' + (soundSettings.muted ? ' — muted (M)' : '') + '</p>' +
+    '<label class="field field--inline"><span>Volume</span><input type="range" id="sound-volume" min="0" max="100" value="' + Math.round(soundSettings.volume * 100) + '"></label>' +
+    '<div class="station__sound-cats">' + cats + '</div></div>';
 }
 
 /** Reflect the sound toggle on its button. */
@@ -18065,7 +18299,7 @@ function setSoundState(muted) {
   button.setAttribute('aria-pressed', String(!muted));
 }
 
-return { mount, categoryOf, toggleUnits, closePanels, reset, update, setStationTab, setBuyStation, getBuyStation, updateStation, setSoundState };
+return { mount, categoryOf, toggleUnits, closePanels, reset, update, setStationTab, setBuyStation, getBuyStation, updateStation, setSoundSettings, setSoundState };
 })();
 
 // ---- src/core/loop.js ----
@@ -18170,7 +18404,8 @@ function eventSound(event) {
   switch (event.tone) {
     case 'big':
       if (/promotion/i.test(text)) return 'chime';
-      return /explosion|secondary collapse/i.test(text) ? 'boom' : 'klaxon';
+      if (/secondary collapse|earthquake|aftershock|has collapsed/i.test(text)) return 'rumble';
+      return /explosion/i.test(text) ? 'boom' : 'klaxon';
     case 'fire':
       if (/traffic accident/i.test(text)) return 'crash';
       return /spread/i.test(text) ? 'warn' : 'alarm';
@@ -18181,21 +18416,45 @@ function eventSound(event) {
       if (/dispatched|on scene —|response complete/i.test(text)) return 'radio';
       if (/\$/.test(text)) return 'cash';
       return 'chime';
-    case 'warn': return /injured|ambulance/i.test(text) ? 'medic' : 'warn';
+    case 'warn':
+      if (/overcome by fumes|without protection|hazard zone is forming/i.test(text)) return 'hazard';
+      return /injured|ambulance/i.test(text) ? 'medic' : 'warn';
     case 'info':
-      return /called —|called off|redirected|evacuation of/i.test(text) ? 'radio' : null;
+      if (/evacuation of/i.test(text)) return 'evac';
+      return /called —|called off|redirected/i.test(text) ? 'radio' : null;
     default: return null;
   }
 }
 
+/** What can be switched off separately: alerts (alarms, booms, warnings), radio, sirens, ambience, effects. */
+const SOUND_CATEGORIES = ['alerts', 'radio', 'sirens', 'ambience', 'effects'];
+const DEFAULT_CATEGORIES = { alerts: true, radio: true, sirens: true, ambience: true, effects: true };
+
+const SOUND_CATEGORY = {
+  click: 'effects', select: 'effects', chime: 'effects', cash: 'effects', clunk: 'effects', kaching: 'effects',
+  alarm: 'alerts', klaxon: 'alerts', bad: 'alerts', crash: 'alerts', boom: 'alerts', warn: 'alerts', medic: 'alerts',
+  rumble: 'alerts', hazard: 'alerts', evac: 'alerts', radio: 'radio',
+};
+
+// Minimum gap between two plays of the same sound, and the sounds that may break the global limit.
+const COOLDOWN = { radio: 700, alarm: 1500, klaxon: 2500, boom: 900, rumble: 2000, hazard: 1500, evac: 4000, crash: 800 };
+const PRIORITY = new Set(['klaxon', 'boom', 'rumble']);
+const LIMIT = { count: 6, windowMs: 2000 }; // at most this many one-shots in a window
+
 function loadPrefs() {
   try {
     const raw = JSON.parse(localStorage.getItem(STORE_KEY) ?? 'null');
-    if (raw) return { muted: Boolean(raw.muted), volume: clamp(Number(raw.volume ?? 0.7), 0, 1) };
+    if (raw) {
+      return {
+        muted: Boolean(raw.muted),
+        volume: clamp(Number(raw.volume ?? 0.7), 0, 1),
+        categories: { ...DEFAULT_CATEGORIES, ...(raw.categories && typeof raw.categories === 'object' ? raw.categories : {}) },
+      };
+    }
   } catch {
     // storage blocked: fall through to the defaults
   }
-  return { muted: false, volume: 0.7 };
+  return { muted: false, volume: 0.7, categories: { ...DEFAULT_CATEGORIES } };
 }
 
 function savePrefs(prefs) {
@@ -18206,6 +18465,21 @@ function savePrefs(prefs) {
   }
 }
 
+const MAX_AGENCY_VOICES = 3;
+
+/**
+ * Each agency sounds different: a fast two-tone yelp for the police, a slow wail for the
+ * medical service, a long alternating horn for civil protection, a low pulsing buzz for
+ * the utilities and a foghorn for the coast guard.
+ */
+const AGENCY_VOICE = {
+  police: { type: 'square', freq: (t) => (Math.floor(t * 3) % 2 ? 960 : 720) },
+  ems: { type: 'sawtooth', freq: (t) => 520 + 420 * (0.5 + 0.5 * Math.sin(t * 1.6)) },
+  civil: { type: 'triangle', freq: (t) => (Math.floor(t / 1.4) % 2 ? 520 : 390) },
+  utility: { type: 'square', freq: (t) => 210 + (Math.floor(t * 2) % 2) * 40, gate: (t) => (Math.floor(t * 2) % 2 ? 1 : 0.35) },
+  coastguard: { type: 'sine', freq: () => 150, gate: (t) => (t % 3.5 < 1.2 ? 1 : 0) },
+};
+
 function createAudio() {
   const prefs = loadPrefs();
   let ctx = null;
@@ -18213,6 +18487,8 @@ function createAudio() {
   let noise = null;
   const loops = {};
   const sirens = [];
+  const agencyVoices = [];
+  const recent = [];
   let trackedState = null;
   let lastEventId = 0;
   let lastPlayed = {};
@@ -18293,6 +18569,24 @@ function createAudio() {
       else gain.connect(master);
       osc.start();
       sirens.push({ osc, gain, pan });
+    }
+
+    // Support agencies have voices of their own, so police, EMS and the rest can be told apart.
+    for (let i = 0; i < MAX_AGENCY_VOICES; i++) {
+      const osc = ctx.createOscillator();
+      osc.type = 'square';
+      osc.frequency.value = 600;
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.value = 2600;
+      const gain = ctx.createGain();
+      gain.gain.value = 0;
+      const pan = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
+      osc.connect(filter).connect(gain);
+      if (pan) gain.connect(pan).connect(master);
+      else gain.connect(master);
+      osc.start();
+      agencyVoices.push({ osc, gain, pan, type: 'square' });
     }
   }
 
@@ -18399,10 +18693,35 @@ function createAudio() {
       tone(740, 0.22, { gain: 0.11 });
       tone(554, 0.34, { gain: 0.11, delay: 0.24 });
     },
+    // Radio traffic: the squelch click, a burst of voice-like chatter, then the tail click.
     radio: () => {
-      burst(0.08, { filter: 'bandpass', from: 2400, gain: 0.1, q: 2 });
-      tone(1500, 0.06, { type: 'square', gain: 0.04, delay: 0.09 });
-      tone(1100, 0.08, { type: 'square', gain: 0.04, delay: 0.18 });
+      burst(0.05, { filter: 'bandpass', from: 3000, gain: 0.12, q: 2 });
+      let t = 0.09;
+      const syllables = 3 + Math.floor(Math.random() * 3);
+      for (let i = 0; i < syllables; i++) {
+        const dur = 0.07 + Math.random() * 0.07;
+        burst(dur, { filter: 'bandpass', from: 700 + Math.random() * 1100, gain: 0.07, q: 3, delay: t });
+        tone(110 + Math.random() * 70, dur, { type: 'sawtooth', gain: 0.018, delay: t });
+        t += dur + 0.03 + Math.random() * 0.05;
+      }
+      tone(1500, 0.04, { type: 'square', gain: 0.035, delay: t + 0.02 });
+    },
+    // A building coming down, or the ground moving: a deep rumble with debris falling after it.
+    rumble: () => {
+      burst(2.2, { from: 240, to: 40, gain: 0.5 });
+      tone(48, 1.8, { type: 'sine', gain: 0.4, slide: 30, attack: 0.05 });
+      for (let k = 0; k < 4; k++) burst(0.25, { filter: 'bandpass', from: 900, to: 300, gain: 0.16, delay: 0.4 + k * 0.35, q: 1.2 });
+    },
+    // A hazard alarm: fast two-pitch chirps.
+    hazard: () => {
+      for (let r = 0; r < 4; r++) {
+        tone(900, 0.07, { type: 'square', gain: 0.06, delay: r * 0.2 });
+        tone(1350, 0.07, { type: 'square', gain: 0.06, delay: r * 0.2 + 0.09 });
+      }
+    },
+    // An evacuation warning: three rising whoops.
+    evac: () => {
+      for (let i = 0; i < 3; i++) tone(400, 0.7, { type: 'sawtooth', gain: 0.1, slide: 760, delay: i * 0.8, attack: 0.08 });
     },
     clunk: () => {
       tone(150, 0.14, { type: 'triangle', gain: 0.2, slide: 80 });
@@ -18412,13 +18731,19 @@ function createAudio() {
   };
 
   function play(name, scale = 1) {
-    if (!ctx || prefs.muted) return;
+    if (!ctx || prefs.muted) return false;
     const fn = SOUNDS[name];
-    if (!fn) return;
+    if (!fn) return false;
+    if (prefs.categories[SOUND_CATEGORY[name] ?? 'effects'] === false) return false;
     const now = performance.now();
-    if (now - (lastPlayed[name] ?? 0) < 120) return;
+    if (now - (lastPlayed[name] ?? -Infinity) < (COOLDOWN[name] ?? 120)) return false;
+    // However busy the night, never more than a handful of one-shots at once.
+    while (recent.length && now - recent[0] > LIMIT.windowMs) recent.shift();
+    if (recent.length >= LIMIT.count && !PRIORITY.has(name)) return false;
     lastPlayed[name] = now;
+    recent.push(now);
     fn(scale);
+    return true;
   }
 
   // -------------------------------------------------------------- frame ---
@@ -18449,8 +18774,11 @@ function createAudio() {
     if (!live) {
       for (const key of ['fire', 'water', 'wind', 'hum']) ramp(loops[key].gain.gain, 0, 0.08);
       for (const s of sirens) ramp(s.gain.gain, 0, 0.08);
+      for (const v of agencyVoices) ramp(v.gain.gain, 0, 0.08);
       return;
     }
+    const ambience = prefs.categories.ambience !== false;
+    const sirenOn = prefs.categories.sirens !== false;
 
     // Everything is heard within about a screen and a half of the camera.
     const reach = (Math.hypot(view.width, view.height) / cam.zoom) * 0.75;
@@ -18463,7 +18791,7 @@ function createAudio() {
       fire += heard((b.x + b.w / 2) * TILE, (b.y + b.h / 2) * TILE) * b.fire;
     }
     for (const wf of state.wildfires ?? []) fire += heard(wf.x, wf.y) * wf.intensity * 1.4;
-    const fireGain = Math.min(1, fire) * 0.2;
+    const fireGain = ambience ? Math.min(1, fire) * 0.2 : 0;
     ramp(loops.fire.gain.gain, fireGain, 0.2);
     if (fireGain > 0.02 && Math.random() < fireGain * 0.5) {
       burst(0.05 + Math.random() * 0.06, {
@@ -18473,11 +18801,11 @@ function createAudio() {
 
     let water = 0;
     for (const s of state.streams) water += heard(s.sx, s.sy);
-    ramp(loops.water.gain.gain, Math.min(1, water * 0.6) * 0.14, 0.15);
+    ramp(loops.water.gain.gain, ambience ? Math.min(1, water * 0.6) * 0.14 : 0, 0.15);
 
     // A little less wind at night would be more honest, but the day length makes
     // that a faint effect; keep it constant and gentle.
-    ramp(loops.wind.gain.gain, 0.025 + 0.09 * (state.wind?.speed ?? 0.3), 0.5);
+    ramp(loops.wind.gain.gain, ambience ? 0.025 + 0.09 * (state.wind?.speed ?? 0.3) : 0, 0.5);
     ramp(loops.wind.filter.frequency, 260 + 520 * (state.wind?.speed ?? 0.3), 0.8);
 
     const moving = state.engines
@@ -18485,7 +18813,7 @@ function createAudio() {
       .map((e) => ({ e, d: Math.hypot(e.x - cam.x, e.y - cam.y) }))
       .sort((a, b) => a.d - b.d);
 
-    ramp(loops.hum.gain.gain, moving.length ? heard(moving[0].e.x, moving[0].e.y) * 0.09 : 0, 0.25);
+    ramp(loops.hum.gain.gain, ambience && moving.length ? heard(moving[0].e.x, moving[0].e.y) * 0.09 : 0, 0.25);
     if (moving.length) {
       ramp(loops.hum.osc.frequency, 46 + moving[0].e.spec.speed * 2.6, 0.3);
     }
@@ -18503,7 +18831,29 @@ function createAudio() {
         ramp(siren.osc.frequency, freq, medical ? 0.012 : 0.05);
         if (siren.pan) ramp(siren.pan.pan, pan(entry.e.x), 0.1);
       }
-      ramp(siren.gain.gain, level * 0.07, 0.15);
+      ramp(siren.gain.gain, sirenOn ? level * 0.07 : 0, 0.15);
+    });
+
+    // Support agencies on their way or on scene, each with its own voice, nearest first.
+    const calls = (state.support?.active ?? [])
+      .filter((c) => t >= c.arriveAt - 6 && t <= c.until)
+      .map((c) => ({ c, d: Math.hypot(c.x - cam.x, c.y - cam.y) }))
+      .sort((a, b) => a.d - b.d);
+    agencyVoices.forEach((voice, i) => {
+      const entry = calls[i];
+      if (!entry || !sirenOn) {
+        ramp(voice.gain.gain, 0, 0.1);
+        return;
+      }
+      const style = AGENCY_VOICE[entry.c.agency] ?? AGENCY_VOICE.police;
+      if (voice.type !== style.type) {
+        voice.osc.type = style.type;
+        voice.type = style.type;
+      }
+      ramp(voice.osc.frequency, style.freq(t + i * 0.21), 0.015);
+      if (voice.pan) ramp(voice.pan.pan, pan(entry.c.x), 0.1);
+      const gate = style.gate ? style.gate(t) : 1;
+      ramp(voice.gain.gain, heard(entry.c.x, entry.c.y) * 0.06 * gate, 0.06);
     });
   }
 
@@ -18522,6 +18872,14 @@ function createAudio() {
       savePrefs(prefs);
       return prefs.muted;
     },
+    /** The current settings, for the sound panel. */
+    settings: () => ({ muted: prefs.muted, volume: prefs.volume, categories: { ...prefs.categories } }),
+    setCategory(name, on) {
+      if (!SOUND_CATEGORIES.includes(name)) return false;
+      prefs.categories[name] = Boolean(on);
+      savePrefs(prefs);
+      return true;
+    },
     setVolume(v) {
       prefs.volume = clamp(v, 0, 1);
       if (master && !prefs.muted) ramp(master.gain, prefs.volume, 0.05);
@@ -18530,22 +18888,27 @@ function createAudio() {
   };
 }
 
-return { eventSound, createAudio };
+return { eventSound, SOUND_CATEGORIES, AGENCY_VOICE, createAudio };
 })();
 
 // ---- src/render/overlays.js ----
 __m["src/render/overlays.js"] = (function () {
 const { TILE } = __m["src/core/config.js"];
 const { currentTarget, engineEta, formatEta } = __m["src/systems/eta.js"];
-// Map overlays for the command layer: the route and ETA of the vehicles heading
-// for the selected incident (or the selected vehicle), hazard and evacuation
-// zones, collapsed buildings, support agencies on scene and the upgrades built
-// at each station. Read-only: it draws from state and never changes it.
+// Map overlays for the command layer: routes with ETAs, incident rings, hazard and
+// evacuation zones, collapse animations, support agencies on scene and the
+// upgrades built at each station. Read-only: it draws from state and never changes
+// it. Everything is culled to the visible tiles and animated from the clock, so
+// there is no per-effect state to keep and an off-screen incident costs nothing.
 
 
 
 
 const ROUTE = 'rgba(111, 201, 255, 0.85)';
+const TAU = Math.PI * 2;
+
+const inView = (b, x, y, w, h, pad = 0) => !b || (
+  x + w >= (b.x0 - pad) * TILE && x <= (b.x1 + 1 + pad) * TILE && y + h >= (b.y0 - pad) * TILE && y <= (b.y1 + 1 + pad) * TILE);
 
 function label(ctx, text, x, y, color, z) {
   const size = Math.max(9, 12 / Math.max(z, 0.35));
@@ -18557,6 +18920,8 @@ function label(ctx, text, x, y, color, z) {
   ctx.fillStyle = color;
   ctx.fillText(text, x, y);
 }
+
+// ------------------------------------------------------------------ routes ---
 
 function drawRoute(ctx, state, engine, now, z) {
   if (engine.path.length === 0) return;
@@ -18573,7 +18938,7 @@ function drawRoute(ctx, state, engine, now, z) {
   const end = engine.path[engine.path.length - 1];
   ctx.fillStyle = ROUTE;
   ctx.beginPath();
-  ctx.arc(end.x, end.y, Math.max(3, 4 / Math.max(z, 0.3)), 0, Math.PI * 2);
+  ctx.arc(end.x, end.y, Math.max(3, 4 / Math.max(z, 0.3)), 0, TAU);
   ctx.fill();
   const eta = engineEta(state, engine);
   if (eta != null && Number.isFinite(eta)) label(ctx, `${engine.name} ${formatEta(eta)}`, end.x, end.y - 10 / Math.max(z, 0.35), '#bfe9ff', z);
@@ -18584,23 +18949,51 @@ function drawRoute(ctx, state, engine, now, z) {
 function drawRoutes(ctx, state, now, z) {
   const sel = state.selected;
   if (!sel) return;
-  const drawn = new Set();
   if (sel.kind === 'unit') {
     const unit = state.units.find((u) => u.id === sel.id);
     const engine = unit?.kind === 'engine' ? unit : state.engines.find((e) => e.id === unit?.engineId);
-    if (engine) {
-      drawRoute(ctx, state, engine, now, z);
-      drawn.add(engine.id);
-    }
+    if (engine) drawRoute(ctx, state, engine, now, z);
     return;
   }
   for (const e of state.engines) {
     const t = currentTarget(e);
-    if (t && t.id === sel.id && !drawn.has(e.id)) drawRoute(ctx, state, e, now, z);
+    if (t && t.id === sel.id) drawRoute(ctx, state, e, now, z);
   }
 }
 
-function drawZones(ctx, state, now, z) {
+// --------------------------------------------------------- incident rings ---
+
+const RING = { fire: '255, 120, 40', rescue: '110, 175, 255', hazmat: '235, 205, 60', collapse: '210, 160, 90' };
+
+/**
+ * A slow pulsing ring on the ground under every open building incident, coloured by
+ * what it is, so a crowded map reads at a glance. A ring that is answered (a vehicle
+ * within reach) calms to a thin steady line.
+ */
+function drawIncidentRings(ctx, state, now, z, bounds) {
+  for (const b of state.buildings) {
+    const burning = b.state === 'burning';
+    const kind = b.collapse ? 'collapse' : burning ? 'fire' : (b.leak ?? 0) > 0 ? 'hazmat' : (b.trapped ?? 0) > 0 ? 'rescue' : null;
+    if (!kind) continue;
+    const x = b.x * TILE;
+    const y = b.y * TILE;
+    const w = b.w * TILE;
+    const h = b.h * TILE;
+    if (!inView(bounds, x, y, w, h, 3)) continue;
+    const answered = state.engines.some((e) => e.targetId === b.id && e.arrived);
+    const phase = (now * (answered ? 0.5 : 1.4) + b.x * 0.13) % 1;
+    const r = Math.max(w, h) * 0.5 + 10 + (answered ? 0 : phase * 22);
+    ctx.strokeStyle = `rgba(${RING[kind]}, ${answered ? 0.35 : 0.6 * (1 - phase)})`;
+    ctx.lineWidth = Math.max(1.5, 2.5 / Math.max(z, 0.3));
+    ctx.beginPath();
+    ctx.ellipse(x + w / 2, y + h / 2 + 4, r * 1.12, r * 0.8, 0, 0, TAU);
+    ctx.stroke();
+  }
+}
+
+// ---------------------------------------------------------- hazards, zones ---
+
+function drawHazards(ctx, state, now, z) {
   const pulse = 0.5 + 0.5 * Math.sin(now * 3);
   for (const h of state.hazards ?? []) {
     ctx.save();
@@ -18608,35 +19001,111 @@ function drawZones(ctx, state, now, z) {
     ctx.strokeStyle = `rgba(232, 200, 60, ${0.55 + 0.25 * pulse})`;
     ctx.lineWidth = 2;
     ctx.setLineDash([14, 8]);
+    ctx.lineDashOffset = now * 6;
     ctx.beginPath();
-    ctx.arc(h.x, h.y, h.radius, 0, Math.PI * 2);
+    ctx.arc(h.x, h.y, h.radius, 0, TAU);
     ctx.fill();
     ctx.stroke();
     ctx.restore();
     label(ctx, h.leak ? 'HAZARD — LEAK' : 'HAZARD — TOXIC SMOKE', h.x, h.y - h.radius - 8, '#f0d35a', z);
   }
+}
+
+/**
+ * An evacuation: dashes marching round the zone, a progress arc, the buildings still to
+ * clear outlined and the cleared ones tinted with a tick, and a line to the shelter.
+ */
+function drawEvacuation(ctx, state, now, z, bounds) {
   for (const zone of state.evac?.zones ?? []) {
+    const done = zone.total === 0 ? 1 : (zone.total - zone.queue.length) / zone.total;
     ctx.save();
     ctx.fillStyle = 'rgba(90, 160, 230, 0.06)';
     ctx.strokeStyle = 'rgba(120, 185, 245, 0.75)';
     ctx.lineWidth = 2;
     ctx.setLineDash([4, 9]);
+    ctx.lineDashOffset = -now * 14;
     ctx.beginPath();
-    ctx.arc(zone.x, zone.y, zone.radius, 0, Math.PI * 2);
+    ctx.arc(zone.x, zone.y, zone.radius, 0, TAU);
     ctx.fill();
     ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.strokeStyle = 'rgba(140, 230, 170, 0.95)';
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.arc(zone.x, zone.y, zone.radius + 7, -Math.PI / 2, -Math.PI / 2 + TAU * done);
+    ctx.stroke();
     ctx.restore();
-    label(ctx, `EVACUATION ${zone.total - zone.queue.length}/${zone.total}`, zone.x, zone.y - zone.radius - 8, '#9fd0ff', z);
+
+    const queued = new Set(zone.queue);
+    for (const b of state.buildings) {
+      const clear = b.evacZone === zone.id;
+      if (!clear && !queued.has(b.id)) continue;
+      const x = b.x * TILE;
+      const y = b.y * TILE;
+      const w = b.w * TILE;
+      const h = b.h * TILE;
+      if (!inView(bounds, x, y, w, h)) continue;
+      if (clear) {
+        ctx.fillStyle = 'rgba(95, 150, 230, 0.2)';
+        ctx.fillRect(x, y, w, h);
+        ctx.strokeStyle = 'rgba(160, 235, 185, 0.95)';
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.moveTo(x + w * 0.38, y + h * 0.52);
+        ctx.lineTo(x + w * 0.48, y + h * 0.64);
+        ctx.lineTo(x + w * 0.66, y + h * 0.36);
+        ctx.stroke();
+      } else {
+        ctx.save();
+        ctx.setLineDash([5, 5]);
+        ctx.lineDashOffset = -now * 10;
+        ctx.strokeStyle = 'rgba(255, 215, 110, 0.9)';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x + 1, y + 1, w - 2, h - 2);
+        ctx.restore();
+      }
+    }
+
+    const shelter = zone.shelter ? state.buildings.find((b) => b.id === zone.shelter.buildingId) : null;
+    if (shelter) {
+      const sx = (shelter.x + shelter.w / 2) * TILE;
+      const sy = (shelter.y + shelter.h / 2) * TILE;
+      ctx.save();
+      ctx.strokeStyle = 'rgba(140, 230, 170, 0.6)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([3, 10]);
+      ctx.lineDashOffset = -now * 24;
+      ctx.beginPath();
+      ctx.moveTo(zone.x, zone.y);
+      ctx.lineTo(sx, sy);
+      ctx.stroke();
+      ctx.restore();
+      label(ctx, `SHELTER ${zone.shelter.sheltered}`, sx, sy - (shelter.h * TILE) / 2 - 8, '#9ff0bd', z);
+    }
+    label(ctx, `EVACUATION ${zone.total - zone.queue.length}/${zone.total}`, zone.x, zone.y - zone.radius - 16, '#9fd0ff', z);
   }
 }
 
-function drawCollapsed(ctx, state, now, z) {
+// ---------------------------------------------------------------- collapse ---
+
+const DUST_TIME = 3; // seconds of the big collapse cloud
+
+/**
+ * A collapsed building: a flash and an expanding dust cloud with falling debris for the
+ * first few seconds (drawn from the building's age, so it plays for whoever is looking),
+ * then cracked rubble hatching and a few drifting puffs for as long as people are buried.
+ */
+function drawCollapsed(ctx, state, now, z, bounds) {
   for (const b of state.buildings) {
-    if (!b.collapse) continue;
+    const c = b.collapse;
+    if (!c) continue;
     const x = b.x * TILE;
     const y = b.y * TILE;
     const w = b.w * TILE;
     const h = b.h * TILE;
+    if (!inView(bounds, x - w, y - h, w * 3, h * 3)) continue;
+    const age = Math.max(0, now - c.at);
+
     ctx.save();
     ctx.beginPath();
     ctx.rect(x, y - b.elevation * 0.25, w, h + b.elevation * 0.25);
@@ -18651,9 +19120,43 @@ function drawCollapsed(ctx, state, now, z) {
       ctx.lineTo(x + k + h, y);
       ctx.stroke();
     }
+    if (age < 0.5) {
+      ctx.fillStyle = `rgba(255, 245, 225, ${0.7 * (1 - age / 0.5)})`;
+      ctx.fillRect(x, y - b.elevation, w, h + b.elevation);
+    }
     ctx.restore();
-    const done = 1 - (b.trapped ?? 0) / Math.max(1, b.collapse.initial);
-    label(ctx, `COLLAPSE · ${b.trapped} buried`, x + w / 2, y - 6, '#f2c776', z);
+
+    const cx = x + w / 2;
+    const cy = y + h / 2;
+    if (age < DUST_TIME) {
+      const k = age / DUST_TIME;
+      for (let i = 0; i < 4; i++) {
+        const a = i * 1.7 + b.x;
+        const r = (0.35 + 0.8 * k) * Math.max(w, h) * (0.55 + 0.2 * i);
+        ctx.fillStyle = `rgba(150, 135, 118, ${0.34 * (1 - k)})`;
+        ctx.beginPath();
+        ctx.arc(cx + Math.cos(a) * w * 0.25 * k, cy - h * 0.25 * k + Math.sin(a) * h * 0.2, r, 0, TAU);
+        ctx.fill();
+      }
+      // Chunks falling out of the cloud.
+      ctx.fillStyle = 'rgba(92, 78, 66, 0.9)';
+      for (let i = 0; i < 9; i++) {
+        const px = x + ((i * 0.618 + b.y * 0.07) % 1) * w;
+        const fall = k * (0.4 + (i % 3) * 0.3) * (h + b.elevation);
+        ctx.fillRect(px, y - b.elevation + fall, 4, 4);
+      }
+    } else {
+      for (let i = 0; i < 3; i++) {
+        const p = (now * 0.18 + i / 3 + b.x * 0.1) % 1;
+        ctx.fillStyle = `rgba(150, 140, 128, ${0.28 * (1 - p)})`;
+        ctx.beginPath();
+        ctx.arc(cx + Math.sin(now * 0.7 + i * 2) * w * 0.2, cy - p * (h + b.elevation) * 0.8, Math.max(w, h) * (0.16 + 0.14 * p), 0, TAU);
+        ctx.fill();
+      }
+    }
+
+    label(ctx, `COLLAPSE · ${b.trapped} buried`, cx, y - 6, '#f2c776', z);
+    const done = 1 - (b.trapped ?? 0) / Math.max(1, c.initial);
     ctx.fillStyle = 'rgba(0,0,0,0.6)';
     ctx.fillRect(x, y + h + 4, w, 5);
     ctx.fillStyle = '#7fd69a';
@@ -18661,12 +19164,16 @@ function drawCollapsed(ctx, state, now, z) {
   }
 }
 
+// ------------------------------------------------------------------ support ---
+
 const AGENCY_COLOR = {
   police: '#6e8cff', ems: '#ff7b7b', civil: '#7fe0a0', utility: '#ffd05a', coastguard: '#5ad0ff',
 };
+const AGENCY_NAME = { police: 'POLICE', ems: 'EMS', civil: 'CIVIL PROTECTION', utility: 'UTILITIES', coastguard: 'COAST GUARD' };
 
-function drawSupport(ctx, state, now, z) {
+function drawSupport(ctx, state, now, z, bounds) {
   for (const s of state.support?.active ?? []) {
+    if (!inView(bounds, s.x - s.radius, s.y - s.radius, s.radius * 2, s.radius * 2)) continue;
     const arrived = state.time >= s.arriveAt;
     const color = AGENCY_COLOR[s.agency] ?? '#ffffff';
     ctx.save();
@@ -18674,42 +19181,79 @@ function drawSupport(ctx, state, now, z) {
     ctx.globalAlpha = arrived ? 0.8 : 0.4;
     ctx.lineWidth = 2;
     ctx.setLineDash(arrived ? [] : [6, 6]);
+    ctx.lineDashOffset = -now * 12;
     ctx.beginPath();
-    ctx.arc(s.x, s.y, s.radius, 0, Math.PI * 2);
+    ctx.arc(s.x, s.y, s.radius, 0, TAU);
     ctx.stroke();
     ctx.restore();
-    const name = { police: 'POLICE', ems: 'EMS', civil: 'CIVIL PROTECTION', utility: 'UTILITIES', coastguard: 'COAST GUARD' }[s.agency];
-    label(ctx, arrived ? `${name} ON SCENE` : `${name} · ${Math.ceil(s.arriveAt - state.time)} s`, s.x, s.y + s.radius + 14, color, z);
+    // A flashing light bar on the spot where they are working.
+    if (arrived) {
+      const on = Math.floor(now * 4) % 2 === 0;
+      ctx.fillStyle = on ? color : '#ffffff';
+      ctx.globalAlpha = 0.9;
+      ctx.fillRect(s.x - 10, s.y - 3, 8, 6);
+      ctx.fillStyle = on ? '#ffffff' : color;
+      ctx.fillRect(s.x + 2, s.y - 3, 8, 6);
+      ctx.globalAlpha = 1;
+    }
+    label(ctx, arrived ? `${AGENCY_NAME[s.agency]} ON SCENE` : `${AGENCY_NAME[s.agency]} · ${Math.ceil(s.arriveAt - state.time)} s`, s.x, s.y + s.radius + 14, color, z);
   }
   for (const b of state.buildings) {
     if (!b.utilityCut || b.state === 'rubble') continue;
+    if (!inView(bounds, b.x * TILE, b.y * TILE, b.w * TILE, b.h * TILE)) continue;
     label(ctx, 'GAS + POWER OFF', (b.x + b.w / 2) * TILE, (b.y + b.h) * TILE + 14, '#ffd05a', z);
   }
 }
+
+// ---------------------------------------------------------------- stations ---
 
 const UPGRADE_STYLE = {
   garage: ['G', '#c9a24a'], training: ['T', '#6bb8d8'], medical: ['M', '#e06b6b'], workshop: ['W', '#9aa7b4'],
   comms: ['C', '#a98bf0'], storage: ['S', '#7fd69a'], tower: ['F', '#ff9c4a'],
 };
 
-/** Each upgrade built at a station shows as a small tagged block beside it; a fire watch tower stands up. */
-function drawStationUpgrades(ctx, state, z) {
+/**
+ * Each upgrade built at a station is a tagged block beside it with pips for its level;
+ * a plate over the station gives its overall level. The fire watch tower stands up
+ * with a blinking beacon, and the communication centre has an antenna that pulses.
+ */
+function drawStationUpgrades(ctx, state, now, z, bounds) {
   if (state.mode !== 'career') return;
   state.city.stations.forEach((st, i) => {
     const ups = state.campaign.stations?.[i]?.upgrades;
     if (!ups || !state.ownedStations[i] || st.sea) return;
     const b = st.building;
+    if (!inView(bounds, b.x * TILE, b.y * TILE, (b.w + 8) * TILE, b.h * TILE, 4)) return;
+    const total = Object.values(ups).reduce((a, c) => a + c, 0);
+    if (total === 0) return;
+    label(ctx, `LEVEL ${1 + total}`, (b.x + b.w / 2) * TILE, b.y * TILE - 14 - b.elevation, '#ffd27a', z);
+
     let x = (b.x + b.w) * TILE + 6;
     const y = (b.y + b.h) * TILE - 18;
     for (const [key, [letter, color]] of Object.entries(UPGRADE_STYLE)) {
       const level = ups[key] ?? 0;
       if (!level) continue;
       if (key === 'tower') {
-        // A lattice mast with a lookout cab.
         ctx.fillStyle = '#4d4338';
         ctx.fillRect(x + 6, y - 26 - level * 6, 4, 26 + level * 6);
         ctx.fillStyle = color;
         ctx.fillRect(x, y - 34 - level * 6, 16, 9);
+        const blink = Math.floor(now * 1.5) % 2 === 0;
+        ctx.fillStyle = blink ? '#ff4a3a' : '#5a1a14';
+        ctx.beginPath();
+        ctx.arc(x + 8, y - 38 - level * 6, 3, 0, TAU);
+        ctx.fill();
+      } else if (key === 'comms') {
+        ctx.fillStyle = '#4d4a58';
+        ctx.fillRect(x + 7, y - 20, 2, 20);
+        for (let r = 0; r < 2; r++) {
+          const p = (now * 0.8 + r * 0.5) % 1;
+          ctx.strokeStyle = `rgba(190, 160, 255, ${0.8 * (1 - p)})`;
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.arc(x + 8, y - 20, 4 + p * 14, 0, TAU);
+          ctx.stroke();
+        }
       }
       ctx.fillStyle = 'rgba(14, 18, 22, 0.9)';
       ctx.fillRect(x, y, 16, 16);
@@ -18720,7 +19264,7 @@ function drawStationUpgrades(ctx, state, z) {
       ctx.textAlign = 'center';
       ctx.fillText(letter, x + 8, y + 12);
       for (let k = 0; k < level; k++) {
-        ctx.fillStyle = '#10161b';
+        ctx.fillStyle = '#ffd27a';
         ctx.fillRect(x + 2 + k * 4, y + 17, 3, 3);
       }
       x += 20;
@@ -18728,14 +19272,16 @@ function drawStationUpgrades(ctx, state, z) {
   });
 }
 
-function drawCommandOverlays(ctx, state, now, z) {
-  drawCollapsed(ctx, state, now, z);
-  drawZones(ctx, state, now, z);
-  drawSupport(ctx, state, now, z);
-  drawStationUpgrades(ctx, state, z);
+/** Everything the command layer adds to the map, back to front. `bounds` is the visible tile rectangle. */
+function drawCommandOverlays(ctx, state, now, z, bounds = null) {
+  drawIncidentRings(ctx, state, now, z, bounds);
+  drawCollapsed(ctx, state, now, z, bounds);
+  drawHazards(ctx, state, now, z);
+  drawEvacuation(ctx, state, now, z, bounds);
+  drawSupport(ctx, state, now, z, bounds);
+  drawStationUpgrades(ctx, state, now, z, bounds);
   drawRoutes(ctx, state, now, z);
 }
-
 
 return { drawCommandOverlays };
 })();
@@ -19353,7 +19899,7 @@ function render(ctx, state, cam, view, opts = {}) {
   drawRail(ctx, state, bounds, z);
   drawTrams(ctx, state, bounds, z);
   drawWildfires(ctx, state, now, z);
-  drawCommandOverlays(ctx, state, now, z);
+  drawCommandOverlays(ctx, state, now, z, bounds);
   if (currentDark > 0.12) {
     ctx.globalCompositeOperation = 'lighter';
     if (currentDark > 0.15) drawStreetLights(ctx, state.city, bounds, z, true);
@@ -24171,7 +24717,7 @@ const { startWildfire } = __m["src/systems/wildfire.js"];
 const { playScene } = __m["src/systems/incidents.js"];
 const { ignite } = __m["src/systems/fire.js"];
 const { render, createCamera, clampCamera, screenToWorld } = __m["src/render/render.js"];
-const { KEYS, hasSlot, readSlot, writeSlot } = __m["src/systems/saves.js"];
+const { KEYS, archiveSlot, hasSlot, listBackups, readSlot, restoreBackup, writeSlot } = __m["src/systems/saves.js"];
 const { careerSlotData, createCareer, createScenarioGame, loadCareerSlot, nextCareerShift, scenarioSlotData } = __m["src/systems/modes.js"];
 const { endShift } = __m["src/systems/campaign.js"];
 const { restorePresets } = __m["src/systems/presets.js"];
@@ -24701,6 +25247,7 @@ function centerOnUnit(id) {
 function toggleSound() {
   audio.unlock();
   hud.setSoundState(audio.toggleMute());
+  hud.setSoundSettings(audio.settings());
 }
 
 function onAction(action, data = {}) {
@@ -24845,9 +25392,17 @@ function slotFor(st) {
   return { key: KEYS.quick, data: { kind: 'quick', shift: serialize(st) } };
 }
 
+// The first time this page writes to a slot, what was there is kept under <slot>.replaced:
+// a new shift or career must never silently destroy the save it replaces.
+const guardedSlots = new Set();
+
 function saveGame(quiet = false) {
   const slot = slotFor(state);
   if (!slot) return false;
+  if (!guardedSlots.has(slot.key)) {
+    guardedSlots.add(slot.key);
+    archiveSlot(storage, slot.key, '.replaced');
+  }
   const result = writeSlot(storage, slot.key, slot.data);
   if (!result.ok) {
     addEvent(state, result.error, 'warn');
@@ -24884,15 +25439,29 @@ function switchTo(next, { start = true } = {}) {
 
 const SLOT_BY_MODE = { quick: KEYS.quick, career: KEYS.career, challenge: KEYS.challenge };
 
+/** A message on the start screen (the log is not visible there). */
+function startStatus(text) {
+  const el = document.getElementById('start-status');
+  el.textContent = text ?? '';
+  el.hidden = !text;
+}
+
 /** Load the slot for a mode (the current one by default). */
 function loadGame(mode = state.mode) {
+  startStatus('');
   const slot = readSlot(storage, SLOT_BY_MODE[mode] ?? KEYS.quick);
   if (slot.status === 'none') {
     addEvent(state, 'No saved game found', 'warn');
+    startStatus('No saved game was found.');
     return false;
   }
   if (!['ok', 'migrated'].includes(slot.status)) {
-    addEvent(state, slot.error ?? 'That save cannot be loaded', 'bad');
+    const why = slot.status === 'newer'
+      ? 'That save was made by a newer version of the game, so it was left untouched. Open the newer version to play it.'
+      : `That save cannot be loaded (${slot.error ?? slot.status}). It was left in place; see "Recover an earlier save" below.`;
+    addEvent(state, why, 'bad');
+    startStatus(why);
+    showBackups();
     return false;
   }
   let next;
@@ -24901,6 +25470,7 @@ function loadGame(mode = state.mode) {
   } catch (err) {
     console.error('[load]', err);
     addEvent(state, 'That save could not be rebuilt; it was left untouched', 'bad');
+    startStatus('That save could not be rebuilt; it was left untouched.');
     return false;
   }
   switchTo(next, { start: false });
@@ -25147,10 +25717,47 @@ hud.mount(state, {
   onUnitCenter: centerOnUnit,
 });
 hud.setSoundState(audio.isMuted());
+hud.setSoundSettings(audio.settings());
 
 command.init(storage);
 if (hasSave(KEYS.quick)) document.getElementById('btn-continue').hidden = false;
 if (hasSave(KEYS.career)) document.getElementById('btn-career-continue').hidden = false;
+
+/** The start screen lists the backups kept beside the saves, each with a Restore button. */
+function showBackups() {
+  const box = document.getElementById('recover');
+  const list = document.getElementById('recover-list');
+  const backups = listBackups(storage);
+  box.hidden = backups.length === 0;
+  list.innerHTML = '';
+  for (const b of backups) {
+    const row = document.createElement('div');
+    row.className = 'preset';
+    const text = document.createElement('div');
+    text.className = 'preset__text';
+    const name = document.createElement('b');
+    name.textContent = `${b.slot === 'career' ? 'Career' : b.slot === 'challenge' ? 'Challenge' : 'Quick Response'} — ${b.about}`;
+    const note = document.createElement('em');
+    note.textContent = b.loadable ? (b.savedAt ? `saved ${new Date(b.savedAt).toLocaleString()}` : 'can be restored') : `cannot be loaded: ${b.error ?? b.status}`;
+    text.append(name, note);
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'btn btn--small btn--primary';
+    button.textContent = 'Restore';
+    button.disabled = !b.loadable;
+    button.addEventListener('click', () => {
+      if (!window.confirm('Restore this backup as your current save? The save it replaces is kept.')) return;
+      const r = restoreBackup(storage, b.key);
+      if (!r.ok) window.alert(r.error);
+      document.getElementById('btn-continue').hidden = !hasSave(KEYS.quick);
+      document.getElementById('btn-career-continue').hidden = !hasSave(KEYS.career);
+      showBackups();
+    });
+    row.append(text, button);
+    list.append(row);
+  }
+}
+showBackups();
 
 // Career starting points, and the buttons of the other two modes.
 const startSelect = document.getElementById('career-start');
@@ -25164,9 +25771,7 @@ document.getElementById('btn-career-new').addEventListener('click', () => {
   // A new career never silently replaces a saved one: ask first, and keep the old one under .prev.
   if (hasSave(KEYS.career)) {
     if (!window.confirm('Starting a new career replaces your saved career (a copy is kept). Continue?')) return;
-    try {
-      storage.setItem(KEYS.career + '.prev', storage.getItem(KEYS.career));
-    } catch { /* the copy is best-effort */ }
+    archiveSlot(storage, KEYS.career, '.prev');
   }
   startCareer(document.getElementById('career-name').value, startSelect.value);
 });
@@ -25184,8 +25789,20 @@ document.getElementById('btn-over-menu').addEventListener('click', () => {
   hud.setStationTab('play');
   toggleStation();
 });
-document.addEventListener('change', (ev) => command.onChange(ev, api));
+document.addEventListener('change', (ev) => {
+  const cat = ev.target?.dataset?.soundCat;
+  if (cat) {
+    audio.setCategory(cat, ev.target.checked);
+    hud.setSoundSettings(audio.settings());
+    return;
+  }
+  command.onChange(ev, api);
+});
 document.addEventListener('input', (ev) => {
+  if (ev.target?.id === 'sound-volume') {
+    audio.setVolume(Number(ev.target.value) / 100);
+    return;
+  }
   // Search boxes filter as you type.
   if (ev.target?.dataset?.filter === 'people-q') command.onChange(ev, api);
 });
@@ -25206,6 +25823,20 @@ window.__fireStation = {
   get state() { return state; },
   get cam() { return cam; },
   view,
+  // Advance the simulation by hand and draw a frame: for headless tests and for browsers
+  // that do not run animation frames in the background. Honours pause like the loop does.
+  step(seconds = 1) {
+    const ticks = Math.max(1, Math.round(seconds * 60));
+    const t0 = performance.now();
+    for (let i = 0; i < ticks; i++) update(state, 1 / 60);
+    const t1 = performance.now();
+    frame(0);
+    const t2 = performance.now();
+    hud.update(state, true);
+    const t3 = performance.now();
+    window.__fireStation.lastStep = { sim: t1 - t0, frame: t2 - t1, hud: t3 - t2, ticks };
+    return state.time;
+  },
 };
 
 // Development helpers, used by the headless screenshots in the README:

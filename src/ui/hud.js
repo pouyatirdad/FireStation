@@ -392,7 +392,7 @@ export function update(state, force = false) {
   updateToasts(state);
   updateTooltip(state);
   updateGameOver(state);
-  if (!$('screen-station').hidden) updateStation(state);
+  if (!$('screen-station').hidden) updateStationThrottled(state);
 }
 
 /** Career shift clock or the scenario's name and time left; hidden in Quick Response. */
@@ -1098,7 +1098,21 @@ function contractsTab(state) {
     '<p class="budget__total">Completed ' + c.completed + ' · failed ' + c.failed + '</p>';
 }
 
+let lastStationAt = 0;
+
+/**
+ * The open Headquarters panel is rebuilt a few times a second while the game runs and
+ * hardly at all while it is paused behind it (nothing changes). Orders call
+ * `updateStation` directly and always rebuild.
+ */
+function updateStationThrottled(state) {
+  const now = performance.now();
+  if (now - lastStationAt < (state.paused ? 700 : 250)) return;
+  updateStation(state);
+}
+
 export function updateStation(state) {
+  lastStationAt = performance.now();
   // Rebuilding the panel under someone who is typing or choosing would lose their place.
   if (command.isEditing($('station-body'))) return;
   const list = command.tabsFor(state);
@@ -1118,7 +1132,7 @@ export function updateStation(state) {
     '<p class="station__saved">' + (state.saveStatus ? 'Saved at ' + state.saveStatus : 'Autosaves every 30 seconds') + '</p>' +
     '<p class="station__keys"><kbd>B</kbd> headquarters · <kbd>D</kbd> dispatch · <kbd>A</kbd> dispatch all · <kbd>Z</kbd> back all · <kbd>E</kbd> deploy · <kbd>R</kbd> pack up · <kbd>G</kbd> hydrant · <kbd>P</kbd> pharmacy · <kbd>K</kbd> hospital · <kbd>Tab</kbd> next incident · <kbd>M</kbd> sound · <kbd>F1</kbd> controls</p>';
 
-  const html = '<p class="menu__eyebrow">Headquarters</p>' + tabs + body + footer;
+  const html = '<p class="menu__eyebrow">Headquarters</p>' + tabs + body + soundPanel() + footer;
   // Rebuilding the DOM under the pointer swallows clicks, so only touch it on a change.
   if (html === lastStationHtml) return;
   const box = $('station-body');
@@ -1126,6 +1140,25 @@ export function updateStation(state) {
   box.innerHTML = html;
   if (box.parentElement) box.parentElement.scrollTop = scroll;
   lastStationHtml = html;
+}
+
+let soundSettings = null;
+
+/** The sound panel (volume and what is switched off) lives in the Headquarters footer. */
+export function setSoundSettings(settings) {
+  soundSettings = settings;
+  lastStationHtml = '';
+}
+
+const SOUND_LABEL = { alerts: 'Alerts', radio: 'Radio', sirens: 'Sirens', ambience: 'Ambience', effects: 'Effects' };
+
+function soundPanel() {
+  if (!soundSettings) return '';
+  const cats = Object.entries(SOUND_LABEL).map(([id, label]) =>
+    '<label class="field field--check"><input type="checkbox" data-sound-cat="' + id + '"' + (soundSettings.categories[id] !== false ? ' checked' : '') + '><span>' + label + '</span></label>').join('');
+  return '<div class="station__sound"><p class="menu__eyebrow">Sound' + (soundSettings.muted ? ' — muted (M)' : '') + '</p>' +
+    '<label class="field field--inline"><span>Volume</span><input type="range" id="sound-volume" min="0" max="100" value="' + Math.round(soundSettings.volume * 100) + '"></label>' +
+    '<div class="station__sound-cats">' + cats + '</div></div>';
 }
 
 /** Reflect the sound toggle on its button. */

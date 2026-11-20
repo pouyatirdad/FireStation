@@ -2032,3 +2032,15 @@ p.form-error { padding-left: 10px; }
   .stat--mode { display: none; }
 }
 
+
+.start-status { margin: 10px 0 0; padding: 8px 12px; border-radius: 5px; background: rgba(212, 80, 76, 0.16); color: #ffb0a8; font-size: 12.5px; line-height: 1.5; }
+.recover { margin-top: 10px; font-size: 12px; }
+.recover summary { cursor: pointer; color: var(--muted); }
+.recover[open] summary { margin-bottom: 6px; }
+
+/* The mode cards must shrink on a phone: a long option in the starting-point list may not widen them. */
+.mode { min-width: 0; }
+.mode select, .mode input { width: 100%; max-width: 100%; text-overflow: ellipsis; }
+@media (max-width: 900px), (max-height: 520px) {
+  .modes { grid-template-columns: minmax(0, 1fr); }
+}

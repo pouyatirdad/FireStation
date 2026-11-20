@@ -28,6 +28,9 @@ npm test                 # or: node --test test/
 
 Node 18+ is only needed for the build and the tests; playing needs nothing but a browser.
 
+Build and test from the project folder: `node tools/build.mjs` (or `npm run build`) regenerates `index.html`,
+`npm test` runs every test (about a minute and a half).
+
 ## The shift
 
 You command **Station 1** in Harbor City: about 1,400 buildings, 430 hydrants, 40 pharmacies, eight
@@ -286,8 +289,19 @@ over many 16-minute shifts, and grow from a Recruit Department to the National E
 - **Money**: salaries and maintenance every game hour, monthly government funding, budgets,
   bankruptcy warnings and emergency funding. The levels unlock vehicles, stations and upgrade levels.
 - **Objectives**: main, secondary, daily and long-term goals with rewards.
-- **End of shift**: Career › End shift files the report, pays a performance bonus, moves reputation
-  and starts the next shift with your fleet, stations and people.
+- **End of shift**: Career › End shift (once half the shift has run) files the report, pays a performance
+  bonus scaled to the time played, moves reputation and starts the next shift with your fleet, stations and
+  people. Every shift has its own calls and wind.
+- **Station budgets**: set a monthly budget per station in Stations (0 means no limit). Upkeep is always
+  paid, but a vehicle, upgrade or training that would take the station over its budget is refused until
+  next month or until you raise the budget.
+
+### Sound
+
+Headquarters has a sound panel: volume and five categories (alerts, radio, sirens, ambience, effects)
+that can be switched off separately; <kbd>M</kbd> mutes everything. Police, EMS, civil protection, utility
+services and the coast guard each have their own siren when they are on their way or on scene. Sounds are
+rate-limited so a busy night never turns into noise.
 
 ### Advanced operations
 
@@ -313,6 +327,9 @@ Shift saves are version 17.
 - An unreadable save is copied to `<key>.corrupt` rather than deleted.
 - Missing or damaged fields get safe defaults; a damaged person record is repaired on load.
 - Starting a new career asks first and keeps the old one under `firestation.career.v1.prev`.
+- The first time a page writes to a slot, what was there is kept under `<slot>.replaced`.
+- The start screen lists these backups under *Recover an earlier save*; restoring one keeps the save it
+  replaces. An unloadable save says why instead of failing silently.
 - A career is saved only while a shift is running; once a shift is filed the next shift is built
   before the next save.
 
@@ -435,7 +452,9 @@ needs editing.
 ?disaster=earthquake  start a disaster: earthquake, hurricane, airport, industrial, siege, blocks
 ```
 
-`window.__fireStation` exposes the live state and camera, read-only, for headless probes.
+`window.__fireStation` exposes the live state and camera for headless probes, and `step(seconds)` advances the
+simulation by hand and draws a frame (for browsers that do not run animation frames in the background);
+`lastStep` holds the sim, draw and HUD times of the last call.
 
 ## Project layout
 

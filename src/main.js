@@ -30,7 +30,7 @@ import { render, createCamera, clampCamera, screenToWorld } from './render/rende
 import * as hud from './ui/hud.js';
 import * as command from './ui/command.js';
 import {
-  KEYS, hasSlot, readSlot, writeSlot,
+  KEYS, archiveSlot, hasSlot, listBackups, readSlot, restoreBackup, writeSlot,
 } from './systems/saves.js';
 import {
   careerSlotData, createCareer, createScenarioGame, loadCareerSlot, nextCareerShift, scenarioSlotData,
@@ -534,6 +534,7 @@ function centerOnUnit(id) {
 function toggleSound() {
   audio.unlock();
   hud.setSoundState(audio.toggleMute());
+  hud.setSoundSettings(audio.settings());
 }
 
 function onAction(action, data = {}) {
@@ -678,9 +679,17 @@ function slotFor(st) {
   return { key: KEYS.quick, data: { kind: 'quick', shift: serialize(st) } };
 }
 
+// The first time this page writes to a slot, what was there is kept under <slot>.replaced:
+// a new shift or career must never silently destroy the save it replaces.
+const guardedSlots = new Set();
+
 function saveGame(quiet = false) {
   const slot = slotFor(state);
   if (!slot) return false;
+  if (!guardedSlots.has(slot.key)) {
+    guardedSlots.add(slot.key);
+    archiveSlot(storage, slot.key, '.replaced');
+  }
   const result = writeSlot(storage, slot.key, slot.data);
   if (!result.ok) {
     addEvent(state, result.error, 'warn');
@@ -717,15 +726,29 @@ function switchTo(next, { start = true } = {}) {
 
 const SLOT_BY_MODE = { quick: KEYS.quick, career: KEYS.career, challenge: KEYS.challenge };
 
+/** A message on the start screen (the log is not visible there). */
+function startStatus(text) {
+  const el = document.getElementById('start-status');
+  el.textContent = text ?? '';
+  el.hidden = !text;
+}
+
 /** Load the slot for a mode (the current one by default). */
 function loadGame(mode = state.mode) {
+  startStatus('');
   const slot = readSlot(storage, SLOT_BY_MODE[mode] ?? KEYS.quick);
   if (slot.status === 'none') {
     addEvent(state, 'No saved game found', 'warn');
+    startStatus('No saved game was found.');
     return false;
   }
   if (!['ok', 'migrated'].includes(slot.status)) {
-    addEvent(state, slot.error ?? 'That save cannot be loaded', 'bad');
+    const why = slot.status === 'newer'
+      ? 'That save was made by a newer version of the game, so it was left untouched. Open the newer version to play it.'
+      : `That save cannot be loaded (${slot.error ?? slot.status}). It was left in place; see "Recover an earlier save" below.`;
+    addEvent(state, why, 'bad');
+    startStatus(why);
+    showBackups();
     return false;
   }
   let next;
@@ -734,6 +757,7 @@ function loadGame(mode = state.mode) {
   } catch (err) {
     console.error('[load]', err);
     addEvent(state, 'That save could not be rebuilt; it was left untouched', 'bad');
+    startStatus('That save could not be rebuilt; it was left untouched.');
     return false;
   }
   switchTo(next, { start: false });
@@ -980,10 +1004,47 @@ hud.mount(state, {
   onUnitCenter: centerOnUnit,
 });
 hud.setSoundState(audio.isMuted());
+hud.setSoundSettings(audio.settings());
 
 command.init(storage);
 if (hasSave(KEYS.quick)) document.getElementById('btn-continue').hidden = false;
 if (hasSave(KEYS.career)) document.getElementById('btn-career-continue').hidden = false;
+
+/** The start screen lists the backups kept beside the saves, each with a Restore button. */
+function showBackups() {
+  const box = document.getElementById('recover');
+  const list = document.getElementById('recover-list');
+  const backups = listBackups(storage);
+  box.hidden = backups.length === 0;
+  list.innerHTML = '';
+  for (const b of backups) {
+    const row = document.createElement('div');
+    row.className = 'preset';
+    const text = document.createElement('div');
+    text.className = 'preset__text';
+    const name = document.createElement('b');
+    name.textContent = `${b.slot === 'career' ? 'Career' : b.slot === 'challenge' ? 'Challenge' : 'Quick Response'} — ${b.about}`;
+    const note = document.createElement('em');
+    note.textContent = b.loadable ? (b.savedAt ? `saved ${new Date(b.savedAt).toLocaleString()}` : 'can be restored') : `cannot be loaded: ${b.error ?? b.status}`;
+    text.append(name, note);
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'btn btn--small btn--primary';
+    button.textContent = 'Restore';
+    button.disabled = !b.loadable;
+    button.addEventListener('click', () => {
+      if (!window.confirm('Restore this backup as your current save? The save it replaces is kept.')) return;
+      const r = restoreBackup(storage, b.key);
+      if (!r.ok) window.alert(r.error);
+      document.getElementById('btn-continue').hidden = !hasSave(KEYS.quick);
+      document.getElementById('btn-career-continue').hidden = !hasSave(KEYS.career);
+      showBackups();
+    });
+    row.append(text, button);
+    list.append(row);
+  }
+}
+showBackups();
 
 // Career starting points, and the buttons of the other two modes.
 const startSelect = document.getElementById('career-start');
@@ -997,9 +1058,7 @@ document.getElementById('btn-career-new').addEventListener('click', () => {
   // A new career never silently replaces a saved one: ask first, and keep the old one under .prev.
   if (hasSave(KEYS.career)) {
     if (!window.confirm('Starting a new career replaces your saved career (a copy is kept). Continue?')) return;
-    try {
-      storage.setItem(KEYS.career + '.prev', storage.getItem(KEYS.career));
-    } catch { /* the copy is best-effort */ }
+    archiveSlot(storage, KEYS.career, '.prev');
   }
   startCareer(document.getElementById('career-name').value, startSelect.value);
 });
@@ -1017,8 +1076,20 @@ document.getElementById('btn-over-menu').addEventListener('click', () => {
   hud.setStationTab('play');
   toggleStation();
 });
-document.addEventListener('change', (ev) => command.onChange(ev, api));
+document.addEventListener('change', (ev) => {
+  const cat = ev.target?.dataset?.soundCat;
+  if (cat) {
+    audio.setCategory(cat, ev.target.checked);
+    hud.setSoundSettings(audio.settings());
+    return;
+  }
+  command.onChange(ev, api);
+});
 document.addEventListener('input', (ev) => {
+  if (ev.target?.id === 'sound-volume') {
+    audio.setVolume(Number(ev.target.value) / 100);
+    return;
+  }
   // Search boxes filter as you type.
   if (ev.target?.dataset?.filter === 'people-q') command.onChange(ev, api);
 });
@@ -1039,6 +1110,20 @@ window.__fireStation = {
   get state() { return state; },
   get cam() { return cam; },
   view,
+  // Advance the simulation by hand and draw a frame: for headless tests and for browsers
+  // that do not run animation frames in the background. Honours pause like the loop does.
+  step(seconds = 1) {
+    const ticks = Math.max(1, Math.round(seconds * 60));
+    const t0 = performance.now();
+    for (let i = 0; i < ticks; i++) update(state, 1 / 60);
+    const t1 = performance.now();
+    frame(0);
+    const t2 = performance.now();
+    hud.update(state, true);
+    const t3 = performance.now();
+    window.__fireStation.lastStep = { sim: t1 - t0, frame: t2 - t1, hud: t3 - t2, ticks };
+    return state.time;
+  },
 };
 
 // Development helpers, used by the headless screenshots in the README:

@@ -16,7 +16,7 @@ import {
 } from '../src/systems/personnel.js';
 import { bankruptcyStatus, fundingForMonth, hourlyBurn, monthSeconds, maintenanceBreakdown } from '../src/systems/finance.js';
 import { vehicleUnlocked, coverage, compareStations, upgradeBlock } from '../src/systems/stations.js';
-import { endShift, levelProgress } from '../src/systems/campaign.js';
+import { endShift, levelProgress, shiftBlock } from '../src/systems/campaign.js';
 import { listObjectives, updateObjectives } from '../src/systems/objectives.js';
 import { toolCount, stationCapacity } from '../src/systems/units.js';
 import { ignite } from '../src/systems/fire.js';
@@ -423,6 +423,7 @@ test('objectives complete, pay, and stay completed', () => {
   assert.equal(listObjectives(state).find((o) => o.id === 'first-shift').done, false);
 
   const before = state.credits;
+  state.time = 600;
   const next = nextCareerShift(state);
   const s2 = next.state;
   assert.equal(s2.campaign.objectives.completed['first-shift'], 1);
@@ -443,6 +444,7 @@ test('progress carries across shifts: stations, roster and totals count', () => 
   assert.equal(row.fraction, 1);
   updateObjectives(state, 5, true);
   assert.ok(state.campaign.objectives.completed['second-station'] != null);
+  state.time = 600;
   const next = nextCareerShift(state).state;
   assert.equal(next.ownedStations[1], true, 'the second station carries over');
   assert.equal(next.campaign.objectives.completed['second-station'] != null, true);
@@ -457,6 +459,7 @@ test('a good shift raises reputation and promotes the department; the fleet carr
   const p = levelProgress(state.campaign);
   assert.equal(p.ready, true);
   const fleet = state.engines.map((e) => e.type);
+  state.time = 600;
   const { state: next, summary } = nextCareerShift(state);
   assert.equal(summary.leveled.id, 4, 'enough reputation and shifts for several promotions at once');
   assert.equal(next.campaign.level, 4);
@@ -492,4 +495,50 @@ test('career mode is independent of quick response: a career never leaks into a 
   assert.equal(q.credits, CONFIG.economy.start);
   assert.notEqual(c.credits, q.credits);
   assert.equal(q.engines.length, 1);
+});
+
+test('an objective completed in the very first shift pays once, not every second', () => {
+  const state = career();
+  state.credits = 1000;
+  state.campaign.level = 3; // 'city-dept' needs level 3: met at once, in shift 0
+  updateObjectives(state, 5, true);
+  const afterFirst = state.credits;
+  assert.ok(afterFirst > 1000, 'it paid');
+  assert.equal(state.campaign.objectives.completed['city-dept'], 0, 'completed in shift 0');
+  for (let i = 0; i < 10; i++) updateObjectives(state, 5, true);
+  assert.equal(state.credits, afterFirst, 'and never again');
+  assert.equal(listObjectives(state).find((o) => o.id === 'city-dept').done, true);
+  assert.equal(state.events.filter((e) => e.text.includes('Reach City Department')).length, 1);
+});
+
+test('a shift cannot be filed at once: no bonus, experience or promotion farming', () => {
+  const state = career();
+  const credits = state.credits;
+  assert.match(shiftBlock(state), /at least half its length/);
+  assert.equal(endShift(state), null, 'refused at the start');
+  assert.equal(nextCareerShift(state), null);
+  assert.equal(state.credits, credits);
+  assert.equal(state.campaign.shifts, 0);
+  assert.ok(state.events.some((e) => e.text.includes('at least half its length')));
+
+  state.time = CONFIG.career.shiftLength * CONFIG.career.minShiftShare;
+  assert.equal(shiftBlock(state), null);
+  const half = endShift(state);
+  assert.ok(half);
+  assert.equal(half.report.rating.grade, 'B', 'a shift with nothing to do cannot earn a top grade');
+  assert.ok(half.report.rating.score <= 70);
+  // The bonus is paid in proportion to the time played.
+  assert.ok(state.ledger.by.bonus === undefined || state.ledger.by.bonus <= 450 + 1500 + 1);
+});
+
+test('emergency funding clears a deep debt with a cushion, and is capped', () => {
+  const state = career();
+  state.credits = -30000;
+  assert.equal(commandEmergencyFunding(state), true);
+  assert.ok(state.credits >= CONFIG.career.bankruptcy.cushion - 500, `credits ${state.credits}`);
+  assert.ok(state.credits <= CONFIG.career.bankruptcy.cushion + 500);
+  const s2 = career();
+  s2.credits = -500000;
+  commandEmergencyFunding(s2);
+  assert.equal(s2.credits, -500000 + CONFIG.career.bankruptcy.emergencyMax, 'never more than the cap');
 });

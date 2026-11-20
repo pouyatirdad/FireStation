@@ -12,6 +12,7 @@ import { addEvent } from './events.js';
 import { spend } from './economy.js';
 import { isCareer, personOf, stationOfEngine, upgradeLevel } from './modifiers.js';
 import { addCrewMember, crewOf, ownsStation, removeCrewMember } from './units.js';
+import { chargeStation, stationBudgetBlock } from './stations.js';
 
 const P = () => CONFIG.personnel;
 const money = (n) => `$${Math.round(n).toLocaleString('en-US')}`;
@@ -40,22 +41,29 @@ export function newPersonId(state) {
   return `p${c.nextPersonId++}`;
 }
 
-/** Keep a short list of people looking for a job; the list turns over now and then. */
+/**
+ * Keep a short list of people looking for a job. The whole list turns over when it
+ * expires; between turnovers a hire only leaves a gap that is filled with one new face
+ * (so hiring cannot be used to re-roll the list).
+ */
 export function refreshCandidates(state, force = false) {
   const c = state.campaign;
   if (!c) return [];
-  if (!force && c.candidates?.length >= P().candidates && state.time < (c.candidatesUntil ?? 0)) return c.candidates;
+  const expired = state.time >= (c.candidatesUntil ?? 0);
+  if (!force && !expired && c.candidates?.length >= P().candidates) return c.candidates;
   const rng = campaignRng(state);
   const rep = clamp((c.reputation ?? 0) / 100, 0, 1);
-  c.candidates = [];
-  for (let i = 0; i < P().candidates; i++) {
+  if (force || expired) {
+    c.candidates = [];
+    c.candidatesUntil = state.time + P().candidateLife;
+  }
+  while (c.candidates.length < P().candidates) {
     const person = makePerson(rng, newPersonId(state), 0.25 + 0.6 * rep);
     person.status = 'candidate';
     // Better people ask for more.
     person.askingFee = Math.round((P().hireCost * (0.8 + 0.07 * Object.values(person.skills).reduce((a, b) => a + b, 0) / 5)) / 10) * 10;
     c.candidates.push(person);
   }
-  c.candidatesUntil = state.time + P().candidateLife;
   return c.candidates;
 }
 
@@ -224,7 +232,7 @@ export function trainingBlock(state, person, courseId) {
   if (!ownsStation(state, station)) return 'No station to train at';
   if (trainees(state, station).length >= trainingSlots(state, station)) return 'The training centre is full';
   if (state.credits < course.cost) return `Needs ${money(course.cost)}`;
-  return null;
+  return stationBudgetBlock(state, station, course.cost);
 }
 
 export function startTraining(state, personId, courseId) {
@@ -238,6 +246,7 @@ export function startTraining(state, personId, courseId) {
   const course = courseOf(courseId);
   const station = person.station ?? 0;
   spend(state, course.cost, 'training');
+  chargeStation(state, station, course.cost);
   const speed = 1 + 0.25 * upgradeLevel(state, station, 'training');
   unassignPerson(state, personId);
   person.status = 'training';
@@ -263,6 +272,7 @@ export function updatePersonnel(state, dt) {
   if (!isCareer(state)) return;
   const f = P().fatigue;
   const pending = [];
+  refreshCandidates(state);
 
   for (const crew of state.crew) {
     const person = personOf(state, crew);

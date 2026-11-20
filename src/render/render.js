@@ -187,7 +187,7 @@ export function render(ctx, state, cam, view, opts = {}) {
   drawRail(ctx, state, bounds, z);
   drawTrams(ctx, state, bounds, z);
   drawWildfires(ctx, state, now, z);
-  drawCommandOverlays(ctx, state, now, z);
+  drawCommandOverlays(ctx, state, now, z, bounds);
   if (currentDark > 0.12) {
     ctx.globalCompositeOperation = 'lighter';
     if (currentDark > 0.15) drawStreetLights(ctx, state.city, bounds, z, true);

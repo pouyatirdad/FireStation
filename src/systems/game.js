@@ -7,7 +7,7 @@ import { Rng, formatClock } from '../core/math.js';
 import { createCity } from '../data/city.js';
 import { buildNav } from './grid.js';
 import {
-  activeEngine, buildingOf, buyVehicle, createUnits, deployCrew, dispatchEngine,
+  activeEngine, buildingOf, buyVehicle, freeBay, createUnits, deployCrew, dispatchEngine,
   engineForUnit, orderAmbulanceToPatient, orderCrew, orderEngine, orderEngineToWildfire,
   orderEngineToBlockade, pickAmbulanceFor, pickEngineForBlockade, recallCrew, repathEngines,
   restoreFleet, sellVehicle, sendEngineHome, sendToHospital, sendToPharmacy,
@@ -41,7 +41,7 @@ import { spawnDebris, updateEffects } from './effects.js';
 import { updateFleeing } from './civilians.js';
 import { updateIncidents } from './incidents.js';
 import { restoreWildfires, updateWildfires } from './wildfire.js';
-import { applyStationEffects, stationBlock, vehicleBlock } from './stations.js';
+import { applyStationEffects, chargeStation, refundStation, stationBlock, stationBudgetBlock, vehicleBlock } from './stations.js';
 import { createReport, observe, restoreReport } from './report.js';
 import { defaultPresets, restorePresets } from './presets.js';
 import { createSupport, restoreSupport, updateSupport } from './agencies.js';
@@ -53,7 +53,7 @@ import { updatePersonnel, releaseVehicle, staffVehicle } from './personnel.js';
 import { updateCareerFinance } from './finance.js';
 import { updateObjectives } from './objectives.js';
 import { updateScenario } from './challenges.js';
-import { isCareer } from './modifiers.js';
+import { isCareer, stationOfEngine } from './modifiers.js';
 import { setWeather } from './weather.js';
 
 export function createGame(seed = CONFIG.city.seed) {
@@ -72,6 +72,7 @@ export function createGame(seed = CONFIG.city.seed) {
     over: false,
     speed: 1,
     incidentsEnabled: true,
+    rngSeed: seed * 7919 + 13, // the seed of this shift's calls; a career gives every shift its own
     rng: new Rng(seed * 7919 + 13),
     rating: CONFIG.rating.start,
     credits: CONFIG.economy.start,
@@ -616,9 +617,21 @@ export function commandBuyVehicle(state, type = 'engine', station = null) {
     addEvent(state, `${CONFIG.vehicles[type]?.label ?? type}: ${block}`, 'warn');
     return null;
   }
+  // A career station only buys what its monthly budget allows.
+  const spec = CONFIG.vehicles[type];
+  if (spec && isCareer(state)) {
+    const bay = freeBay(state, spec.boat ? 2 : station, Boolean(spec.boat));
+    const home = bay >= 0 ? state.city.bays[bay].station : null;
+    const over = home != null ? stationBudgetBlock(state, home, spec.cost) : null;
+    if (over) {
+      addEvent(state, `${spec.label}: ${over}`, 'warn');
+      return null;
+    }
+  }
   const engine = buyVehicle(state, type, station);
   if (engine) {
     if (isCareer(state)) {
+      chargeStation(state, stationOfEngine(state, engine), engine.spec.cost);
       staffVehicle(state, engine);
       applyStationEffects(state);
       if (engine.spec.crew > 0 && engine.crewIds.length < engine.spec.crew) {
@@ -678,7 +691,10 @@ export function commandSellVehicle(state, id = null) {
     ? state.engines.find((e) => e.id === id)
     : engineForUnit(state, getSelected(state)) ?? activeEngine(state);
   if (engine) releaseVehicle(state, engine);
-  return sellVehicle(state, engine);
+  const home = engine ? stationOfEngine(state, engine) : null;
+  const refund = sellVehicle(state, engine);
+  if (refund && home != null) refundStation(state, home, refund);
+  return refund;
 }
 
 // Re-exported so the UI has one module to talk to for orders.
@@ -792,6 +808,7 @@ function serializeExtras(state) {
     scenario: copy(state.scenario),
     shiftDue: Boolean(state.shiftDue),
     incidentPace: state.incidentPace ?? 1,
+    rngSeed: state.rngSeed,
     buildingExtras: state.buildings
       .filter((b) => b.leak || b.collapse || b.utilityCut || b.evacZone)
       .map((b) => ({ id: b.id, leak: b.leak ?? 0, collapse: copy(b.collapse ?? null), utilityCut: Boolean(b.utilityCut), evacZone: b.evacZone ?? null, evacOccupants: b.evacOccupants ?? null })),
@@ -811,6 +828,9 @@ function restoreExtras(state, data, campaign) {
   state.scenario = state.mode === 'challenge' ? data.scenario : null;
   state.shiftDue = Boolean(data.shiftDue);
   state.incidentPace = data.incidentPace ?? 1;
+  // A loaded shift carries on with fresh luck instead of replaying the calls it started with.
+  if (Number.isFinite(data.rngSeed)) state.rngSeed = data.rngSeed;
+  state.rng = new Rng(state.rngSeed + Math.floor(state.time) * 31 + 1);
   if (data.weather?.kind) setWeather(state, data.weather.kind);
   const byId = new Map(state.buildings.map((b) => [b.id, b]));
   for (const e of data.buildingExtras ?? []) {

@@ -11,7 +11,7 @@ import {
   newScenarioTemplate, saveScenarioTo,
 } from '../data/scenarios.js';
 import { WEATHER } from '../systems/weather.js';
-import { buildingScenes } from '../systems/scenes.js';
+import { SCENES } from '../systems/scenes.js';
 import {
   INCIDENT_KINDS as PRESET_KINDS, availableVehicles, nearestStations, planPreset, recommendedPresets,
 } from '../systems/presets.js';
@@ -21,11 +21,11 @@ import { allAgencies } from '../systems/agencies.js';
 import { evacuationAdvice } from '../systems/evacuation.js';
 import { buildReport, formatDuration } from '../systems/report.js';
 import { isCareer } from '../systems/modifiers.js';
-import { levelProgress, readiness } from '../systems/campaign.js';
+import { levelProgress, readiness, shiftBlock } from '../systems/campaign.js';
 import { listObjectives } from '../systems/objectives.js';
 import { courseOf, payrollPerHour, people, rosterSummary, trainees, trainingBlock, trainingSlots } from '../systems/personnel.js';
 import {
-  UPGRADE_KEYS, compareStations, coverage, levelInfo, stationLevel, upgradeBlock, upgradeCost,
+  UPGRADE_KEYS, budgetSummary, compareStations, coverage, levelInfo, stationLevel, upgradeBlock, upgradeCost,
 } from '../systems/stations.js';
 import { financialReport } from '../systems/finance.js';
 import { stationCapacity } from '../systems/units.js';
@@ -73,8 +73,6 @@ export function init(storage) {
     ui.results = {};
   }
 }
-
-export const refreshResults = () => { if (ui.storage) ui.results = loadResults(ui.storage); };
 
 export function noteResult(id, result) {
   if (!ui.storage) return null;
@@ -313,7 +311,8 @@ export function stationsTab(state) {
         level >= def.max ? '<em>Complete</em>' : btn(`Upgrade ${money(upgradeCost(key, level + 1))}`, 'upgrade', `data-station="${i}" data-key="${key}"${block ? ` disabled title="${esc(block)}"` : ''}`, 'btn btn--small btn--primary')}</div>`;
     }).join('');
     return `<div class="station-card"><header><b>${esc(st.name)}</b><span>level ${stationLevel(state, i)} · ${used}/${stationCapacity(state, i)} bays · ${(state.campaign.personnel).filter((p) => p.station === i && p.vehicleId).length} crew</span></header>${ups}
-      <label class="field field--inline"><span>Monthly budget</span><input type="number" min="0" step="100" id="stbudget-${i}" value="${rec?.budget ?? 0}"><button type="button" class="btn btn--small" data-action="station-budget" data-station="${i}">Set</button></label></div>`;
+      ${rec?.budget > 0 ? `<div class="intel__row"><span>Spent this month</span><b data-tone="${(rec.spentMonth ?? 0) > rec.budget ? 'bad' : ''}">${money(rec.spentMonth ?? 0)} of ${money(rec.budget)}</b>${bar((rec.spentMonth ?? 0) / rec.budget, (rec.spentMonth ?? 0) > rec.budget ? 'bar--fire' : '')}</div>` : `<div class="intel__row"><span>Spent this month</span><b>${money(rec?.spentMonth ?? 0)}</b><span>no limit</span></div>`}
+      <label class="field field--inline"><span>Monthly budget (0 = no limit)</span><input type="number" min="0" step="100" id="stbudget-${i}" value="${rec?.budget ?? 0}"><button type="button" class="btn btn--small" data-action="station-budget" data-station="${i}">Set</button></label></div>`;
   }).join('');
 
   const rows = compareStations(state).map((r) => `<tr><td>${esc(r.name)}</td><td>${r.level}</td><td>${r.vehicles}</td><td>${r.staff}</td><td>${r.resolved}/${r.incidents}</td><td>${formatDuration(r.avgResponse)}</td><td>${money(r.cost)}</td></tr>`).join('');
@@ -321,7 +320,11 @@ export function stationsTab(state) {
     ? cov.underserved.slice(0, 6).map((d) => `<div class="intel__row"><span>${esc(d.district)}</span><b>${Math.round(d.seconds)} s from ${esc(d.station)}</b></div>`).join('')
     : '<p class="budget__total">Every district is within reach.</p>';
 
+  const alloc = budgetSummary(state);
+  const funding = financialReport(state).funding;
+  const allocNote = `Budgets allocated: ${money(alloc.allocated)} of about ${money(funding)} in monthly funding${alloc.allocated > funding ? ' — you have promised more than the city pays' : ''}. A station over its budget still pays its upkeep but cannot buy vehicles, upgrades or training until next month.`;
   return `<p class="station__note">Department level ${state.campaign.level} lets you run ${levelInfo(state.campaign).stations === 99 ? 'any number of' : levelInfo(state.campaign).stations} station${levelInfo(state.campaign).stations === 1 ? '' : 's'} and upgrade to level ${levelInfo(state.campaign).upgradeCap}. Open new stations in the Fleet tab.</p>` +
+    section('Station budgets', '<p class="budget__total">' + allocNote + '</p>') +
     stations +
     section(`Coverage — ${pct(cov.share)} of the city's buildings are within a minute and a quarter`, under, 'Districts a vehicle needs longer than that to reach:') +
     section('Station comparison', `<table class="cmd-table"><thead><tr><th>Station</th><th>Lvl</th><th>Veh</th><th>Crew</th><th>Done</th><th>Resp.</th><th>Upkeep</th></tr></thead><tbody>${rows}</tbody></table>`);
@@ -348,7 +351,7 @@ export function careerTab(state) {
 
   const shiftBox = summary
     ? `<p class="station__note">Shift ${summary.shiftNumber} is filed. ${summary.leveled ? `<b>Promoted to ${esc(summary.leveled.name)}.</b>` : ''}</p>${reportHtml(state, summary.report)}<div class="finance__buttons">${btn('Start the next shift', 'next-shift', '', 'btn btn--primary')}</div>`
-    : `<p class="station__note">${state.shiftDue ? '<b>The shift is over.</b> ' : `${formatDuration(left)} left in this shift. `}File the report when you are ready: it pays the performance bonus, moves your reputation and gives everyone experience.</p><div class="finance__buttons">${btn('End shift and file the report', 'end-shift', '', 'btn btn--primary')}${btn('Save', 'save-game')}</div>`;
+    : `<p class="station__note">${state.shiftDue ? '<b>The shift is over.</b> ' : `${formatDuration(left)} left in this shift. `}File the report when you are ready: it pays the performance bonus, moves your reputation and gives everyone experience.</p><div class="finance__buttons">${btn('End shift and file the report', 'end-shift', shiftBlock(state) ? `disabled title="${esc(shiftBlock(state))}"` : '', 'btn btn--primary')}${btn('Save', 'save-game')}</div>`;
 
   return `<div class="station__balance">${esc(c.name)}<span>${esc(lp.current.name)} · reputation ${Math.round(c.reputation)}/100 · shift ${c.shifts + 1} · readiness ${pct(readiness(state))}</span></div>` +
     bar(c.reputation / 100, 'bar--health') + `<p class="station__note">${next}</p>` + shiftBox +
@@ -430,7 +433,7 @@ const select = (path, options, value, type = 'text') => `<select data-path="${pa
 
 function scenarioEditor() {
   const d = ui.scenario;
-  const sceneOptions = buildingScenes().map((s) => [s.id, s.label]);
+  const sceneOptions = SCENES.map((s) => [s.id, s.label]);
   const counts = {};
   for (const f of d.start.fleet) counts[f.type] = (counts[f.type] ?? 0) + 1;
   const fleet = GROUND_TYPES().map((t) => `<label class="field field--num"><span>${esc(vehicleLabel(t))}</span><input type="number" min="0" max="16" value="${counts[t] ?? 0}" data-fleet="${t}"></label>`).join('');

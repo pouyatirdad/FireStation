@@ -10,6 +10,8 @@
 
 import { CONFIG } from '../core/config.js';
 import { createGame, loadState, serialize } from './game.js';
+import { Rng } from '../core/math.js';
+import { createWind } from './wind.js';
 import { addVehicle, clearFleet, removeCrewMember } from './units.js';
 import { createCampaign, endShift, openShift, seedRoster, wireCareer } from './campaign.js';
 import {
@@ -26,7 +28,6 @@ import {
 } from './presets.js';
 import { callAgency } from './agencies.js';
 import { evacuateIncident } from './evacuation.js';
-import { startDisaster } from './disasters.js';
 import { addEvent } from './events.js';
 
 // ------------------------------------------------------------------ career ---
@@ -36,6 +37,10 @@ export function buildCareerShift(campaign, first = false) {
   const state = createGame(campaign.seed);
   state.mode = 'career';
   state.campaign = campaign;
+  // Every shift of a career has its own calls and its own wind (the city stays the same).
+  state.rngSeed = campaign.seed * 7919 + 13 + (campaign.shifts + 1) * 1000003;
+  state.rng = new Rng(state.rngSeed);
+  state.wind = createWind(new Rng(state.rngSeed + 104729));
   state.credits = campaign.balance;
   state.ownedStations = campaign.ownedStations
     ? state.city.stations.map((_, i) => Boolean(campaign.ownedStations[i] ?? i === 0))
@@ -133,4 +138,3 @@ export const commandCancelDispatch = (state, engineId) => cancelDispatch(state, 
 export const commandRedirect = (state, engineId, target) => redirectDispatch(state, engineId, target);
 export const commandAgency = (state, agency, target) => callAgency(state, agency, target);
 export const commandEvacuate = (state, kind, id) => evacuateIncident(state, kind, id);
-export const commandDisaster = (state, id) => startDisaster(state, id);

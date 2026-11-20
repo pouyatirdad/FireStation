@@ -159,8 +159,43 @@ test('new events map to radio and promotion sounds without disturbing the old on
   assert.equal(eventSound({ tone: 'good', text: 'Police on scene — streets closed round the incident' }), 'radio');
   assert.equal(eventSound({ tone: 'info', text: 'Police called — arriving in 25 s ($450)' }), 'radio');
   assert.equal(eventSound({ tone: 'big', text: 'PROMOTION — City Department!' }), 'chime');
-  assert.equal(eventSound({ tone: 'big', text: 'SECONDARY COLLAPSE at X' }), 'boom');
+  assert.equal(eventSound({ tone: 'big', text: 'SECONDARY COLLAPSE at X' }), 'rumble');
+  assert.equal(eventSound({ tone: 'big', text: 'EXPLOSION at X!' }), 'boom');
   assert.equal(eventSound({ tone: 'big', text: 'MAJOR INCIDENT' }), 'klaxon');
   assert.equal(eventSound({ tone: 'good', text: 'Incident closed — $600' }), 'cash');
   assert.equal(eventSound({ tone: 'info', text: 'Shift saved' }), null);
+});
+
+test('overlays are culled to the view and the collapse cloud plays only in its first seconds', () => {
+  const c = career();
+  const b = near(c);
+  collapseBuilding(c, b, 3);
+  ignite(c, near(c, 'apartment') ?? near(c, 'shop'), 'test');
+  let calls = 0;
+  const counting = () => new Proxy({}, {
+    get: (target, prop) => (prop in target ? target[prop] : () => { calls += 1; return { width: 10 }; }),
+    set: (target, prop, value) => { target[prop] = value; return true; },
+  });
+  const here = { x0: b.x - 10, y0: b.y - 10, x1: b.x + 20, y1: b.y + 20 };
+  const away = { x0: 0, y0: 380, x1: 5, y1: 383 };
+  drawCommandOverlays(counting(), c, c.time, 1, here);
+  const visible = calls;
+  calls = 0;
+  drawCommandOverlays(counting(), c, c.time, 1, away);
+  assert.ok(visible > 20, `drew ${visible}`);
+  assert.ok(calls < visible / 3, `off-screen work ${calls} vs ${visible}`);
+
+  // The big dust cloud (arcs) is drawn at the start and replaced by a few drifting puffs later.
+  const t0 = b.collapse.at;
+  const arcs = (age) => {
+    let n = 0;
+    const ctx = new Proxy({}, { get: (t, p) => (p === 'arc' ? () => { n += 1; } : p in t ? t[p] : () => ({ width: 10 })), set: (t, p, v) => { t[p] = v; return true; } });
+    drawCommandOverlays(ctx, c, t0 + age, 1, here);
+    return n;
+  };
+  assert.ok(arcs(1) > arcs(10), 'more dust at first than later');
+  assert.ok(arcs(10) >= 3, 'some drifting dust while people are buried');
+  b.collapse = null;
+  b.trapped = 0;
+  assert.ok(arcs(10) < 3 + 3, 'no rubble puffs once the rescue is over');
 });

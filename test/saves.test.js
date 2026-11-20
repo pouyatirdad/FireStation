@@ -179,6 +179,7 @@ test('challenge results keep the best score; custom scenarios survive a bad entr
 test('a finished career shift can be saved only after the next shift exists', () => {
   const state = createCareer({ name: 'Two shifts' });
   startShift(state);
+  state.time = 600;
   const r = nextCareerShift(state);
   assert.ok(r.summary.report.rating.grade);
   assert.equal(r.state.campaign.shifts, 1);

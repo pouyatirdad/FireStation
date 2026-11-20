@@ -3,6 +3,43 @@
 All notable changes to FireStation. The game is one self-contained `index.html`; rebuild it with
 `node tools/build.mjs` after changing `src/` or `styles/`.
 
+## 0.17.0 — Final QA, polish and release
+
+**Fixed**
+- Objectives completed in the very first shift paid out every second (the completion marker was `0`,
+  which read as "not done"). A first shift could earn millions.
+- A career shift could be filed at once for a free grade, bonus, experience and promotion. A shift now
+  has to run half its length, the bonus scales with the time played, and a shift with nothing to do cannot
+  earn a top grade.
+- Every shift of a career replayed the same calls and wind; each shift now has its own, and a loaded shift
+  carries on with fresh luck.
+- A newer campaign version inside a current save could be overwritten; it is now refused.
+- A new quick shift or career no longer silently replaces a save: the old one is kept
+  (`<slot>.replaced`, `<slot>.prev`).
+- Unloadable saves now say why on the start screen.
+- Hiring candidates topped up over time (they never refilled); station upkeep is tracked for every station.
+- The start screen's mode cards fit a phone; the mode cards sit above the long intro.
+- Dead code removed; the Headquarters panel is no longer rebuilt every frame.
+
+**Added**
+- **Station budgets are enforced.** A monthly budget per station (0 = no limit): upkeep is tracked and
+  always paid; vehicles, upgrades and training that would pass the budget are refused with a clear reason;
+  warnings at 80% and when passed; monthly reset; refunds on sale; allocation compared with funding.
+- **Audio.** Five agency sirens, radio effects (squelch, chatter), rumble, hazard and evacuation sounds,
+  a sound panel with volume and five categories (alerts, radio, sirens, ambience, effects), and limits
+  against excessive playback.
+- **Visuals.** A collapse dust-cloud animation with falling debris, drifting dust while people are buried,
+  pulsing incident rings, an evacuation progress ring with queued and cleared buildings and a shelter line,
+  station level plates with a blinking tower beacon and a pulsing comms antenna. All culled to the view.
+- **Save recovery** screen: restore a backup (an upgraded Quick Response save, a replaced career, an
+  unreadable save) without losing the current one.
+- Emergency funding clears the debt with a cushion (capped); level 6 needs reputation 85; four challenges
+  made harder; a won challenge never scores nothing.
+- Dev hook `window.__fireStation.step(seconds)` with a timing breakdown.
+
+**Tested**
+- Real-browser run-through (desktop and a 375x812 emulation): see DEVELOPMENT_PROGRESS.md.
+
 ## 0.16.0 — Challenge Mode and the scenario editor
 
 - **Challenge Mode.** Eight scored challenges (One Engine Only, No Water Supply, Night Emergency,

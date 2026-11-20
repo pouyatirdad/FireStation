@@ -47,7 +47,7 @@ export function upgradeBlock(state, station, key) {
   if (level >= cap) return `Needs a higher department level (cap ${cap})`;
   const cost = upgradeCost(key, level + 1);
   if (state.credits < cost) return `Needs ${money(cost)}`;
-  return null;
+  return stationBudgetBlock(state, station, cost);
 }
 
 export function buyUpgrade(state, station, key) {
@@ -59,6 +59,7 @@ export function buyUpgrade(state, station, key) {
   }
   const level = upgradeLevel(state, station, key) + 1;
   spend(state, upgradeCost(key, level), 'upgrade');
+  chargeStation(state, station, upgradeCost(key, level));
   const rec = stationRecord(state, station);
   rec.upgrades[key] = level;
   rec.level = stationLevel(state, station);
@@ -177,11 +178,74 @@ export function compareStations(state) {
   return rows;
 }
 
+const MAX_BUDGET = 1000000;
+
+/**
+ * Station budgets. Each station has a monthly allowance (0 means unlimited). What a
+ * station costs this month is tracked in `spentMonth`: its upkeep as it is charged,
+ * and what is bought for it (vehicles, upgrades, training). Mandatory upkeep is always
+ * paid, but a purchase that would take the station over its budget is refused.
+ */
 export function setStationBudget(state, index, amount) {
   const n = Math.floor(Number(amount));
-  if (!Number.isFinite(n) || n < 0 || !state.ownedStations[index]) return false;
-  stationRecord(state, index).budget = n;
+  if (!Number.isFinite(n) || n < 0 || n > MAX_BUDGET || !state.ownedStations[index]) return false;
+  const rec = stationRecord(state, index);
+  rec.budget = n;
+  rec.warned = false;
+  rec.warnedNear = false;
+  addEvent(state, n > 0 ? `${state.city.stations[index].name}: monthly budget set to ${money(n)}` : `${state.city.stations[index].name}: budget limit removed`, 'info');
+  if (n > 0 && (rec.spentMonth ?? 0) > n) {
+    rec.warned = true;
+    addEvent(state, `${state.city.stations[index].name} has already spent ${money(rec.spentMonth)} this month, over the new budget — purchases wait until next month`, 'warn');
+  }
   return true;
+}
+
+/** Why spending `amount` for this station would break its budget, or null. */
+export function stationBudgetBlock(state, station, amount) {
+  if (!isCareer(state)) return null;
+  const rec = state.campaign.stations[station];
+  if (!rec || !(rec.budget > 0)) return null;
+  const after = (rec.spentMonth ?? 0) + amount;
+  if (after <= rec.budget) return null;
+  return `Over ${state.city.stations[station]?.name ?? 'the station'}'s budget (${money(after)} of ${money(rec.budget)}) — raise it in Stations`;
+}
+
+/** Record money spent for a station this month, and warn as it nears and passes its budget. */
+export function chargeStation(state, station, amount) {
+  if (!isCareer(state) || !(amount > 0)) return;
+  const rec = stationRecord(state, station);
+  rec.spentMonth = (rec.spentMonth ?? 0) + amount;
+  if (!(rec.budget > 0)) return;
+  const name = state.city.stations[station]?.name ?? 'The station';
+  if (rec.spentMonth > rec.budget && !rec.warned) {
+    rec.warned = true;
+    addEvent(state, `${name} is over its monthly budget (${money(rec.spentMonth)} of ${money(rec.budget)}) — only upkeep is paid until next month`, 'warn');
+  } else if (rec.spentMonth >= rec.budget * 0.8 && !rec.warnedNear && !rec.warned) {
+    rec.warnedNear = true;
+    addEvent(state, `${name} has used ${Math.round((rec.spentMonth / rec.budget) * 100)}% of its monthly budget`, 'warn');
+  }
+}
+
+/** A vehicle sold back reduces what the station has spent (never below nothing). */
+export function refundStation(state, station, amount) {
+  if (!isCareer(state) || !(amount > 0)) return;
+  const rec = stationRecord(state, station);
+  rec.spentMonth = Math.max(0, (rec.spentMonth ?? 0) - amount);
+}
+
+/** Allocated against expected funding, and each station's use of its budget. */
+export function budgetSummary(state) {
+  let allocated = 0;
+  const rows = [];
+  state.city.stations.forEach((st, i) => {
+    if (!state.ownedStations[i]) return;
+    const rec = state.campaign.stations[i];
+    const budget = rec?.budget ?? 0;
+    allocated += budget;
+    rows.push({ index: i, name: st.name, budget, spent: rec?.spentMonth ?? 0 });
+  });
+  return { allocated, rows };
 }
 
 // ------------------------------------------------------------------ hooks ---
@@ -208,20 +272,13 @@ export function wireStations(state) {
   });
   // Station budgets: tally maintenance as it is charged, warn when over.
   on(state, 'finance:hour', (st, data) => {
-    for (const [i, v] of Object.entries(data.perStation)) {
-      const rec = st.campaign.stations[i];
-      if (!rec) continue;
-      rec.spentMonth = (rec.spentMonth ?? 0) + v;
-      if (rec.budget > 0 && rec.spentMonth > rec.budget && !rec.warned) {
-        rec.warned = true;
-        addEvent(st, `${st.city.stations[i].name} is over its monthly budget (${money(rec.spentMonth)} of ${money(rec.budget)})`, 'warn');
-      }
-    }
+    for (const [i, v] of Object.entries(data.perStation)) chargeStation(st, Number(i), v);
   });
   on(state, 'finance:month', (st) => {
     for (const rec of Object.values(st.campaign.stations)) {
       rec.spentMonth = 0;
       rec.warned = false;
+      rec.warnedNear = false;
     }
   });
 }

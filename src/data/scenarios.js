@@ -57,7 +57,7 @@ export const CHALLENGES = [
       { at: 150, kind: 'building-fire', location: { kind: 'type', type: 'office' }, intensity: 0.3, trapped: 2, injured: 1 },
     ],
     timeLimit: 600,
-    success: { resolveAll: true },
+    success: { resolveAll: true, maxCasualties: 4 },
     failure: { maxLost: 3 },
   },
   {
@@ -77,10 +77,11 @@ export const CHALLENGES = [
     rules: { random: false },
     incidents: [
       { at: 8, kind: 'pileup', location: { kind: 'auto' }, intensity: 0.5, trapped: 0, injured: 0 },
-      { at: 90, kind: 'crash', location: { kind: 'auto' }, intensity: 0.4, trapped: 0, injured: 0 },
+      { at: 70, kind: 'crash', location: { kind: 'auto' }, intensity: 0.4, trapped: 0, injured: 0 },
+      { at: 130, kind: 'scene', scene: 'tanker', location: { kind: 'auto' }, intensity: 0.5, trapped: 0, injured: 0 },
     ],
-    timeLimit: 480,
-    success: { resolveAll: true },
+    timeLimit: 420,
+    success: { resolveAll: true, maxCasualties: 2 },
     failure: { maxCasualties: 4 },
   },
   {
@@ -90,7 +91,7 @@ export const CHALLENGES = [
     rules: { random: false },
     incidents: [{ at: 5, kind: 'disaster', disaster: 'siege', location: { kind: 'auto' }, intensity: 0.5, trapped: 0, injured: 0 }],
     timeLimit: 720,
-    success: { resolveAll: true },
+    success: { resolveAll: true, maxCasualties: 2 },
     failure: { maxLost: 6 },
   },
   {
@@ -109,12 +110,15 @@ export const CHALLENGES = [
     start: { clock: 14 * 60, credits: 2500, fleet: [d('ambulance'), d('ambulance'), d('ambulance'), d('ambubus'), d('rescue'), d('medcar'), d('medcar')] },
     rules: { random: false },
     incidents: [
-      { at: 8, kind: 'collapse', location: { kind: 'type', type: 'apartment' }, intensity: 0.2, trapped: 5, injured: 6 },
-      { at: 70, kind: 'medical', location: { kind: 'auto' }, intensity: 0.8, trapped: 0, injured: 3 },
+      { at: 8, kind: 'collapse', location: { kind: 'type', type: 'apartment' }, intensity: 0.2, trapped: 6, injured: 8 },
+      { at: 50, kind: 'medical', location: { kind: 'auto' }, intensity: 0.8, trapped: 0, injured: 5 },
+      { at: 110, kind: 'collapse', location: { kind: 'type', type: 'house' }, intensity: 0.2, trapped: 4, injured: 4 },
+      { at: 170, kind: 'collapse', location: { kind: 'type', type: 'office' }, intensity: 0.2, trapped: 5, injured: 6 },
+      { at: 230, kind: 'medical', location: { kind: 'auto' }, intensity: 1, trapped: 0, injured: 6 },
     ],
     timeLimit: 600,
-    success: { resolveAll: true },
-    failure: { maxCasualties: 5 },
+    success: { resolveAll: true, maxCasualties: 3 },
+    failure: { maxCasualties: 6 },
   },
   {
     id: 'industrial', name: 'Industrial Emergency', version: 1, builtin: true,
@@ -125,9 +129,10 @@ export const CHALLENGES = [
       { at: 8, kind: 'scene', scene: 'dust', location: { kind: 'auto' }, intensity: 0.5, trapped: 0, injured: 0 },
       { at: 40, kind: 'scene', scene: 'toxicleak', location: { kind: 'auto' }, intensity: 0.5, trapped: 0, injured: 0 },
       { at: 90, kind: 'scene', scene: 'tankvent', location: { kind: 'auto' }, intensity: 0.5, trapped: 0, injured: 0 },
+      { at: 140, kind: 'scene', scene: 'ammonia', location: { kind: 'auto' }, intensity: 0.5, trapped: 0, injured: 0 },
     ],
     timeLimit: 600,
-    success: { resolveAll: true },
+    success: { resolveAll: true, maxCasualties: 3 },
     failure: { maxCasualties: 5 },
   },
 ];
@@ -217,14 +222,14 @@ export function validateScenario(input, city = null) {
       if (!loc.buildingId) return errors.push(`${tag}: choose a building`);
       if (city && !city.buildings.some((b) => b.id === loc.buildingId)) return errors.push(`${tag}: that building does not exist`);
     }
-    if (it.kind === 'scene' && !SCENES.some((s) => s.id === it.scene && !s.site)) return errors.push(`${tag}: unknown scene`);
+    if (it.kind === 'scene' && !SCENES.some((s) => s.id === it.scene)) return errors.push(`${tag}: unknown scene`);
     if (it.kind === 'disaster' && !DISASTER_KINDS.includes(it.disaster)) return errors.push(`${tag}: unknown disaster`);
     incidents.push({
       at: it.at, kind: it.kind, location: { ...loc }, intensity, trapped, injured,
       ...(it.kind === 'scene' ? { scene: it.scene } : {}), ...(it.kind === 'disaster' ? { disaster: it.disaster } : {}),
     });
   });
-  if (incidents.length === 0 && !rules.random) errors.push('Add an incident, or turn on random calls');
+  if (list.length === 0 && !rules.random) errors.push('Add an incident, or turn on random calls');
 
   const s = input.success ?? {};
   const success = { resolveAll: Boolean(s.resolveAll), surviveTime: Boolean(s.surviveTime) };
@@ -235,7 +240,7 @@ export function validateScenario(input, city = null) {
   }
   if (!success.resolveAll && !success.surviveTime) errors.push('Choose a success condition: resolve everything, or survive the time limit');
   if (success.surviveTime && timeLimit == null) errors.push('Survive the time limit needs a time limit');
-  if (success.resolveAll && incidents.length === 0) errors.push('Resolve everything needs at least one scripted incident');
+  if (success.resolveAll && list.length === 0) errors.push('Resolve everything needs at least one scripted incident');
 
   const f = input.failure ?? {};
   const failure = {};

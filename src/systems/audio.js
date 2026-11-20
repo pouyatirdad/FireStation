@@ -25,7 +25,8 @@ export function eventSound(event) {
   switch (event.tone) {
     case 'big':
       if (/promotion/i.test(text)) return 'chime';
-      return /explosion|secondary collapse/i.test(text) ? 'boom' : 'klaxon';
+      if (/secondary collapse|earthquake|aftershock|has collapsed/i.test(text)) return 'rumble';
+      return /explosion/i.test(text) ? 'boom' : 'klaxon';
     case 'fire':
       if (/traffic accident/i.test(text)) return 'crash';
       return /spread/i.test(text) ? 'warn' : 'alarm';
@@ -36,21 +37,45 @@ export function eventSound(event) {
       if (/dispatched|on scene —|response complete/i.test(text)) return 'radio';
       if (/\$/.test(text)) return 'cash';
       return 'chime';
-    case 'warn': return /injured|ambulance/i.test(text) ? 'medic' : 'warn';
+    case 'warn':
+      if (/overcome by fumes|without protection|hazard zone is forming/i.test(text)) return 'hazard';
+      return /injured|ambulance/i.test(text) ? 'medic' : 'warn';
     case 'info':
-      return /called —|called off|redirected|evacuation of/i.test(text) ? 'radio' : null;
+      if (/evacuation of/i.test(text)) return 'evac';
+      return /called —|called off|redirected/i.test(text) ? 'radio' : null;
     default: return null;
   }
 }
 
+/** What can be switched off separately: alerts (alarms, booms, warnings), radio, sirens, ambience, effects. */
+export const SOUND_CATEGORIES = ['alerts', 'radio', 'sirens', 'ambience', 'effects'];
+const DEFAULT_CATEGORIES = { alerts: true, radio: true, sirens: true, ambience: true, effects: true };
+
+const SOUND_CATEGORY = {
+  click: 'effects', select: 'effects', chime: 'effects', cash: 'effects', clunk: 'effects', kaching: 'effects',
+  alarm: 'alerts', klaxon: 'alerts', bad: 'alerts', crash: 'alerts', boom: 'alerts', warn: 'alerts', medic: 'alerts',
+  rumble: 'alerts', hazard: 'alerts', evac: 'alerts', radio: 'radio',
+};
+
+// Minimum gap between two plays of the same sound, and the sounds that may break the global limit.
+const COOLDOWN = { radio: 700, alarm: 1500, klaxon: 2500, boom: 900, rumble: 2000, hazard: 1500, evac: 4000, crash: 800 };
+const PRIORITY = new Set(['klaxon', 'boom', 'rumble']);
+const LIMIT = { count: 6, windowMs: 2000 }; // at most this many one-shots in a window
+
 function loadPrefs() {
   try {
     const raw = JSON.parse(localStorage.getItem(STORE_KEY) ?? 'null');
-    if (raw) return { muted: Boolean(raw.muted), volume: clamp(Number(raw.volume ?? 0.7), 0, 1) };
+    if (raw) {
+      return {
+        muted: Boolean(raw.muted),
+        volume: clamp(Number(raw.volume ?? 0.7), 0, 1),
+        categories: { ...DEFAULT_CATEGORIES, ...(raw.categories && typeof raw.categories === 'object' ? raw.categories : {}) },
+      };
+    }
   } catch {
     // storage blocked: fall through to the defaults
   }
-  return { muted: false, volume: 0.7 };
+  return { muted: false, volume: 0.7, categories: { ...DEFAULT_CATEGORIES } };
 }
 
 function savePrefs(prefs) {
@@ -61,6 +86,21 @@ function savePrefs(prefs) {
   }
 }
 
+const MAX_AGENCY_VOICES = 3;
+
+/**
+ * Each agency sounds different: a fast two-tone yelp for the police, a slow wail for the
+ * medical service, a long alternating horn for civil protection, a low pulsing buzz for
+ * the utilities and a foghorn for the coast guard.
+ */
+export const AGENCY_VOICE = {
+  police: { type: 'square', freq: (t) => (Math.floor(t * 3) % 2 ? 960 : 720) },
+  ems: { type: 'sawtooth', freq: (t) => 520 + 420 * (0.5 + 0.5 * Math.sin(t * 1.6)) },
+  civil: { type: 'triangle', freq: (t) => (Math.floor(t / 1.4) % 2 ? 520 : 390) },
+  utility: { type: 'square', freq: (t) => 210 + (Math.floor(t * 2) % 2) * 40, gate: (t) => (Math.floor(t * 2) % 2 ? 1 : 0.35) },
+  coastguard: { type: 'sine', freq: () => 150, gate: (t) => (t % 3.5 < 1.2 ? 1 : 0) },
+};
+
 export function createAudio() {
   const prefs = loadPrefs();
   let ctx = null;
@@ -68,6 +108,8 @@ export function createAudio() {
   let noise = null;
   const loops = {};
   const sirens = [];
+  const agencyVoices = [];
+  const recent = [];
   let trackedState = null;
   let lastEventId = 0;
   let lastPlayed = {};
@@ -148,6 +190,24 @@ export function createAudio() {
       else gain.connect(master);
       osc.start();
       sirens.push({ osc, gain, pan });
+    }
+
+    // Support agencies have voices of their own, so police, EMS and the rest can be told apart.
+    for (let i = 0; i < MAX_AGENCY_VOICES; i++) {
+      const osc = ctx.createOscillator();
+      osc.type = 'square';
+      osc.frequency.value = 600;
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.value = 2600;
+      const gain = ctx.createGain();
+      gain.gain.value = 0;
+      const pan = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
+      osc.connect(filter).connect(gain);
+      if (pan) gain.connect(pan).connect(master);
+      else gain.connect(master);
+      osc.start();
+      agencyVoices.push({ osc, gain, pan, type: 'square' });
     }
   }
 
@@ -254,10 +314,35 @@ export function createAudio() {
       tone(740, 0.22, { gain: 0.11 });
       tone(554, 0.34, { gain: 0.11, delay: 0.24 });
     },
+    // Radio traffic: the squelch click, a burst of voice-like chatter, then the tail click.
     radio: () => {
-      burst(0.08, { filter: 'bandpass', from: 2400, gain: 0.1, q: 2 });
-      tone(1500, 0.06, { type: 'square', gain: 0.04, delay: 0.09 });
-      tone(1100, 0.08, { type: 'square', gain: 0.04, delay: 0.18 });
+      burst(0.05, { filter: 'bandpass', from: 3000, gain: 0.12, q: 2 });
+      let t = 0.09;
+      const syllables = 3 + Math.floor(Math.random() * 3);
+      for (let i = 0; i < syllables; i++) {
+        const dur = 0.07 + Math.random() * 0.07;
+        burst(dur, { filter: 'bandpass', from: 700 + Math.random() * 1100, gain: 0.07, q: 3, delay: t });
+        tone(110 + Math.random() * 70, dur, { type: 'sawtooth', gain: 0.018, delay: t });
+        t += dur + 0.03 + Math.random() * 0.05;
+      }
+      tone(1500, 0.04, { type: 'square', gain: 0.035, delay: t + 0.02 });
+    },
+    // A building coming down, or the ground moving: a deep rumble with debris falling after it.
+    rumble: () => {
+      burst(2.2, { from: 240, to: 40, gain: 0.5 });
+      tone(48, 1.8, { type: 'sine', gain: 0.4, slide: 30, attack: 0.05 });
+      for (let k = 0; k < 4; k++) burst(0.25, { filter: 'bandpass', from: 900, to: 300, gain: 0.16, delay: 0.4 + k * 0.35, q: 1.2 });
+    },
+    // A hazard alarm: fast two-pitch chirps.
+    hazard: () => {
+      for (let r = 0; r < 4; r++) {
+        tone(900, 0.07, { type: 'square', gain: 0.06, delay: r * 0.2 });
+        tone(1350, 0.07, { type: 'square', gain: 0.06, delay: r * 0.2 + 0.09 });
+      }
+    },
+    // An evacuation warning: three rising whoops.
+    evac: () => {
+      for (let i = 0; i < 3; i++) tone(400, 0.7, { type: 'sawtooth', gain: 0.1, slide: 760, delay: i * 0.8, attack: 0.08 });
     },
     clunk: () => {
       tone(150, 0.14, { type: 'triangle', gain: 0.2, slide: 80 });
@@ -267,13 +352,19 @@ export function createAudio() {
   };
 
   function play(name, scale = 1) {
-    if (!ctx || prefs.muted) return;
+    if (!ctx || prefs.muted) return false;
     const fn = SOUNDS[name];
-    if (!fn) return;
+    if (!fn) return false;
+    if (prefs.categories[SOUND_CATEGORY[name] ?? 'effects'] === false) return false;
     const now = performance.now();
-    if (now - (lastPlayed[name] ?? 0) < 120) return;
+    if (now - (lastPlayed[name] ?? -Infinity) < (COOLDOWN[name] ?? 120)) return false;
+    // However busy the night, never more than a handful of one-shots at once.
+    while (recent.length && now - recent[0] > LIMIT.windowMs) recent.shift();
+    if (recent.length >= LIMIT.count && !PRIORITY.has(name)) return false;
     lastPlayed[name] = now;
+    recent.push(now);
     fn(scale);
+    return true;
   }
 
   // -------------------------------------------------------------- frame ---
@@ -304,8 +395,11 @@ export function createAudio() {
     if (!live) {
       for (const key of ['fire', 'water', 'wind', 'hum']) ramp(loops[key].gain.gain, 0, 0.08);
       for (const s of sirens) ramp(s.gain.gain, 0, 0.08);
+      for (const v of agencyVoices) ramp(v.gain.gain, 0, 0.08);
       return;
     }
+    const ambience = prefs.categories.ambience !== false;
+    const sirenOn = prefs.categories.sirens !== false;
 
     // Everything is heard within about a screen and a half of the camera.
     const reach = (Math.hypot(view.width, view.height) / cam.zoom) * 0.75;
@@ -318,7 +412,7 @@ export function createAudio() {
       fire += heard((b.x + b.w / 2) * TILE, (b.y + b.h / 2) * TILE) * b.fire;
     }
     for (const wf of state.wildfires ?? []) fire += heard(wf.x, wf.y) * wf.intensity * 1.4;
-    const fireGain = Math.min(1, fire) * 0.2;
+    const fireGain = ambience ? Math.min(1, fire) * 0.2 : 0;
     ramp(loops.fire.gain.gain, fireGain, 0.2);
     if (fireGain > 0.02 && Math.random() < fireGain * 0.5) {
       burst(0.05 + Math.random() * 0.06, {
@@ -328,11 +422,11 @@ export function createAudio() {
 
     let water = 0;
     for (const s of state.streams) water += heard(s.sx, s.sy);
-    ramp(loops.water.gain.gain, Math.min(1, water * 0.6) * 0.14, 0.15);
+    ramp(loops.water.gain.gain, ambience ? Math.min(1, water * 0.6) * 0.14 : 0, 0.15);
 
     // A little less wind at night would be more honest, but the day length makes
     // that a faint effect; keep it constant and gentle.
-    ramp(loops.wind.gain.gain, 0.025 + 0.09 * (state.wind?.speed ?? 0.3), 0.5);
+    ramp(loops.wind.gain.gain, ambience ? 0.025 + 0.09 * (state.wind?.speed ?? 0.3) : 0, 0.5);
     ramp(loops.wind.filter.frequency, 260 + 520 * (state.wind?.speed ?? 0.3), 0.8);
 
     const moving = state.engines
@@ -340,7 +434,7 @@ export function createAudio() {
       .map((e) => ({ e, d: Math.hypot(e.x - cam.x, e.y - cam.y) }))
       .sort((a, b) => a.d - b.d);
 
-    ramp(loops.hum.gain.gain, moving.length ? heard(moving[0].e.x, moving[0].e.y) * 0.09 : 0, 0.25);
+    ramp(loops.hum.gain.gain, ambience && moving.length ? heard(moving[0].e.x, moving[0].e.y) * 0.09 : 0, 0.25);
     if (moving.length) {
       ramp(loops.hum.osc.frequency, 46 + moving[0].e.spec.speed * 2.6, 0.3);
     }
@@ -358,7 +452,29 @@ export function createAudio() {
         ramp(siren.osc.frequency, freq, medical ? 0.012 : 0.05);
         if (siren.pan) ramp(siren.pan.pan, pan(entry.e.x), 0.1);
       }
-      ramp(siren.gain.gain, level * 0.07, 0.15);
+      ramp(siren.gain.gain, sirenOn ? level * 0.07 : 0, 0.15);
+    });
+
+    // Support agencies on their way or on scene, each with its own voice, nearest first.
+    const calls = (state.support?.active ?? [])
+      .filter((c) => t >= c.arriveAt - 6 && t <= c.until)
+      .map((c) => ({ c, d: Math.hypot(c.x - cam.x, c.y - cam.y) }))
+      .sort((a, b) => a.d - b.d);
+    agencyVoices.forEach((voice, i) => {
+      const entry = calls[i];
+      if (!entry || !sirenOn) {
+        ramp(voice.gain.gain, 0, 0.1);
+        return;
+      }
+      const style = AGENCY_VOICE[entry.c.agency] ?? AGENCY_VOICE.police;
+      if (voice.type !== style.type) {
+        voice.osc.type = style.type;
+        voice.type = style.type;
+      }
+      ramp(voice.osc.frequency, style.freq(t + i * 0.21), 0.015);
+      if (voice.pan) ramp(voice.pan.pan, pan(entry.c.x), 0.1);
+      const gate = style.gate ? style.gate(t) : 1;
+      ramp(voice.gain.gain, heard(entry.c.x, entry.c.y) * 0.06 * gate, 0.06);
     });
   }
 
@@ -376,6 +492,14 @@ export function createAudio() {
       if (master) ramp(master.gain, prefs.muted ? 0 : prefs.volume, 0.05);
       savePrefs(prefs);
       return prefs.muted;
+    },
+    /** The current settings, for the sound panel. */
+    settings: () => ({ muted: prefs.muted, volume: prefs.volume, categories: { ...prefs.categories } }),
+    setCategory(name, on) {
+      if (!SOUND_CATEGORIES.includes(name)) return false;
+      prefs.categories[name] = Boolean(on);
+      savePrefs(prefs);
+      return true;
     },
     setVolume(v) {
       prefs.volume = clamp(v, 0, 1);

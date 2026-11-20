@@ -122,5 +122,3 @@ function containLeak(state, b) {
   b.incidentLabel = null;
 }
 
-/** Hazard zones that people ought to be moved out of (used by evacuation and the incident card). */
-export const zonesNeedingEvacuation = (state) => (state.hazards ?? []).filter((z) => z.level >= 0.3);

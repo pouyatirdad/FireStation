@@ -162,26 +162,16 @@ const parse = (raw) => {
 };
 
 /**
- * Read a slot. Returns `{ status, ... }`:
- *   none       nothing saved
+ * Look at the raw text of a save without touching storage. Returns `{ status, ... }`:
  *   ok         `{ kind, shift, campaign }` ready for loadState
  *   migrated   as ok, but an older save that was upgraded (`from`)
  *   newer      written by a newer version of the game; left alone
- *   corrupt    unreadable; kept under `<key>.corrupt`
+ *   corrupt    unreadable
  */
-export function readSlot(storage, key) {
-  let raw = null;
-  try {
-    raw = storage.getItem(key);
-  } catch {
-    return { status: 'error', error: 'Storage is blocked' };
-  }
-  if (raw == null) return { status: 'none' };
-
+export function inspectRaw(raw) {
   const p = parse(raw);
   if (!p.ok || p.value == null || typeof p.value !== 'object') {
-    keepCopy(storage, `${key}.corrupt`, raw);
-    return { status: 'corrupt', error: 'The save could not be read; a copy was kept' };
+    return { status: 'corrupt', error: 'The save could not be read' };
   }
   let value = p.value;
   let legacy = false;
@@ -195,22 +185,15 @@ export function readSlot(storage, key) {
   const migrated = migrateShift(value.shift);
   if (!migrated.ok) {
     if (migrated.newer) return { status: 'newer', error: 'This save was made by a newer version of the game' };
-    keepCopy(storage, `${key}.corrupt`, raw);
     return { status: 'corrupt', error: migrated.error };
   }
   const n = normalizeShift(migrated.data);
-  if (!n.ok) {
-    keepCopy(storage, `${key}.corrupt`, raw);
-    return { status: 'corrupt', error: n.errors[0] };
-  }
+  if (!n.ok) return { status: 'corrupt', error: n.errors[0] };
 
   let campaign = null;
   if (value.kind === 'career') {
     campaign = normalizeCampaign(value.campaign);
-    if (!campaign) {
-      keepCopy(storage, `${key}.corrupt`, raw);
-      return { status: 'corrupt', error: 'The career data is missing' };
-    }
+    if (!campaign) return { status: 'corrupt', error: 'The career data is missing' };
     if (campaign.newer) return { status: 'newer', error: 'This career was made by a newer version of the game' };
   }
   return {
@@ -222,6 +205,80 @@ export function readSlot(storage, key) {
     warnings: n.errors,
     savedAt: value.savedAt ?? null,
   };
+}
+
+/**
+ * Read a slot: `none` if nothing is saved, otherwise what `inspectRaw` says. An
+ * unreadable save is copied to `<key>.corrupt` (never deleted).
+ */
+export function readSlot(storage, key) {
+  let raw = null;
+  try {
+    raw = storage.getItem(key);
+  } catch {
+    return { status: 'error', error: 'Storage is blocked' };
+  }
+  if (raw == null) return { status: 'none' };
+  const result = inspectRaw(raw);
+  if (result.status === 'corrupt') {
+    keepCopy(storage, `${key}.corrupt`, raw);
+    result.error = `${result.error}; a copy was kept`;
+  }
+  return result;
+}
+
+// ------------------------------------------------------------ recovery ---
+
+const BACKUP_SUFFIXES = {
+  '.bak': 'the Quick Response save from before it was upgraded',
+  '.prev': 'the career that was replaced by a new one',
+  '.replaced': 'the save that was replaced by a restore',
+  '.corrupt': 'a save that could not be read',
+};
+
+/**
+ * The backups kept beside each slot (an old-format save, a replaced career, an unreadable
+ * save), with whether each one could be loaded as it stands.
+ */
+export function listBackups(storage) {
+  const out = [];
+  for (const [slot, key] of Object.entries({ quick: KEYS.quick, career: KEYS.career, challenge: KEYS.challenge })) {
+    for (const [suffix, about] of Object.entries(BACKUP_SUFFIXES)) {
+      let raw = null;
+      try {
+        raw = storage.getItem(key + suffix);
+      } catch {
+        continue;
+      }
+      if (raw == null) continue;
+      const info = inspectRaw(raw);
+      out.push({
+        key: key + suffix, target: key, slot, suffix: suffix.slice(1), about,
+        loadable: info.status === 'ok' || info.status === 'migrated',
+        status: info.status, kind: info.kind ?? slot, savedAt: info.savedAt ?? null, error: info.error ?? null,
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * Put a backup back as the live save. The save it replaces is kept under `<slot>.replaced`
+ * and the backup itself is left in place, so nothing is ever lost by restoring.
+ */
+export function restoreBackup(storage, backupKey) {
+  try {
+    const entry = listBackups(storage).find((b) => b.key === backupKey);
+    if (!entry) return { ok: false, error: 'There is no such backup' };
+    if (!entry.loadable) return { ok: false, error: 'That backup cannot be loaded' };
+    const raw = storage.getItem(backupKey);
+    const current = storage.getItem(entry.target);
+    if (current != null && current !== raw) storage.setItem(`${entry.target}.replaced`, current);
+    storage.setItem(entry.target, raw);
+    return { ok: true, slot: entry.slot };
+  } catch {
+    return { ok: false, error: 'Could not restore — the browser blocked storage' };
+  }
 }
 
 function keepCopy(storage, key, raw) {
@@ -240,7 +297,8 @@ export function writeSlot(storage, key, { kind, shift, campaign = null }) {
     if (existing != null) {
       const p = parse(existing);
       if (p.ok && p.value && typeof p.value === 'object') {
-        if ((p.value.format ?? 1) > ENVELOPE_FORMAT || Number(p.value.version) > SHIFT_VERSION) {
+        if ((p.value.format ?? 1) > ENVELOPE_FORMAT || Number(p.value.version) > SHIFT_VERSION
+          || Number(p.value.shift?.version) > SHIFT_VERSION || Number(p.value.campaign?.version) > CAMPAIGN_VERSION) {
           return { ok: false, reason: 'newer', error: 'A newer save is stored here; it was not overwritten' };
         }
         if (p.value.format == null) keepCopy(storage, `${key}.bak`, existing);
@@ -251,6 +309,21 @@ export function writeSlot(storage, key, { kind, shift, campaign = null }) {
     return { ok: true };
   } catch (e) {
     return { ok: false, reason: 'storage', error: 'Could not save — the browser blocked storage' };
+  }
+}
+
+/**
+ * Copy whatever is in a slot to `<key><suffix>` (an older copy there is replaced). Used
+ * before a save is overwritten by something that is not its own continuation.
+ */
+export function archiveSlot(storage, key, suffix = '.replaced') {
+  try {
+    const raw = storage.getItem(key);
+    if (raw == null) return false;
+    storage.setItem(key + suffix, raw);
+    return true;
+  } catch {
+    return false;
   }
 }
 

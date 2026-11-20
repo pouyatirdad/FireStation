@@ -300,9 +300,10 @@ export const CONFIG = {
       { id: 3, name: 'City Department', rep: 45, shifts: 3, vehicles: ['rescue', 'ambubus'], stations: 3, upgradeCap: 3 },
       { id: 4, name: 'Regional Department', rep: 60, shifts: 5, vehicles: ['rescueboat', 'fireboat', 'hazmat'], stations: 5, upgradeCap: 4 },
       { id: 5, name: 'Advanced Department', rep: 75, shifts: 8, vehicles: ['helicopter'], stations: 7, upgradeCap: 5 },
-      { id: 6, name: 'National Emergency Service', rep: 90, shifts: 12, vehicles: ['airtanker'], stations: 99, upgradeCap: 5 },
+      { id: 6, name: 'National Emergency Service', rep: 85, shifts: 12, vehicles: ['airtanker'], stations: 99, upgradeCap: 5 },
     ],
     shiftLength: 960, // seconds of play in a career shift (a game day is 16 minutes)
+    minShiftShare: 0.5, // a shift can be filed once this share of it has been played (no instant-file bonus farming)
     reputation: {
       start: 20,
       weights: { response: 0.25, rescue: 0.2, outcome: 0.2, safety: 0.15, finance: 0.1, readiness: 0.1 },
@@ -314,7 +315,9 @@ export const CONFIG = {
     maintenance: { station: 30, vehicle: 8, upgradeLevel: 6 },
     funding: { baseMonthly: 4000, perRep: 60 }, // government funding paid at the start of each month
     monthDays: 4, // game days in a "month" for the finance summaries
-    bankruptcy: { warnAt: 1500, emergencyAt: -4000, emergencyAmount: 12000, repPenalty: 8, cooldownDays: 4 },
+    // Emergency funding covers the debt plus a cushion (at least `emergencyAmount`, at most `emergencyMax`), costs
+    // reputation and can be asked for again only after `cooldownDays` shifts.
+    bankruptcy: { warnAt: 1500, emergencyAt: -4000, emergencyAmount: 12000, emergencyMax: 40000, cushion: 4000, repPenalty: 8, cooldownDays: 4 },
     objectiveRefresh: 1, // game days between daily objectives
   },
 

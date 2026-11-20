@@ -264,7 +264,9 @@ export function buildReport(state) {
     property: saved + destroyed === 0 ? 0.8 : saved / (saved + destroyed),
     finance: net >= 0 ? 1 : clamp(1 + net / 6000, 0, 1),
   };
-  const score = scoreShift(parts);
+  // A shift with nothing to do shows nothing about the department: it cannot earn a top grade.
+  const quiet = resolved + failed + open === 0;
+  const score = quiet ? Math.min(scoreShift(parts), 70) : scoreShift(parts);
 
   const vehicles = Object.values(report.vehicles).map((v) => ({
     ...v, avgResponse: v.responses ? v.responseSum / v.responses : null,

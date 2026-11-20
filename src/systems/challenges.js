@@ -163,7 +163,7 @@ export function scenarioScore(state, won) {
   let score = 1000 + 120 * s.saved + 60 * s.rescued + 40 * (s.treated ?? 0) - 400 * s.casualties - 200 * s.lost + Math.round(state.credits / 10);
   if (won && def.timeLimit) score += Math.max(0, Math.round((def.timeLimit - state.time) * 2));
   if (!won) score = Math.round(score * 0.5);
-  return Math.max(0, Math.round(score));
+  return Math.max(won ? 100 : 0, Math.round(score));
 }
 
 function thresholds(state, success) {

@@ -1,8 +1,6 @@
 // Career totals: what the department has done over all its shifts, including the
 // shift in progress. Objectives and reputation read this.
 
-import { CONFIG } from '../core/config.js';
-
 const SPECIAL = ['rescue', 'hazmat', 'helicopter', 'airtanker', 'fireboat', 'rescueboat', 'ambubus'];
 
 export function emptyTotals() {
@@ -61,7 +59,3 @@ export function liveTotals(state) {
   };
 }
 
-export const personnelTotals = (state) => ({
-  roster: state.campaign.personnel.length,
-  maxRoster: CONFIG.personnel.maxRoster,
-});
