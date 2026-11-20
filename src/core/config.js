@@ -161,6 +161,15 @@ export const CONFIG = {
       hydrantOnly: true, tag: 'U',
       tools: { chainsaw: 1, cutter: 1, diving: 1 },
     },
+    // A hazmat unit: sealed suits for its whole crew, so it can work inside a hazard
+    // zone, and a decontamination line. Small tank, but a pump like any engine.
+    hazmat: {
+      label: 'Hazmat unit', cost: 2600, crew: 3, speed: 8.4, capacity: 900,
+      hoseRange: 14, turretRange: 7, turretPower: 0.025, turretWater: 20,
+      refillRate: 150, rescueTime: 3.2, refund: 0.6,
+      hazmat: true,
+      tools: { cutter: 1 },
+    },
     // A water-bombing helicopter: no crew, flies straight over roads, wrecks and
     // traffic, and drops water on whatever it hovers over, forest fires included.
     // It refills at a station helipad or by dipping in the harbour (the south
@@ -280,6 +289,110 @@ export const CONFIG = {
     crashCall: 0.16, // share of small calls that are a traffic accident
     drownCall: 0.1, // share of small calls that are someone in the water
   },
+
+  // Career mode: a persistent department. Quick Response ignores everything below.
+  career: {
+    startCredits: 24000,
+    // Department levels: what you need to reach each one and what it unlocks.
+    levels: [
+      { id: 1, name: 'Recruit Department', rep: 0, shifts: 0, vehicles: ['engine', 'ambulance', 'medcar'], stations: 1, upgradeCap: 1 },
+      { id: 2, name: 'Junior Department', rep: 30, shifts: 1, vehicles: ['ladder', 'tanker', 'rapid'], stations: 2, upgradeCap: 2 },
+      { id: 3, name: 'City Department', rep: 45, shifts: 3, vehicles: ['rescue', 'ambubus'], stations: 3, upgradeCap: 3 },
+      { id: 4, name: 'Regional Department', rep: 60, shifts: 5, vehicles: ['rescueboat', 'fireboat', 'hazmat'], stations: 5, upgradeCap: 4 },
+      { id: 5, name: 'Advanced Department', rep: 75, shifts: 8, vehicles: ['helicopter'], stations: 7, upgradeCap: 5 },
+      { id: 6, name: 'National Emergency Service', rep: 85, shifts: 12, vehicles: ['airtanker'], stations: 99, upgradeCap: 5 },
+    ],
+    shiftLength: 960, // seconds of play in a career shift (a game day is 16 minutes)
+    minShiftShare: 0.5, // a shift can be filed once this share of it has been played (no instant-file bonus farming)
+    reputation: {
+      start: 20,
+      weights: { response: 0.25, rescue: 0.2, outcome: 0.2, safety: 0.15, finance: 0.1, readiness: 0.1 },
+      targetResponse: 70, // seconds: a response at least this fast scores full marks
+      slowResponse: 220, // seconds: a response this slow scores nothing
+    },
+    // Per-game-hour operating costs (career only). A game hour is `economy.hourEvery` real seconds.
+    salary: { recruit: 18, firefighter: 26, driver: 30, lieutenant: 38, captain: 50, chief: 70 },
+    maintenance: { station: 30, vehicle: 8, upgradeLevel: 6 },
+    funding: { baseMonthly: 4000, perRep: 60 }, // government funding paid at the start of each month
+    monthDays: 4, // game days in a "month" for the finance summaries
+    // Emergency funding covers the debt plus a cushion (at least `emergencyAmount`, at most `emergencyMax`), costs
+    // reputation and can be asked for again only after `cooldownDays` shifts.
+    bankruptcy: { warnAt: 1500, emergencyAt: -4000, emergencyAmount: 12000, emergencyMax: 40000, cushion: 4000, repPenalty: 8, cooldownDays: 4 },
+    objectiveRefresh: 1, // game days between daily objectives
+  },
+
+  // Personnel: individual firefighters with skills that change what the crew does.
+  personnel: {
+    startRoster: 4, // firefighters at the start of a career (three crew the first engine, one reserve)
+    hireCost: 900,
+    maxRoster: 60,
+    candidates: 4, // candidates on the table at any time
+    candidateLife: 900, // seconds before the pool is refreshed
+    skills: ['firefighting', 'rescue', 'medical', 'driving', 'technical'],
+    maxSkill: 10,
+    skillBonus: 0.06, // per skill level above 1, on the matching rate
+    xpPerLevel: 100, // skill xp needed per skill level (x level)
+    fatigue: { perSecondWorking: 0.0035, perSecondDriving: 0.0012, restPerSecond: 0.004, exhausted: 0.85, penalty: 0.35 },
+    injury: { chancePerSecond: 0.0007, fire: 0.65, recovery: [240, 420], rankProtection: 0.08 },
+    ranks: [
+      { id: 'recruit', label: 'Recruit', level: 1 },
+      { id: 'firefighter', label: 'Firefighter', level: 2 },
+      { id: 'driver', label: 'Driver / Operator', level: 4 },
+      { id: 'lieutenant', label: 'Lieutenant', level: 6 },
+      { id: 'captain', label: 'Captain', level: 8 },
+      { id: 'chief', label: 'Chief', level: 10 },
+    ],
+    xp: { shift: 40, perRescue: 25, perTreatment: 20, perKnockdown: 30, perClearance: 15 },
+  },
+
+  // Training courses: cost, how long and which skill they raise.
+  training: {
+    courses: {
+      firefighting: { label: 'Firefighting Training', skill: 'firefighting', cost: 700, time: 180, xp: 90 },
+      rescue: { label: 'Rescue Training', skill: 'rescue', cost: 700, time: 180, xp: 90 },
+      medical: { label: 'Medical Training', skill: 'medical', cost: 650, time: 160, xp: 90 },
+      driving: { label: 'Driving Training', skill: 'driving', cost: 600, time: 150, xp: 90 },
+      hazmat: { label: 'Hazmat Training', skill: 'technical', cost: 1100, time: 240, xp: 80, cert: 'hazmat' },
+      technical: { label: 'Technical Rescue Training', skill: 'technical', cost: 1000, time: 240, xp: 110, cert: 'technical' },
+    },
+    baseSlots: 1, // trainees per station before a training centre
+  },
+
+  // Station upgrades (career). Each level costs `cost * level`.
+  upgrades: {
+    garage: { label: 'Garage expansion', cost: 3500, max: 4, per: 4, text: 'Four more vehicle bays per level' },
+    training: { label: 'Training centre', cost: 3000, max: 3, per: 1, text: 'One more trainee at a time and faster courses per level' },
+    medical: { label: 'Medical centre', cost: 3200, max: 3, per: 0.35, text: 'Crews recover from fatigue and injury faster per level' },
+    workshop: { label: 'Maintenance workshop', cost: 3000, max: 3, per: 0.2, text: 'Cuts vehicle maintenance costs per level' },
+    comms: { label: 'Communication centre', cost: 4000, max: 3, per: 0.04, text: 'Coordinated dispatch: responders drive faster per level' },
+    storage: { label: 'Equipment storage', cost: 3400, max: 2, per: 1, text: 'One more of every tool in each vehicle locker per level' },
+    tower: { label: 'Fire watch tower', cost: 4200, max: 3, per: 0.2, text: 'Spots forest fires early: they start smaller within range' },
+    baseBays: 4, // bays a station starts with in career mode
+    towerRange: 70, // tiles
+  },
+
+  // Support agencies: a call-out costs money, takes time to arrive and has one effect.
+  agencies: {
+    police: { label: 'Police', cost: 450, delay: 25, duration: 150, cooldown: 120, text: 'Closes the streets round the scene: your vehicles run at full speed there and the wreck crews work faster' },
+    ems: { label: 'Emergency medical service', cost: 700, delay: 35, duration: 90, cooldown: 150, text: 'Mass-casualty help: treats up to four injured people near the scene' },
+    civil: { label: 'Civil protection', cost: 600, delay: 30, duration: 240, cooldown: 180, text: 'Opens a shelter and speeds an evacuation of the area' },
+    utility: { label: 'Utility services', cost: 500, delay: 20, duration: 300, cooldown: 120, text: 'Cuts gas and power to the building: no gas explosions and the fire grows slower' },
+    coastguard: { label: 'Coast guard', cost: 800, delay: 40, duration: 120, cooldown: 150, text: 'Pulls people out of the water near the scene' },
+  },
+
+  // Hazards, collapse and evacuation.
+  hazard: {
+    radius: 9, // tiles round a leaking building
+    contaminationPerSecond: 0.05,
+    injuryChance: 0.01,
+    decontamination: 5, // seconds to decontaminate a crew member at a decon point
+  },
+  collapse: {
+    secondary: [90, 160], // seconds before a secondary collapse can happen
+    rescueFactor: 0.5, // rescue speed in a collapsed building without cutting gear
+    cutterFactor: 1.6, // with cutting gear
+  },
+  evacuation: { radius: 10, pace: 4, shelterCapacity: 60, closureTraffic: 0.5 },
 
   clockStart: 7 * 60, // 07:00
   clockRate: 1.5, // game minutes per real second: a game hour is 40 s, a day 16 minutes

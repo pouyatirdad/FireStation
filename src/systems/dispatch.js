@@ -9,7 +9,7 @@ import { addEvent } from './events.js';
 import { activeFires } from './fire.js';
 import { findPatient, isMedical } from './medical.js';
 import {
-  boatCanReach, canDive, crewOf, isFirefighter, orderAmbulanceToPatient, orderEngine,
+  boatCanReach, canDive, crewOf, isFirefighter, orderAmbulanceToPatient, orderEngine, unstaffed,
   orderEngineToBlockade, orderEngineToVictim, orderEngineToWildfire, sendEngineHome, sendToHospital,
   toolCount, toolsFree,
 } from './units.js';
@@ -24,7 +24,7 @@ function crewBusy(state, engine) {
 
 /** A vehicle with nothing to do: not driving, not packing up, not tied to a job. */
 export function isFree(state, engine) {
-  return engine.path.length === 0 && engine.packTimer === 0
+  return !unstaffed(state, engine) && engine.path.length === 0 && engine.packTimer === 0
     && !engine.targetId && !engine.wildfireId && !engine.blockadeId && !engine.victimId
     && !engine.patientId && !crewBusy(state, engine);
 }
@@ -94,7 +94,7 @@ const lowOnWater = (engine) => engine.capacity > 0 && engine.capacity < 50000
   && engine.water < engine.capacity * 0.15;
 
 /** How well a vehicle suits a job: lower is better, Infinity if it cannot do it. */
-function cost(state, engine, job) {
+export function cost(state, engine, job) {
   const d = dist(engine.x, engine.y, job.x, job.y);
   switch (job.kind) {
     case 'fire': {
@@ -120,7 +120,7 @@ function cost(state, engine, job) {
   }
 }
 
-function order(state, engine, job) {
+export function order(state, engine, job) {
   switch (job.kind) {
     case 'fire':
       return orderEngine(state, engine, job.x, job.y, job.ref.id);

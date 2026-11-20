@@ -2,7 +2,7 @@
 
 A top-down emergency-services management game for Windows, in the spirit of **Emergency 4**: a
 520×384 city (ten times the area of the first version) with forests, pharmacies, an airport, a railway, a tram and a waterfront,
-a fleet of thirteen kinds of apparatus you buy and sell — engines, ladders, tankers, rescue units,
+a fleet of fourteen kinds of apparatus you buy and sell — engines, ladders, tankers, rescue units,
 paramedic cars, ambulances and ambulance buses, rescue boats, fireboats, a helicopter, an air tanker and
 **ambulances** — small calls and major incidents, injured civilians, forest fires, a loans-and-insurance economy,
 synthesised sound, hospitals, blocked roads with live traffic, wind that drives the fire, chained incidents and a day/night cycle. Vanilla JavaScript, no dependencies; one self-contained
@@ -27,6 +27,9 @@ npm test                 # or: node --test test/
 ```
 
 Node 18+ is only needed for the build and the tests; playing needs nothing but a browser.
+
+Build and test from the project folder: `node tools/build.mjs` (or `npm run build`) regenerates `index.html`,
+`npm test` runs every test (about a minute and a half).
 
 ## The shift
 
@@ -178,7 +181,7 @@ There is no running budget: no subsidy and no vehicle upkeep. Credits come only 
 - **Night:** after dusk the vehicles light the scene: long headlight beams with a pool of light on the road, big alternating red
   and blue pulses from the light bars (red and white on an ambulance) across the street and the buildings, a floodlight round an
   engine working at a scene, a searchlight under a helicopter, and larger warm pools under the street lights.
-- **Costs:** vehicles cost nothing to run (no upkeep, no crew wages). Loan interest and the insurance premium, if you take them, are charged every two real minutes. A lost building costs $350 (scaled the same way), a life $700, and kits
+- **Costs:** in Quick Response vehicles cost nothing to run (no upkeep, no crew wages); a career pays salaries and upkeep every game hour (see Game modes). Loan interest and the insurance premium, if you take them, are charged every two real minutes. A lost building costs $350 (scaled the same way), a life $700, and kits
   bought at a pharmacy $12 each.
 - The balance can go negative; you just cannot buy anything until it recovers.
 
@@ -255,6 +258,80 @@ Hydrant, pharmacy, hospital and equipment actions are buttons on the selection c
 | <kbd>Esc</kbd> | Close a panel, or clear the selection |
 
 ![On scene](docs/screenshot-engine.png)
+
+## Game modes
+
+The start screen offers three ways to play. **Quick Response** is the original game, unchanged: no
+wages, no management. **Career** and **Challenges** are described below.
+
+### Dispatch, ETA, reports and intel (all modes)
+
+Select an incident and its card shows **intel** (severity, danger, explosion risk, secondary risks,
+people trapped, the equipment it needs, the weather and traffic) and the **ETA** of every vehicle on
+the way, drawn as a route on the map. **Presets** (Headquarters › Dispatch) send a whole combination
+(for example two engines, a ladder, an ambulance and a rescue unit to a building fire) with one click;
+a second click sends nothing more, and what is missing is reported. Presets can be created, edited and
+deleted; units can be called off or sent to another incident. **Support agencies** (police, EMS, civil
+protection, utility services, coast guard) are called from the card or the Dispatch tab. The
+**Report** tab grades the shift S to A, B, C or D from resolution, response time, safety, property and
+money — never from speed alone.
+
+### Career
+
+A persistent department. Hire and train firefighters, upgrade stations, manage money and reputation
+over many 16-minute shifts, and grow from a Recruit Department to the National Emergency Service.
+
+- **People**: each firefighter has a name, rank, level, five skills (firefighting, rescue, medical,
+  driving, technical), certifications, fatigue and injuries. Skills change how fast water works, rescues
+  and treatment go, and how fast a vehicle drives. A vehicle with no crew cannot be dispatched.
+- **Stations**: seven upgrades (garage, training centre, medical centre, workshop, communication
+  centre, equipment storage, fire watch tower), coverage by district and a comparison table.
+- **Money**: salaries and maintenance every game hour, monthly government funding, budgets,
+  bankruptcy warnings and emergency funding. The levels unlock vehicles, stations and upgrade levels.
+- **Objectives**: main, secondary, daily and long-term goals with rewards.
+- **End of shift**: Career › End shift (once half the shift has run) files the report, pays a performance
+  bonus scaled to the time played, moves reputation and starts the next shift with your fleet, stations and
+  people. Every shift has its own calls and wind.
+- **Station budgets**: set a monthly budget per station in Stations (0 means no limit). Upkeep is always
+  paid, but a vehicle, upgrade or training that would take the station over its budget is refused until
+  next month or until you raise the budget.
+
+### Sound
+
+Headquarters has a sound panel: volume and five categories (alerts, radio, sirens, ambience, effects)
+that can be switched off separately; <kbd>M</kbd> mutes everything. Police, EMS, civil protection, utility
+services and the coast guard each have their own siren when they are on their way or on scene. Sounds are
+rate-limited so a busy night never turns into noise.
+
+### Advanced operations
+
+Hazmat zones (protect crews with a hazmat unit or certified people; wash them down), structural
+collapse (cutting gear, secondary collapses), evacuation zones with shelters, six multi-stage disasters
+and weather. Disasters can strike a level-4 or higher career on their own; in any mode
+`?disaster=earthquake` starts one.
+
+### Challenges and scenarios
+
+Eight scored challenges and a scenario editor (Headquarters › Play). Challenges and scenarios use
+their own save slot and keep your best scores; they never touch Quick Response or career saves.
+
+### Saves
+
+Three independent slots: Quick Response (`firestation.save.v16`, the key earlier versions used), career
+(`firestation.career.v1`) and the challenge in progress. A slot holds `{ format, kind, shift, campaign }`.
+Shift saves are version 17.
+
+- A bare version-16 Quick Response save still loads; the first time it is replaced a copy is kept
+  under `<key>.bak`.
+- A save from a newer game is never read or overwritten.
+- An unreadable save is copied to `<key>.corrupt` rather than deleted.
+- Missing or damaged fields get safe defaults; a damaged person record is repaired on load.
+- Starting a new career asks first and keeps the old one under `firestation.career.v1.prev`.
+- The first time a page writes to a slot, what was there is kept under `<slot>.replaced`.
+- The start screen lists these backups under *Recover an earlier save*; restoring one keeps the save it
+  replaces. An unloadable save says why instead of failing silently.
+- A career is saved only while a shift is running; once a shift is filed the next shift is built
+  before the next save.
 
 ## How it works
 
@@ -370,9 +447,14 @@ needs editing.
 ?zoom=0.8       set the opening zoom
 ?select=b7      select a building by id
 ?help           open the controls overlay
+?career          start a career (?career=riverside or lean for the other starts)
+?challenge=night start a built-in challenge by id (one-engine, no-water, night, highway, forest-siege, budget-crisis, mass-casualty, industrial)
+?disaster=earthquake  start a disaster: earthquake, hurricane, airport, industrial, siege, blocks
 ```
 
-`window.__fireStation` exposes the live state and camera, read-only, for headless probes.
+`window.__fireStation` exposes the live state and camera for headless probes, and `step(seconds)` advances the
+simulation by hand and draws a frame (for browsers that do not run animation frames in the background);
+`lastStep` holds the sim, draw and HUD times of the last call.
 
 ## Project layout
 
@@ -386,6 +468,9 @@ src/systems/            navigation, fire, civilians, fleet, incidents, wildfires
                         effects, events, game rules and save state
 src/render/render.js    the 2.5D canvas renderer
 src/ui/hud.js           DOM HUD, unit dock, incident list and screens
+src/ui/command.js       Headquarters tabs (dispatch, people, stations, career, report, play), intel card
+src/render/overlays.js  routes with ETAs, hazard and evacuation zones, collapses, upgrade markers
+src/data/scenarios.js   the eight challenges and the scenario format and validator
 test/                   city, navigation, fire, rescue, fleet, incidents, medical, economy,
                         world (map size, sound mapping, daylight) and save tests
 tools/build.mjs         bundles src/ and the CSS into index.html
@@ -400,4 +485,4 @@ attachment; it needs no other file and no network.
 
 ## Not built yet
 
-Police units, rain and an isometric art pass. The simulation was written so those can be added without rewriting the core.
+An isometric art pass, a graphical map editor and recorded or voiced audio (the sound is all synthesised). The plan for what comes next is in NEXT_ROADMAP.md; what is verified and what is not is in RELEASE_STATUS.md; known weaknesses are in TECHNICAL_DEBT.md.
