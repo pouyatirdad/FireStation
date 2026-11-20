@@ -2,7 +2,7 @@
 
 A top-down emergency-services management game for Windows, in the spirit of **Emergency 4**: a
 520×384 city (ten times the area of the first version) with forests, pharmacies, an airport, a railway, a tram and a waterfront,
-a fleet of thirteen kinds of apparatus you buy and sell — engines, ladders, tankers, rescue units,
+a fleet of fourteen kinds of apparatus you buy and sell — engines, ladders, tankers, rescue units,
 paramedic cars, ambulances and ambulance buses, rescue boats, fireboats, a helicopter, an air tanker and
 **ambulances** — small calls and major incidents, injured civilians, forest fires, a loans-and-insurance economy,
 synthesised sound, hospitals, blocked roads with live traffic, wind that drives the fire, chained incidents and a day/night cycle. Vanilla JavaScript, no dependencies; one self-contained
@@ -181,7 +181,7 @@ There is no running budget: no subsidy and no vehicle upkeep. Credits come only 
 - **Night:** after dusk the vehicles light the scene: long headlight beams with a pool of light on the road, big alternating red
   and blue pulses from the light bars (red and white on an ambulance) across the street and the buildings, a floodlight round an
   engine working at a scene, a searchlight under a helicopter, and larger warm pools under the street lights.
-- **Costs:** vehicles cost nothing to run (no upkeep, no crew wages). Loan interest and the insurance premium, if you take them, are charged every two real minutes. A lost building costs $350 (scaled the same way), a life $700, and kits
+- **Costs:** in Quick Response vehicles cost nothing to run (no upkeep, no crew wages); a career pays salaries and upkeep every game hour (see Game modes). Loan interest and the insurance premium, if you take them, are charged every two real minutes. A lost building costs $350 (scaled the same way), a life $700, and kits
   bought at a pharmacy $12 each.
 - The balance can go negative; you just cannot buy anything until it recovers.
 
@@ -485,4 +485,4 @@ attachment; it needs no other file and no network.
 
 ## Not built yet
 
-An isometric art pass, a graphical map editor, voiced radio chatter and per-agency sirens. See DEVELOPMENT_PROGRESS.md for what is partial.
+An isometric art pass, a graphical map editor and recorded or voiced audio (the sound is all synthesised). The plan for what comes next is in NEXT_ROADMAP.md; what is verified and what is not is in RELEASE_STATUS.md; known weaknesses are in TECHNICAL_DEBT.md.
