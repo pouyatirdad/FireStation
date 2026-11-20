@@ -1883,3 +1883,152 @@ body {
 }
 .sel__shortcut .btn { text-transform: none; letter-spacing: 0; }
 .sel__shortcut .btn.is-active { background: rgba(255, 180, 70, 0.22); border-color: rgba(255, 180, 70, 0.6); }
+
+/* ======================================================================== *
+ * Command screens: modes, intel, presets, people, stations, career, report, *
+ * challenges and the scenario editor.                                       *
+ * ======================================================================== */
+
+.card--station { width: min(760px, 96vw); }
+.tabs { flex-wrap: wrap; }
+.tab { flex: 1 1 auto; min-width: 64px; padding: 7px 8px; }
+
+.stat--mode .stat__value { color: #f0c96a; font-variant-numeric: tabular-nums; }
+
+/* ---- start screen: three modes ---- */
+.modes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 18px 0 6px;
+}
+.mode {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+}
+.mode h3 { margin: 0; font-size: 15px; }
+.mode p { margin: 0; font-size: 11.5px; line-height: 1.5; color: var(--muted); flex: 1; }
+.mode .btn + .btn { margin-top: 0; }
+.over-lead { margin: 0 0 12px; color: var(--muted); font-size: 13px; }
+
+/* ---- generic form bits ---- */
+.field { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--muted); }
+.field input, .field select, .filters input, .filters select, .person select, .editor select, .field--inline input {
+  min-width: 0;
+  padding: 5px 7px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+.field input:focus, .field select:focus, .filters input:focus { outline: 1px solid var(--select); }
+.field--inline { flex-direction: row; align-items: center; gap: 6px; margin-top: 8px; }
+.field--inline input { width: 110px; }
+.field--check { flex-direction: row; align-items: center; gap: 8px; margin: 3px 0; color: var(--text); }
+.field--num input { width: 100%; }
+.field-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; margin: 6px 0; }
+.filters { display: flex; gap: 6px; margin: 0 0 10px; }
+.filters input { flex: 1; }
+.form-error { margin: 8px 0; padding: 6px 10px 6px 24px; border-radius: 4px; background: rgba(212, 80, 76, 0.14); color: #ff9d94; font-size: 12px; }
+p.form-error { padding-left: 10px; }
+
+/* ---- pills, bars and grades ---- */
+.pill { display: inline-block; padding: 1px 8px; border-radius: 9px; background: rgba(255, 255, 255, 0.09); font-size: 11px; font-weight: 600; }
+.pill[data-tone='good'] { background: rgba(95, 174, 133, 0.25); color: #9fe3bd; }
+.pill[data-tone='warn'] { background: rgba(217, 164, 65, 0.25); color: #f0c96a; }
+.pill[data-tone='bad'] { background: rgba(212, 80, 76, 0.28); color: #ff9d94; }
+.grade { display: inline-flex; align-items: center; justify-content: center; min-width: 30px; height: 30px; border-radius: 6px; font-weight: 800; background: rgba(255, 255, 255, 0.1); }
+.grade--S { background: #e0b43a; color: #1c1500; }
+.grade--A { background: #5fae85; color: #06210f; }
+.grade--B { background: #6bb8d8; color: #05202c; }
+.grade--C { background: #d9a441; color: #2a1c00; }
+.grade--D { background: #d4504c; color: #2a0705; }
+.report__grade { display: flex; align-items: center; gap: 14px; margin-bottom: 10px; }
+.report__grade .grade { width: 64px; height: 64px; font-size: 38px; }
+.report__grade span { color: var(--muted); font-size: 13px; }
+
+/* ---- intel block on the selection card ---- */
+.intel { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); font-size: 11.5px; }
+.intel .menu__eyebrow { margin: 8px 0 4px; }
+.intel__row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 3px 0; }
+.intel__row > span { color: var(--muted); }
+.intel__row > b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.intel__row > b[data-tone='good'] { color: #8fe0a8; }
+.intel__row > b[data-tone='bad'] { color: #ff8f84; }
+.intel__row .bar { flex: 1; min-width: 60px; }
+.intel__list { margin: 2px 0 4px; padding-left: 16px; color: #c7d1db; }
+.intel__buttons { display: flex; flex-wrap: wrap; gap: 5px; }
+.panel--selection { max-height: calc(100vh - 150px); overflow-y: auto; }
+
+/* ---- presets and agencies ---- */
+.preset { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line); }
+.preset:last-of-type { border-bottom: 0; }
+.preset__text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.preset__text b { font-size: 13px; }
+.preset__text span { color: var(--muted); font-size: 11.5px; }
+.preset__text em { color: #f0c96a; font-size: 11px; font-style: normal; }
+.preset__buttons { display: flex; gap: 5px; flex: 0 0 auto; }
+.editor { margin-top: 10px; padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: rgba(255, 255, 255, 0.03); }
+.editor__incident { display: flex; align-items: flex-end; gap: 8px; margin: 6px 0; padding: 8px; border-radius: 4px; background: rgba(0, 0, 0, 0.2); }
+.editor__incident .field-grid { flex: 1; margin: 0; }
+.editor .budget { margin-top: 10px; }
+
+/* ---- people ---- */
+.person { padding: 8px 0; border-bottom: 1px solid var(--line); }
+.person--best { border-left: 3px solid var(--good); padding-left: 8px; }
+.person[data-status='injured'] .person__head b { color: #ff9d94; }
+.person[data-status='training'] .person__head b { color: #9fd8ff; }
+.person__head { display: flex; flex-wrap: wrap; gap: 2px 10px; align-items: baseline; }
+.person__head span { color: var(--muted); font-size: 11.5px; }
+.person__skills { display: flex; flex-wrap: wrap; gap: 5px; margin: 5px 0; }
+.skill { position: relative; display: inline-flex; align-items: center; gap: 4px; width: 78px; height: 16px; padding: 0 4px; border-radius: 3px; background: rgba(255, 255, 255, 0.06); overflow: hidden; font-size: 10px; }
+.skill b { position: relative; z-index: 1; color: var(--muted); }
+.skill i { position: absolute; left: 0; top: 0; bottom: 0; background: rgba(107, 184, 216, 0.32); }
+.skill em { position: relative; z-index: 1; margin-left: auto; font-style: normal; font-weight: 700; }
+.skill--fatigue i { background: rgba(224, 102, 28, 0.45); }
+.person__buttons { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+.person__buttons select { max-width: 190px; }
+
+/* ---- stations ---- */
+.station-card { margin: 0 0 12px; padding: 10px; border: 1px solid var(--line); border-radius: 6px; }
+.station-card header { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 10px; margin-bottom: 6px; }
+.station-card header span { color: var(--muted); font-size: 11.5px; }
+.upgrade { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 5px 0; border-top: 1px solid var(--line); font-size: 12px; }
+.upgrade div { display: flex; flex-direction: column; gap: 1px; }
+.upgrade div > span:not(.pips) { color: var(--muted); font-size: 11px; }
+.upgrade em { color: var(--good); font-style: normal; font-size: 11px; }
+.pips { display: inline-flex; gap: 3px; margin-left: 6px; vertical-align: middle; }
+.pips i { width: 8px; height: 8px; border-radius: 2px; background: rgba(255, 255, 255, 0.14); }
+.pips i.on { background: var(--fire); }
+.cmd-table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+.cmd-table th, .cmd-table td { padding: 4px 6px; text-align: left; border-bottom: 1px solid var(--line); }
+.cmd-table th { color: var(--muted); font-weight: 600; }
+
+/* ---- career objectives ---- */
+.objective { padding: 6px 0; border-bottom: 1px solid var(--line); }
+.objective div { display: flex; flex-direction: column; gap: 1px; margin-bottom: 4px; }
+.objective span { color: var(--muted); font-size: 11px; }
+.objective.is-done b { color: var(--good); }
+.objective.is-done .bar i { background: var(--good); }
+
+/* ---- phones and narrow windows ---- */
+@media (max-width: 900px), (max-height: 520px) {
+  .modes { grid-template-columns: 1fr; }
+  .preset { flex-direction: column; align-items: stretch; }
+  .preset__buttons { flex-wrap: wrap; }
+  .editor__incident { flex-direction: column; align-items: stretch; }
+  .field-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tab { font-size: 11px; padding: 6px 6px; min-width: 56px; }
+  .card--station { width: 98vw; }
+  .person__buttons select { max-width: 100%; flex: 1 1 140px; }
+  .skill { width: 70px; }
+  .stat--mode { display: none; }
+}
+

@@ -23,6 +23,7 @@ export function createWind(rng) {
 export function updateWind(state, dt) {
   const wind = state.wind;
   if (!wind) return;
+  if (state.rules?.windLock) return; // a scenario fixes the wind
   wind.changeIn -= dt;
   if (wind.changeIn <= 0) {
     wind.changeIn = state.rng.range(90, 180);

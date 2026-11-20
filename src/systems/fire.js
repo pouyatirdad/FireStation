@@ -188,7 +188,7 @@ export function updateFire(state, dt) {
     const resistance = fireResistance(b);
     b.fire = Math.min(
       1,
-      b.fire + CONFIG.fire.growth * dt * (0.75 + 0.5 * (1 - b.fire)) * b.risk,
+      b.fire + CONFIG.fire.growth * dt * (0.75 + 0.5 * (1 - b.fire)) * b.risk * (b.utilityCut ? 0.8 : 1),
     );
     if (water > 0) {
       b.fire -= (water * dt * 1.7) / resistance;
@@ -209,7 +209,7 @@ export function updateFire(state, dt) {
     }
 
     // An industrial fire left to run can take the whole building up with it.
-    if ((b.type === 'warehouse' || b.type === 'factory' || b.type === 'tankfarm') && b.fire >= (b.hazmat ? 0.7 : 0.85) && !b.exploded && state.rng.float() < dt * (b.hazmat ? 0.08 : 0.04)) {
+    if ((b.type === 'warehouse' || b.type === 'factory' || b.type === 'tankfarm') && b.fire >= (b.hazmat ? 0.7 : 0.85) && !b.exploded && !b.utilityCut && state.rng.float() < dt * (b.hazmat ? 0.08 : 0.04)) {
       b.exploded = true;
       state.onExplosion?.(b);
     }

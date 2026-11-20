@@ -4,6 +4,7 @@
 // engine parked on the avenue is correctly hidden by the block in front of it.
 
 import { CONFIG, TILE } from '../core/config.js';
+import { drawCommandOverlays } from './overlays.js';
 import { clamp } from '../core/math.js';
 import { buildingRect } from '../systems/fire.js';
 import {
@@ -186,6 +187,7 @@ export function render(ctx, state, cam, view, opts = {}) {
   drawRail(ctx, state, bounds, z);
   drawTrams(ctx, state, bounds, z);
   drawWildfires(ctx, state, now, z);
+  drawCommandOverlays(ctx, state, now, z);
   if (currentDark > 0.12) {
     ctx.globalCompositeOperation = 'lighter';
     if (currentDark > 0.15) drawStreetLights(ctx, state.city, bounds, z, true);

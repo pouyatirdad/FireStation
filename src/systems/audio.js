@@ -23,16 +23,22 @@ export function eventSound(event) {
   if (!event) return null;
   const text = event.text ?? '';
   switch (event.tone) {
-    case 'big': return /explosion/i.test(text) ? 'boom' : 'klaxon';
+    case 'big':
+      if (/promotion/i.test(text)) return 'chime';
+      return /explosion|secondary collapse/i.test(text) ? 'boom' : 'klaxon';
     case 'fire':
       if (/traffic accident/i.test(text)) return 'crash';
       return /spread/i.test(text) ? 'warn' : 'alarm';
     case 'bad': return /building lost/i.test(text) ? 'boom' : 'bad';
     case 'good':
       if (/supply line connected/i.test(text)) return 'clunk';
+      // Radio traffic: dispatch orders and support agencies reporting in.
+      if (/dispatched|on scene —|response complete/i.test(text)) return 'radio';
       if (/\$/.test(text)) return 'cash';
       return 'chime';
     case 'warn': return /injured|ambulance/i.test(text) ? 'medic' : 'warn';
+    case 'info':
+      return /called —|called off|redirected|evacuation of/i.test(text) ? 'radio' : null;
     default: return null;
   }
 }

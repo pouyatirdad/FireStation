@@ -51,7 +51,7 @@ export const SCENES = [
     text: ({ b }) => `A candle left burning has started a fire at ${b.name}` },
   { id: 'hoarder', label: 'Hoarder house fire', types: ['house'], weight: 1, reward: 720, fire: 0.38, trapped: [1, 1],
     text: ({ b }) => `House fire at ${b.name} — the rooms are packed to the ceiling and the resident cannot get out` },
-  { id: 'gasleak-flat', label: 'Gas leak', types: ['apartment'], weight: 1.5, reward: 520, hazmat: true,
+  { id: 'gasleak-flat', label: 'Gas leak', types: ['apartment'], leak: true, weight: 1.5, reward: 520, hazmat: true,
     hurt: [[0.3, 0.55, 'Gas leak casualty at'], [0.3, 0.55, 'Gas leak casualty at']],
     text: ({ b }) => `Gas leak in ${b.name} — the block is being evacuated and two people are overcome` },
 
@@ -62,13 +62,13 @@ export const SCENES = [
     text: ({ b }) => `Oven fire at ${b.name} — flames in the flue` },
   { id: 'shortcircuit', label: 'Electrical fire', types: ['shop', 'pharmacy'], weight: 2, reward: 340, fire: 0.15,
     text: ({ b }) => `Electrical fire behind the counter at ${b.name}` },
-  { id: 'gasleak-shop', label: 'Gas leak', types: ['shop'], weight: 1.5, reward: 480, hazmat: true,
+  { id: 'gasleak-shop', label: 'Gas leak', types: ['shop'], leak: true, weight: 1.5, reward: 480, hazmat: true,
     hurt: [[0.3, 0.6, 'Gas leak casualty at']],
     text: ({ b }) => `Gas leak at ${b.name} — customers evacuated, one person collapsed` },
   { id: 'fryer', label: 'Fryer explosion', types: ['shop'], weight: 1, reward: 600, fire: 0.4,
     hurt: [[0.5, 0.9, 'Burns victim at']],
     text: ({ b }) => `Fryer explosion at ${b.name} — the kitchen is alight and a cook is badly burned` },
-  { id: 'chemspill', label: 'Chemical spill', types: ['pharmacy'], weight: 1, reward: 520, hazmat: true,
+  { id: 'chemspill', label: 'Chemical spill', types: ['pharmacy'], leak: true, weight: 1, reward: 520, hazmat: true,
     hurt: [[0.3, 0.5, 'Fume casualty at']],
     text: ({ b }) => `Chemical spill in the stockroom of ${b.name} — fumes in the shop` },
 
@@ -86,7 +86,7 @@ export const SCENES = [
     text: ({ b, n }) => `MAJOR INCIDENT — flames racing up the cladding of ${b.name}, ${n} people above the fire` },
   { id: 'rooftop', label: 'Rooftop plant fire', types: ['tower', 'office'], weight: 1.5, reward: 600, fire: 0.2,
     text: ({ b }) => `Air-conditioning plant on the roof of ${b.name} is alight` },
-  { id: 'crane', label: 'Construction accident', types: ['office', 'tower', 'hotel'], weight: 1, reward: 700, trapped: [1, 2], rescue: true,
+  { id: 'crane', label: 'Construction accident', types: ['office', 'tower', 'hotel'], collapse: true, weight: 1, reward: 700, trapped: [1, 2], rescue: true,
     hurt: [[0.7, 1, 'Construction casualty at']],
     text: ({ b }) => `A scaffold has collapsed at ${b.name} — workers trapped and hurt` },
   { id: 'cradle', label: 'Cradle failure', types: ['tower', 'hotel'], weight: 1, reward: 650, trapped: [2, 2], rescue: true,
@@ -106,10 +106,10 @@ export const SCENES = [
     text: ({ b }) => `Electrical fire in the gymnasium roof of ${b.name}` },
 
   // --- industry -------------------------------------------------------------
-  { id: 'racking', label: 'Racking collapse', types: ['warehouse'], weight: 2, reward: 850, trapped: [1, 2], rescue: true,
+  { id: 'racking', label: 'Racking collapse', types: ['warehouse'], collapse: true, weight: 2, reward: 850, trapped: [1, 2], rescue: true,
     hurt: [[0.7, 1, 'Crush victim at']],
     text: ({ b }) => `Pallet racking has collapsed at ${b.name} — workers buried under the load` },
-  { id: 'toxicleak', label: 'Toxic gas leak', types: ['factory'], weight: 1.5, reward: 1300, hazmat: true,
+  { id: 'toxicleak', label: 'Toxic gas leak', types: ['factory'], leak: true, weight: 1.5, reward: 1300, hazmat: true,
     hurt: [[0.3, 0.8, 'Gas casualty at'], [0.3, 0.8, 'Gas casualty at'], [0.3, 0.8, 'Gas casualty at']],
     text: ({ b }) => `Toxic gas leak at ${b.name} — the works is evacuating, three people down` },
   { id: 'dust', label: 'Dust explosion', types: ['factory'], weight: 1, big: true, reward: 2000, fire: 0.5, blast: true,
@@ -121,7 +121,7 @@ export const SCENES = [
     text: ({ b }) => `Boiler explosion at ${b.name} — fire in the boiler house and debris in the street` },
   { id: 'tankvent', label: 'Tank vent fire', types: ['tankfarm'], weight: 2, reward: 1500, fire: 0.45, hazmat: true,
     text: ({ b }) => `A vent has ignited on a fuel tank at ${b.name} — it burns hot and may spread` },
-  { id: 'ammonia', label: 'Ammonia leak', types: ['warehouse'], weight: 1, reward: 1100, hazmat: true,
+  { id: 'ammonia', label: 'Ammonia leak', types: ['warehouse'], leak: true, weight: 1, reward: 1100, hazmat: true,
     hurt: [[0.3, 0.7, 'Ammonia casualty at'], [0.3, 0.7, 'Ammonia casualty at'], [0.3, 0.7, 'Ammonia casualty at']],
     text: ({ b }) => `Ammonia leak from the cold store at ${b.name} — three workers overcome` },
   { id: 'forklift', label: 'Forklift accident', types: ['warehouse', 'factory'], weight: 1.5, reward: 0,
@@ -131,6 +131,17 @@ export const SCENES = [
     text: ({ b }) => `MAJOR INCIDENT — the pallet yard at ${b.name} is burning fiercely and the wind is spreading it` },
   { id: 'quay-fuel', label: 'Boat and fuel quay fire', types: ['warehouse', 'tankfarm'], waterfront: true, weight: 2, reward: 1500, fire: 0.4, hazmat: true,
     text: ({ b }) => `A fuelling boat is alight against the quay at ${b.name} — a fireboat can reach it` },
+
+  // --- structural collapse ----------------------------------------------------
+  { id: 'house-collapse', label: 'Building collapse', types: ['house', 'apartment', 'shop'], weight: 1, reward: 1200, trapped: [3, 5], collapse: true,
+    hurt: [[0.6, 1, 'Collapse casualty at'], [0.5, 0.9, 'Collapse casualty at']],
+    text: ({ b, n }) => `Part of ${b.name} has collapsed — ${n} people buried in the rubble and others hurt` },
+  { id: 'wall-collapse', label: 'Gable wall collapse', types: ['warehouse', 'factory', 'office'], weight: 1, reward: 1300, trapped: [2, 4], collapse: true,
+    hurt: [[0.6, 1, 'Collapse casualty at']],
+    text: ({ b, n }) => `A gable wall has come down at ${b.name} — ${n} workers are under the masonry` },
+  { id: 'gas-collapse', label: 'Gas blast and collapse', types: ['apartment'], weight: 0.7, big: true, reward: 2800, fire: 0.3, trapped: [4, 7], collapse: true, hazmat: true, blast: true,
+    hurt: [[0.6, 1, 'Blast casualty at'], [0.5, 1, 'Blast casualty at']],
+    text: ({ b, n }) => `MAJOR INCIDENT — a gas explosion has brought down part of ${b.name}: ${n} people buried and fire in the ruins` },
 
   // --- the airport ----------------------------------------------------------
   { id: 'crash-landing', label: 'Aircraft emergency', types: ['terminal', 'hangar'], weight: 1.5, big: true, reward: 3200, fire: 0.5, hazmat: true, blast: true,

@@ -4,11 +4,16 @@
 import { CONFIG } from '../core/config.js';
 import { formatClock } from '../core/math.js';
 import {
-  freeBay, hydrantInReach, ownsStation, toolCount, toolsFree, totalBays, totalBerths, vehicleTools,
+  freeBay, hydrantInReach, ownsStation, stationCapacity, toolCount, toolsFree, totalBays, totalBerths, vehicleTools,
 } from '../systems/units.js';
 import { contractProgress } from '../systems/contracts.js';
 import { fireDifficulty } from '../systems/fire.js';
 import { windLabel } from '../systems/wind.js';
+import { stationBlock, vehicleBlock } from '../systems/stations.js';
+import { isCareer } from '../systems/modifiers.js';
+import { scenarioProgress } from '../systems/challenges.js';
+import { formatDuration } from '../systems/report.js';
+import * as command from './command.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -354,6 +359,7 @@ export function update(state, force = false) {
   $('stat-saved').textContent = String(state.stats.saved);
   $('stat-lost').textContent = String(state.stats.lost);
   $('stat-rating').textContent = String(Math.round(state.rating));
+  updateModeBadge(state);
   $('rating-fill').style.width = `${Math.max(0, Math.min(100, state.rating))}%`;
 
   const pauseButton = $('btn-pause');
@@ -387,6 +393,23 @@ export function update(state, force = false) {
   updateTooltip(state);
   updateGameOver(state);
   if (!$('screen-station').hidden) updateStation(state);
+}
+
+/** Career shift clock or the scenario's name and time left; hidden in Quick Response. */
+function updateModeBadge(state) {
+  const box = $('stat-mode');
+  if (isCareer(state)) {
+    box.hidden = false;
+    $('mode-label').textContent = `Career · shift ${state.campaign.shifts + 1}`;
+    $('mode-value').textContent = state.shiftDue ? 'Shift over' : formatDuration(Math.max(0, CONFIG.career.shiftLength - state.time));
+  } else if (state.mode === 'challenge' && state.scenario) {
+    const p = scenarioProgress(state);
+    box.hidden = false;
+    $('mode-label').textContent = p.name;
+    $('mode-value').textContent = p.remaining != null ? formatDuration(p.remaining) : `${p.started}/${p.scripted} started`;
+  } else {
+    box.hidden = true;
+  }
 }
 
 function unitLevel(engine) {
@@ -543,9 +566,9 @@ function updateSelection(state) {
     return;
   }
 
-  const key = selected.kind === 'wildfire'
+  const key = (selected.kind === 'wildfire'
     ? `wf:${entity.id}:${Math.round(entity.intensity * 20)}:${Math.round(entity.radius / 16)}`
-    : selectionSignature(state, entity);
+    : selectionSignature(state, entity)) + '|' + (selected.kind === 'unit' ? '' : command.incidentSignature(state));
   if (key === lastSelectionKey) return;
   lastSelectionKey = key;
   panel.hidden = false;
@@ -561,6 +584,7 @@ function updateSelection(state) {
       ? (entity.kind === 'engine' ? engineCard(state, entity) : crewCard(state, entity))
       : buildingCard(state, entity);
   if (selected.kind === 'unit' && entity.kind === 'engine') panel.insertAdjacentHTML('beforeend', shortcutRow(state, entity));
+  else if (selected.kind !== 'unit') panel.insertAdjacentHTML('beforeend', command.incidentExtras(state));
 }
 
 /** The unit's selection key, with a button to change it. */
@@ -904,6 +928,21 @@ function updateTooltip(state) {
 function updateGameOver(state) {
   if (!state.over || overShown) return;
   overShown = true;
+  const result = state.scenario?.result;
+  $('btn-replay').hidden = !result;
+  $('btn-over-menu').hidden = !result;
+  $('btn-restart').hidden = Boolean(result);
+  $('over-lead').hidden = !result;
+  if (result) {
+    $('over-eyebrow').textContent = state.scenario.def.name;
+    $('over-title').textContent = result.status === 'won' ? 'Challenge complete' : 'Challenge failed';
+    $('over-lead').textContent = result.status === 'won'
+      ? `Score ${result.score}${state.scenarioBest ? ' — a new best!' : ''}`
+      : `Failed: ${result.reasons.join(', ')}. Score ${result.score}`;
+  } else {
+    $('over-eyebrow').textContent = 'Shift over';
+    $('over-title').textContent = 'The district is lost';
+  }
   $('over-stats').innerHTML = `
     <div><b>${state.stats.saved}</b><span>Saved</span></div>
     <div><b>${state.stats.lost}</b><span>Lost</span></div>
@@ -932,11 +971,6 @@ export function setBuyStation(index) {
 /** The station new vehicles are delivered to (0 or 1), as chosen in the panel. */
 export const getBuyStation = () => buyStation;
 
-const TABS = [
-  ['fleet', 'Fleet'],
-  ['finance', 'Finance'],
-  ['contracts', 'Contracts'],
-];
 
 const vehicleBlurb = (spec) => {
   if (spec.plane) return 'no crew · ' + spec.capacity.toLocaleString('en-US') + ' L · circles the fire, skims the sea to refill';
@@ -949,7 +983,9 @@ const vehicleBlurb = (spec) => {
 };
 
 function fleetTab(state) {
-  const bays = totalBays(state);
+  const bays = isCareer(state)
+    ? state.city.stations.reduce((n, st, i) => n + (ownsStation(state, i) && !st.sea ? stationCapacity(state, i) : 0), 0)
+    : totalBays(state);
   const landCount = state.engines.filter((e) => !e.spec.boat).length;
   const maxed = freeBay(state, null, false) < 0;
   const dockOpen = ownsStation(state, 2);
@@ -987,7 +1023,7 @@ function fleetTab(state) {
         : st.kind === 'airport' ? 'The airport fire station: sixteen bays beside the runway and its own medical centre. Calls start coming from the airfield and its district.'
           : 'A regional station with sixteen bays and a base hospital. Calls start coming from its district.';
       return '<div class="station__expand"><div><b>' + esc(st.name) + '</b><span>' + blurb + '</span></div>' +
-        '<button type="button" class="btn btn--small btn--primary" data-action="buy-station" data-station="' + i + '"' + (state.credits < cost ? ' disabled' : '') + '>Open $' + cost.toLocaleString('en-US') + '</button></div>';
+        '<button type="button" class="btn btn--small btn--primary" data-action="buy-station" data-station="' + i + '"' + (state.credits < cost || stationBlock(state) ? ' disabled title="' + esc(stationBlock(state) ?? '') + '"' : '') + '>Open $' + cost.toLocaleString('en-US') + '</button></div>';
     }).join('') +
     '</div>';
 
@@ -999,10 +1035,11 @@ function fleetTab(state) {
 
   const buys = Object.entries(CONFIG.vehicles).map(([type, spec]) => {
     const noRoom = spec.boat ? !dockOpen || freeBay(state, 2, true) < 0 : maxed;
-    const disabled = noRoom || state.credits < spec.cost;
-    return '<button type="button" class="station__buybtn" data-action="buy-vehicle" data-type="' + type + '"' + (disabled ? ' disabled' : '') + '>' +
+    const locked = vehicleBlock(state, type);
+    const disabled = noRoom || state.credits < spec.cost || Boolean(locked);
+    return '<button type="button" class="station__buybtn" data-action="buy-vehicle" data-type="' + type + '"' + (disabled ? ' disabled' : '') + (locked ? ' title="' + esc(locked) + '"' : '') + '>' +
       '<span class="station__buyhead"><b>' + esc(spec.label) + '</b><i>$' + spec.cost.toLocaleString('en-US') + '</i></span>' +
-      '<span>' + esc(vehicleBlurb(spec)) + '</span></button>';
+      '<span>' + esc(locked ?? vehicleBlurb(spec)) + '</span></button>';
   }).join('');
 
   return '<div class="station__balance">$' + state.credits.toLocaleString('en-US') + '<span>credits · ' + landCount + '/' + bays + ' bays</span></div>' +
@@ -1062,16 +1099,22 @@ function contractsTab(state) {
 }
 
 export function updateStation(state) {
-  const tabs = '<div class="tabs" role="tablist">' + TABS.map(([id, label]) =>
+  // Rebuilding the panel under someone who is typing or choosing would lose their place.
+  if (command.isEditing($('station-body'))) return;
+  const list = command.tabsFor(state);
+  if (!list.some(([id]) => id === stationTab)) stationTab = 'fleet';
+  const tabs = '<div class="tabs" role="tablist">' + list.map(([id, label]) =>
     '<button type="button" role="tab" class="tab' + (stationTab === id ? ' is-active' : '') + '" data-action="station-tab" data-tab="' + id + '">' + label + '</button>').join('') + '</div>';
-  const body = stationTab === 'finance' ? financeTab(state)
+  const own = command.renderTab(stationTab, state);
+  const body = own != null ? own
+    : stationTab === 'finance' ? financeTab(state) + command.careerFinanceHtml(state)
       : stationTab === 'contracts' ? contractsTab(state)
         : fleetTab(state);
 
   const footer = '<div class="station__save">' +
     '<button type="button" class="btn btn--small" data-action="save-game">Save<kbd>Ctrl+S</kbd></button>' +
     '<button type="button" class="btn btn--small" data-action="load-game">Load</button>' +
-    '<button type="button" class="btn btn--small" data-action="new-shift">New shift</button></div>' +
+    (state.mode === 'quick' ? '<button type="button" class="btn btn--small" data-action="new-shift">New shift</button>' : '') + '</div>' +
     '<p class="station__saved">' + (state.saveStatus ? 'Saved at ' + state.saveStatus : 'Autosaves every 30 seconds') + '</p>' +
     '<p class="station__keys"><kbd>B</kbd> headquarters · <kbd>D</kbd> dispatch · <kbd>A</kbd> dispatch all · <kbd>Z</kbd> back all · <kbd>E</kbd> deploy · <kbd>R</kbd> pack up · <kbd>G</kbd> hydrant · <kbd>P</kbd> pharmacy · <kbd>K</kbd> hospital · <kbd>Tab</kbd> next incident · <kbd>M</kbd> sound · <kbd>F1</kbd> controls</p>';
 

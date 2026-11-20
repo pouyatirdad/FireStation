@@ -28,6 +28,18 @@ import { playScene } from './systems/incidents.js';
 import { ignite } from './systems/fire.js';
 import { render, createCamera, clampCamera, screenToWorld } from './render/render.js';
 import * as hud from './ui/hud.js';
+import * as command from './ui/command.js';
+import {
+  KEYS, hasSlot, readSlot, writeSlot,
+} from './systems/saves.js';
+import {
+  careerSlotData, createCareer, createScenarioGame, loadCareerSlot, nextCareerShift, scenarioSlotData,
+} from './systems/modes.js';
+import { endShift } from './systems/campaign.js';
+import { restorePresets } from './systems/presets.js';
+import { findChallenge } from './data/scenarios.js';
+import { startDisaster } from './systems/disasters.js';
+import { SCENARIOS_START } from './data/startScenarios.js';
 import { startPinch, pinchCamera, isCompact, startZoomFor } from './ui/gestures.js';
 
 const canvas = document.getElementById('game');
@@ -94,6 +106,7 @@ function frame(dt) {
   guarded('render', () => render(ctx, state, cam, view, { now: state.time }));
   guarded('audio', () => audio.update(state, cam, view));
   guarded('hud', () => hud.update(state));
+  guarded('scenario', checkScenarioEnd);
 }
 
 function beginLoop() {
@@ -564,7 +577,9 @@ function onAction(action, data = {}) {
     case 'save-game': saveGame(); break;
     case 'load-game': loadGame(); break;
     case 'new-shift': restart(); break;
-    default: break;
+    default:
+      if (command.handle(action, data, state, api) && action.startsWith('preset-')) persistPresets();
+      break;
   }
   if (!stationScreen.hidden) {
     hud.updateStation(state);
@@ -596,6 +611,7 @@ function hideOverlay(screen) {
   if (state.running && helpScreen.hidden && stationScreen.hidden) {
     state.paused = pausedByOverlay;
   }
+  if (!state.running && !state.over && screen === stationScreen) document.getElementById('screen-start').hidden = false;
 }
 
 function toggleHelp() {
@@ -628,44 +644,58 @@ function sellApparatus(id) {
 
 // ------------------------------------------------------------------- save ---
 
-const SAVE_KEY = 'firestation.save.v16';
-
-function hasSave() {
+const storage = (() => {
   try {
-    return Boolean(localStorage.getItem(SAVE_KEY));
+    return window.localStorage;
   } catch {
-    return false;
+    return { getItem: () => null, setItem: () => { throw new Error('blocked'); } };
   }
+})();
+
+const hasSave = (key = KEYS.quick) => hasSlot(storage, key);
+
+function persistPresets() {
+  try {
+    storage.setItem(KEYS.presets, JSON.stringify(state.presets));
+  } catch { /* presets are a convenience */ }
+}
+
+/** Custom presets are kept across shifts and modes. */
+function loadPresets() {
+  try {
+    const raw = storage.getItem(KEYS.presets);
+    return raw ? restorePresets(JSON.parse(raw)) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The slot a mode saves to, and what goes in it; null when there is nothing to save now. */
+function slotFor(st) {
+  if (!st.running || st.over) return null;
+  if (st.mode === 'career') return st.shiftSummary ? null : { key: KEYS.career, data: careerSlotData(st) };
+  if (st.mode === 'challenge') return { key: KEYS.challenge, data: scenarioSlotData(st) };
+  return { key: KEYS.quick, data: { kind: 'quick', shift: serialize(st) } };
 }
 
 function saveGame(quiet = false) {
-  if (!state.running) return false;
-  try {
-    localStorage.setItem(SAVE_KEY, JSON.stringify(serialize(state)));
-    state.saveStatus = formatClock(state.clock);
-    if (!quiet) addEvent(state, 'Shift saved', 'good');
-    hud.updateStation(state);
-    return true;
-  } catch {
-    addEvent(state, 'Could not save — the browser blocked storage', 'warn');
+  const slot = slotFor(state);
+  if (!slot) return false;
+  const result = writeSlot(storage, slot.key, slot.data);
+  if (!result.ok) {
+    addEvent(state, result.error, 'warn');
     return false;
   }
+  state.saveStatus = formatClock(state.clock);
+  if (!quiet) addEvent(state, 'Shift saved', 'good');
+  hud.updateStation(state);
+  return true;
 }
 
-function loadGame() {
-  let data = null;
-  try {
-    data = JSON.parse(localStorage.getItem(SAVE_KEY) ?? 'null');
-  } catch {
-    data = null;
-  }
-  if (!data) {
-    addEvent(state, 'No saved shift found', 'warn');
-    return false;
-  }
-
+/** Make a freshly built or loaded game the one being played. */
+function switchTo(next, { start = true } = {}) {
   loop?.stop();
-  state = loadState(data);
+  state = next;
   cam = createCamera(state);
   const focus = state.engines[0];
   if (focus) {
@@ -680,7 +710,34 @@ function loadGame() {
   document.getElementById('screen-start').hidden = true;
   document.getElementById('screen-over').hidden = true;
   hud.reset(state);
+  if (start && !state.running) startShift(state);
+  state.running = true;
   beginLoop();
+}
+
+const SLOT_BY_MODE = { quick: KEYS.quick, career: KEYS.career, challenge: KEYS.challenge };
+
+/** Load the slot for a mode (the current one by default). */
+function loadGame(mode = state.mode) {
+  const slot = readSlot(storage, SLOT_BY_MODE[mode] ?? KEYS.quick);
+  if (slot.status === 'none') {
+    addEvent(state, 'No saved game found', 'warn');
+    return false;
+  }
+  if (!['ok', 'migrated'].includes(slot.status)) {
+    addEvent(state, slot.error ?? 'That save cannot be loaded', 'bad');
+    return false;
+  }
+  let next;
+  try {
+    next = slot.kind === 'career' ? loadCareerSlot(slot) : loadState(slot.shift, null);
+  } catch (err) {
+    console.error('[load]', err);
+    addEvent(state, 'That save could not be rebuilt; it was left untouched', 'bad');
+    return false;
+  }
+  switchTo(next, { start: false });
+  if (slot.status === 'migrated') addEvent(state, 'An older save was upgraded; a backup copy is kept', 'info');
   return true;
 }
 
@@ -690,19 +747,67 @@ function startGame() {
 }
 
 function restart() {
-  loop?.stop();
-  state = createGame(CONFIG.city.seed);
-  cam = createCamera(state);
-  cam.zoom = startZoomFor(view.width, view.height, cam.zoom);
-  pausedByOverlay = false;
-  helpScreen.hidden = true;
-  stationScreen.hidden = true;
-  hud.reset(state);
-  document.getElementById('screen-over').hidden = true;
-  document.getElementById('screen-start').hidden = true;
-  startShift(state);
-  beginLoop();
+  const next = createGame(CONFIG.city.seed);
+  const presets = loadPresets();
+  if (presets) next.presets = presets;
+  switchTo(next);
 }
+
+function startCareer(name, scenario) {
+  const next = createCareer({ name, scenario });
+  const saved = loadPresets();
+  if (saved) {
+    next.presets = saved;
+    next.campaign.presets = saved.map((x) => ({ ...x, units: { ...x.units } }));
+  }
+  switchTo(next);
+  saveGame(true);
+}
+
+function playScenario(def) {
+  saveGame(true);
+  const next = createScenarioGame(def);
+  const presets = loadPresets();
+  if (presets) next.presets = presets;
+  switchTo(next);
+  hideOverlay(stationScreen);
+  state.paused = false;
+}
+
+/** Record a finished challenge once, and keep its best score. */
+function checkScenarioEnd() {
+  const result = state.scenario?.result;
+  if (!result || state.resultNoted) return;
+  state.resultNoted = true;
+  const out = command.noteResult(state.scenario.def.id, result);
+  state.scenarioBest = Boolean(out?.isBest);
+  try {
+    storage.removeItem(KEYS.challenge);
+  } catch { /* nothing to clear */ }
+  hud.update(state, true);
+}
+
+const api = {
+  refresh: () => hud.updateStation(state),
+  city: () => state.city,
+  persistPresets,
+  endShift: () => {
+    if (state.mode !== 'career') return;
+    endShift(state);
+    hud.update(state, true);
+  },
+  nextShift: () => {
+    const r = nextCareerShift(state);
+    if (!r) return;
+    switchTo(r.state);
+    saveGame(true);
+    toggleStation();
+    hud.setStationTab('career');
+    hud.updateStation(state);
+  },
+  playScenario,
+  continueChallenge: () => loadGame('challenge'),
+};
 
 // --------------------------------------------------------------- keyboard ---
 
@@ -876,7 +981,47 @@ hud.mount(state, {
 });
 hud.setSoundState(audio.isMuted());
 
-if (hasSave()) document.getElementById('btn-continue').hidden = false;
+command.init(storage);
+if (hasSave(KEYS.quick)) document.getElementById('btn-continue').hidden = false;
+if (hasSave(KEYS.career)) document.getElementById('btn-career-continue').hidden = false;
+
+// Career starting points, and the buttons of the other two modes.
+const startSelect = document.getElementById('career-start');
+for (const [id, def] of Object.entries(SCENARIOS_START)) {
+  const option = document.createElement('option');
+  option.value = id;
+  option.textContent = `${def.label} — ${def.text}`;
+  startSelect.append(option);
+}
+document.getElementById('btn-career-new').addEventListener('click', () => {
+  // A new career never silently replaces a saved one: ask first, and keep the old one under .prev.
+  if (hasSave(KEYS.career)) {
+    if (!window.confirm('Starting a new career replaces your saved career (a copy is kept). Continue?')) return;
+    try {
+      storage.setItem(KEYS.career + '.prev', storage.getItem(KEYS.career));
+    } catch { /* the copy is best-effort */ }
+  }
+  startCareer(document.getElementById('career-name').value, startSelect.value);
+});
+document.getElementById('btn-career-continue').addEventListener('click', () => loadGame('career'));
+document.getElementById('btn-play').addEventListener('click', () => {
+  document.getElementById('screen-start').hidden = true;
+  hud.setStationTab('play');
+  toggleStation();
+});
+document.getElementById('btn-replay').addEventListener('click', () => {
+  if (state.scenario) playScenario(state.scenario.def);
+});
+document.getElementById('btn-over-menu').addEventListener('click', () => {
+  document.getElementById('screen-over').hidden = true;
+  hud.setStationTab('play');
+  toggleStation();
+});
+document.addEventListener('change', (ev) => command.onChange(ev, api));
+document.addEventListener('input', (ev) => {
+  // Search boxes filter as you type.
+  if (ev.target?.dataset?.filter === 'people-q') command.onChange(ev, api);
+});
 
 setInterval(() => {
   if (state.running && !state.paused) saveGame(true);
@@ -902,7 +1047,12 @@ window.__fireStation = {
 //   ?warp=45     fast-forward this many seconds before the first frame
 //   ?burn       light three buildings, for looking at fire without a dispatch
 const params = new URLSearchParams(window.location.search);
-if (params.has('autostart') || params.has('demo') || params.has('burn')) startGame();
+// ?career starts a career; ?challenge=<id> a built-in challenge; ?disaster=<id> a major disaster
+// (earthquake, hurricane, airport, industrial, siege, blocks) in whatever mode is running.
+if (params.has('career')) startCareer('Test department', params.get('career') || 'harbor');
+else if (params.get('challenge') && findChallenge(params.get('challenge'))) playScenario(findChallenge(params.get('challenge')));
+else if (params.has('autostart') || params.has('demo') || params.has('burn') || params.has('disaster')) startGame();
+if (params.get('disaster')) startDisaster(state, params.get('disaster'));
 if (params.has('demo')) {
   const target = state.buildings.find((b) => b.type === 'hotel') ?? state.buildings[5];
   ignite(state, target, 'alarm');
