@@ -2,7 +2,7 @@
 
 Roadmap: Quick Response stays as it is; Career, personnel, stations, finance, advanced operations,
 support agencies, challenges and a scenario editor are added around it. This file is the honest
-status. **Version 0.17.0 — release candidate.**
+status. **Version 0.17.1 — release candidate** (0.17.1 fixes vehicles stopping after a load).
 
 ## Where things stand
 
@@ -83,7 +83,7 @@ and limits against excessive playback (per-sound cooldowns and at most six one-s
 
 ## Test results
 
-`npm test`: 357 tests, 357 passing, 0 failing (the original 245 plus 112 new). New suites: `saves`, `integrity`, `budget`,
+`npm test`: 366 tests, 366 passing, 0 failing (the original 245 plus 121 new; the last 9 are the 0.17.1 load fix). New suites: `saves`, `integrity`, `budget`,
 `audio`, `operations`, `career`, `advanced`, `scenarios`, `ui`.
 
 **Browser testing** (in-app browser pane, desktop size and the 375x812 mobile emulation), all driven by

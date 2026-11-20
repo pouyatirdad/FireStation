@@ -1,6 +1,6 @@
-# Release status — FireStation 0.17.0
+# Release status — FireStation 0.17.1
 
-Audit date: 2026-11-20. This file says what is **verified**, what is only **implemented**, and what is
+Audit date: 2026-11-20 (updated for 0.17.1, which fixes bug 1 below). This file says what is **verified**, what is only **implemented**, and what is
 **unknown**. Where something was not checked, it says so. `DEVELOPMENT_PROGRESS.md` is the history of the
 work; this is the current state.
 
@@ -9,11 +9,11 @@ work; this is the current state.
 | Check | Result |
 |---|---|
 | Branch | `new-changes` (tracks `origin/new-changes`, no difference from the remote) |
-| Commit | `d6a3aae` "Final QA pass: fix economy exploits, enforce station budgets, finish audio and visuals" |
+| Commit | Audited at `d6a3aae` "Final QA pass..." and `903e80f` (audit documents); the load fix is the commit after it (0.17.1) |
 | Contains the QA commit | Yes (`d6a3aae` is `HEAD`; it follows `d404995` and `0d6d2a2`) |
 | Uncommitted changes | None at the start of the audit. The audit itself changes only documentation and two stale sentences (README, in-game help), listed in section 6 |
-| `package.json` version | 0.17.0 |
-| Full test suite (`npm test`) | **357 tests, 357 pass, 0 fail**, about 74 s |
+| `package.json` version | 0.17.1 |
+| Full test suite (`npm test`) | **366 tests, 366 pass, 0 fail**, about 75 s (357 at the 0.17.0 audit, plus 9 for the load fix) |
 | `index.html` matches the sources | Yes: `node tools/build.mjs` reproduces the committed file |
 | Bundle syntax | Loads; `new Function` parse succeeds; no console errors in the last browser run except a benign `navigator.vibrate` notice from synthetic touch |
 
@@ -94,13 +94,21 @@ user to open and merge; the audit did not check its state on GitHub.
 
 Verified bug:
 
-1. **Vehicles that are driving to a call stop where they are after a save is loaded.** Verified by script:
+1. **FIXED in 0.17.1: vehicles that are driving to a call stopped where they were after a save was loaded.** What was found, verified by script:
    before saving an engine and an ambulance had paths; after `serialize` and `loadState` both had
    `path = 0` and stayed still. Engines are saved with a target but not their route, so on load they behave
    as if already arrived (the crew then report "too far to reach" or nothing happens). The same applies to the
    ambulance standing by (`standbyFor` is not saved). This predates 0.10 (the engine fields in `serialize` are
    unchanged), but it now also affects careers and challenges, and a browser refresh during a response
    triggers it. Highest-priority fix.
+
+   **Fix and proof (0.17.1):** `serialize` now keeps each vehicle's route, goal, arrival flag, order ids, stand-by
+   order, aircraft mission and status, and patients keep their claims; `restoreFleet` validates and restores
+   them (older saves have no order, as before). `test/ordersave.test.js` covers a driving engine, an engine on
+   scene, an ambulance with a patient claim, a stand-by ambulance, an air tanker's mission, a full multi-vehicle
+   response, an old-format save, damaged order data and a career refresh; seven of the nine fail on the 0.17.0
+   code. In a real page reload the engine kept its route, drove 1,100 px, deployed its crew and put the fire
+   out. Not covered: a vehicle carrying patients to a hospital, or diving crews, were not given their own tests.
 
 Suspicious, not proven to be wrong:
 

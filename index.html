@@ -8317,6 +8317,41 @@ function vehicleBase(state, type, overrides = {}) {
   };
 }
 
+const finite = (n) => typeof n === 'number' && Number.isFinite(n);
+const idOrNull = (v) => (typeof v === 'string' && v.length > 0 && v.length < 64 ? v : null);
+
+/**
+ * The part of a saved vehicle that is its current order: the route it is driving, where it is
+ * going, what it was sent to, whether it has arrived. Anything missing or damaged means "no
+ * order", which is what saves written before routes were kept look like.
+ */
+function savedOrder(entry) {
+  const path = Array.isArray(entry.path)
+    ? entry.path.filter((p) => p && finite(p.x) && finite(p.y)).slice(0, 4000).map((p) => ({ x: p.x, y: p.y }))
+    : [];
+  const goal = entry.goal && Number.isInteger(entry.goal.x) && Number.isInteger(entry.goal.y) && path.length > 0
+    ? { x: entry.goal.x, y: entry.goal.y } : null;
+  const m = entry.mission;
+  const mission = m && finite(m.x) && finite(m.y) && (m.mode === 'attack' || m.mode === 'refill')
+    ? { x: m.x, y: m.y, tid: idOrNull(m.tid), wid: idOrNull(m.wid), mode: m.mode } : null;
+  const s = entry.standbyFor;
+  const standbyFor = s && idOrNull(s.id) && idOrNull(s.kind) ? { kind: s.kind, id: s.id } : null;
+  const hasOrder = path.length > 0 || mission != null;
+  return {
+    path,
+    goal,
+    arrived: hasOrder ? Boolean(entry.arrived) : entry.arrived === true,
+    packTimer: finite(entry.packTimer) && entry.packTimer > 0 ? Math.min(entry.packTimer, 10) : 0,
+    wildfireId: idOrNull(entry.wildfireId),
+    blockadeId: idOrNull(entry.blockadeId),
+    victimId: idOrNull(entry.victimId),
+    patientId: idOrNull(entry.patientId),
+    standbyFor,
+    mission,
+    status: typeof entry.status === 'string' && entry.status.length < 40 ? entry.status : 'in quarters',
+  };
+}
+
 /** Rebuild the fleet from a save file. */
 function restoreFleet(state, saved = {}) {
   state.engines = [];
@@ -8340,6 +8375,7 @@ function restoreFleet(state, saved = {}) {
       supply: entry.supply ?? null,
       kits: entry.kits ?? CONFIG.vehicles[type].kits ?? 0,
       cargo: (entry.cargo ?? []).map((c) => ({ ...c })),
+      ...savedOrder(entry),
     });
     state.vehicleCount[type] = Math.max(state.vehicleCount[type] ?? 0, engine.number);
     state.engines.push(engine);
@@ -16168,6 +16204,18 @@ function serialize(state) {
       supply: e.supply,
       kits: e.kits,
       cargo: (e.cargo ?? []).map((c) => ({ ...c })),
+      // The current order, so a vehicle that is driving to a call keeps driving after a load.
+      path: e.path.map((p) => ({ x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10 })),
+      goal: e.goal ? { x: e.goal.x, y: e.goal.y } : null,
+      arrived: Boolean(e.arrived),
+      packTimer: e.packTimer ?? 0,
+      wildfireId: e.wildfireId ?? null,
+      blockadeId: e.blockadeId ?? null,
+      victimId: e.victimId ?? null,
+      patientId: e.patientId ?? null,
+      standbyFor: e.standbyFor ? { kind: e.standbyFor.kind, id: e.standbyFor.id } : null,
+      mission: e.mission ? { ...e.mission } : null,
+      status: e.status,
     })),
     crews: state.crew.map((c) => ({
       id: c.id,
@@ -16196,6 +16244,8 @@ function serialize(state) {
       maxLife: p.maxLife,
       treated: p.treated,
       critical: p.critical,
+      claimedBy: p.claimedBy ?? null,
+      medicId: p.medicId ?? null,
     })),
     blockades: state.blockades.map((b) => ({
       id: b.id, name: b.name, place: b.place, tx: b.tx, ty: b.ty, tw: b.tw, th: b.th,

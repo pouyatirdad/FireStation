@@ -3,6 +3,15 @@
 All notable changes to FireStation. The game is one self-contained `index.html`; rebuild it with
 `node tools/build.mjs` after changing `src/` or `styles/`.
 
+## 0.17.1 — Vehicles keep driving after a load
+
+- **Fixed:** a vehicle driving to a call stopped where it was after a save was loaded (a browser refresh
+  during a response, or Continue). Saves now keep each vehicle's route, goal, whether it has arrived, what it
+  was sent to, a stand-by order, an aircraft's mission and the claims on patients. Saves written before this
+  still load, with vehicles at rest as they always did; damaged order data is cleaned on load.
+- Tests: 9 new (the 7 that exercise the fix fail on the old code). Checked in a real page reload: the engine
+  kept its route, drove on, deployed its crew and put the fire out.
+
 ## 0.17.0 — Final QA, polish and release
 
 **Fixed**

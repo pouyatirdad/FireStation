@@ -530,6 +530,41 @@ function vehicleBase(state, type, overrides = {}) {
   };
 }
 
+const finite = (n) => typeof n === 'number' && Number.isFinite(n);
+const idOrNull = (v) => (typeof v === 'string' && v.length > 0 && v.length < 64 ? v : null);
+
+/**
+ * The part of a saved vehicle that is its current order: the route it is driving, where it is
+ * going, what it was sent to, whether it has arrived. Anything missing or damaged means "no
+ * order", which is what saves written before routes were kept look like.
+ */
+function savedOrder(entry) {
+  const path = Array.isArray(entry.path)
+    ? entry.path.filter((p) => p && finite(p.x) && finite(p.y)).slice(0, 4000).map((p) => ({ x: p.x, y: p.y }))
+    : [];
+  const goal = entry.goal && Number.isInteger(entry.goal.x) && Number.isInteger(entry.goal.y) && path.length > 0
+    ? { x: entry.goal.x, y: entry.goal.y } : null;
+  const m = entry.mission;
+  const mission = m && finite(m.x) && finite(m.y) && (m.mode === 'attack' || m.mode === 'refill')
+    ? { x: m.x, y: m.y, tid: idOrNull(m.tid), wid: idOrNull(m.wid), mode: m.mode } : null;
+  const s = entry.standbyFor;
+  const standbyFor = s && idOrNull(s.id) && idOrNull(s.kind) ? { kind: s.kind, id: s.id } : null;
+  const hasOrder = path.length > 0 || mission != null;
+  return {
+    path,
+    goal,
+    arrived: hasOrder ? Boolean(entry.arrived) : entry.arrived === true,
+    packTimer: finite(entry.packTimer) && entry.packTimer > 0 ? Math.min(entry.packTimer, 10) : 0,
+    wildfireId: idOrNull(entry.wildfireId),
+    blockadeId: idOrNull(entry.blockadeId),
+    victimId: idOrNull(entry.victimId),
+    patientId: idOrNull(entry.patientId),
+    standbyFor,
+    mission,
+    status: typeof entry.status === 'string' && entry.status.length < 40 ? entry.status : 'in quarters',
+  };
+}
+
 /** Rebuild the fleet from a save file. */
 export function restoreFleet(state, saved = {}) {
   state.engines = [];
@@ -553,6 +588,7 @@ export function restoreFleet(state, saved = {}) {
       supply: entry.supply ?? null,
       kits: entry.kits ?? CONFIG.vehicles[type].kits ?? 0,
       cargo: (entry.cargo ?? []).map((c) => ({ ...c })),
+      ...savedOrder(entry),
     });
     state.vehicleCount[type] = Math.max(state.vehicleCount[type] ?? 0, engine.number);
     state.engines.push(engine);

@@ -38,8 +38,8 @@ after-action timelines), `eta.js` (route and ETA with a cache), `scenes.js`/`dat
 
 Goal: fix what is known to be wrong and build the tools every later release needs.
 
-1. **Save the route.** Vehicles en route keep driving after a load (also `standbyFor`, packing timers,
-   crew tasks). Test: dispatch, save, load, assert the vehicle arrives. *(S)*
+1. ~~**Save the route.**~~ **Done in 0.17.1** (route, goal, order ids, stand-by, mission, patient claims; nine tests). Still to
+   do: a test for hospital and diving trips. *(S)*
 2. **Schema-driven save and load** for engines, crews, patients, wildfires, blockades and the new records, with a
    round-trip test that fills every field and compares. *(M)*
 3. **Real save compatibility.** Obtain or produce a genuine save from the 0.9 game (check out the tag before

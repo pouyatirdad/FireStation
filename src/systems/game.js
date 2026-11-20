@@ -746,6 +746,18 @@ export function serialize(state) {
       supply: e.supply,
       kits: e.kits,
       cargo: (e.cargo ?? []).map((c) => ({ ...c })),
+      // The current order, so a vehicle that is driving to a call keeps driving after a load.
+      path: e.path.map((p) => ({ x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10 })),
+      goal: e.goal ? { x: e.goal.x, y: e.goal.y } : null,
+      arrived: Boolean(e.arrived),
+      packTimer: e.packTimer ?? 0,
+      wildfireId: e.wildfireId ?? null,
+      blockadeId: e.blockadeId ?? null,
+      victimId: e.victimId ?? null,
+      patientId: e.patientId ?? null,
+      standbyFor: e.standbyFor ? { kind: e.standbyFor.kind, id: e.standbyFor.id } : null,
+      mission: e.mission ? { ...e.mission } : null,
+      status: e.status,
     })),
     crews: state.crew.map((c) => ({
       id: c.id,
@@ -774,6 +786,8 @@ export function serialize(state) {
       maxLife: p.maxLife,
       treated: p.treated,
       critical: p.critical,
+      claimedBy: p.claimedBy ?? null,
+      medicId: p.medicId ?? null,
     })),
     blockades: state.blockades.map((b) => ({
       id: b.id, name: b.name, place: b.place, tx: b.tx, ty: b.ty, tw: b.tw, th: b.th,
