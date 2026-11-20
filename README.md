@@ -256,6 +256,66 @@ Hydrant, pharmacy, hospital and equipment actions are buttons on the selection c
 
 ![On scene](docs/screenshot-engine.png)
 
+## Game modes
+
+The start screen offers three ways to play. **Quick Response** is the original game, unchanged: no
+wages, no management. **Career** and **Challenges** are described below.
+
+### Dispatch, ETA, reports and intel (all modes)
+
+Select an incident and its card shows **intel** (severity, danger, explosion risk, secondary risks,
+people trapped, the equipment it needs, the weather and traffic) and the **ETA** of every vehicle on
+the way, drawn as a route on the map. **Presets** (Headquarters › Dispatch) send a whole combination
+(for example two engines, a ladder, an ambulance and a rescue unit to a building fire) with one click;
+a second click sends nothing more, and what is missing is reported. Presets can be created, edited and
+deleted; units can be called off or sent to another incident. **Support agencies** (police, EMS, civil
+protection, utility services, coast guard) are called from the card or the Dispatch tab. The
+**Report** tab grades the shift S to A, B, C or D from resolution, response time, safety, property and
+money — never from speed alone.
+
+### Career
+
+A persistent department. Hire and train firefighters, upgrade stations, manage money and reputation
+over many 16-minute shifts, and grow from a Recruit Department to the National Emergency Service.
+
+- **People**: each firefighter has a name, rank, level, five skills (firefighting, rescue, medical,
+  driving, technical), certifications, fatigue and injuries. Skills change how fast water works, rescues
+  and treatment go, and how fast a vehicle drives. A vehicle with no crew cannot be dispatched.
+- **Stations**: seven upgrades (garage, training centre, medical centre, workshop, communication
+  centre, equipment storage, fire watch tower), coverage by district and a comparison table.
+- **Money**: salaries and maintenance every game hour, monthly government funding, budgets,
+  bankruptcy warnings and emergency funding. The levels unlock vehicles, stations and upgrade levels.
+- **Objectives**: main, secondary, daily and long-term goals with rewards.
+- **End of shift**: Career › End shift files the report, pays a performance bonus, moves reputation
+  and starts the next shift with your fleet, stations and people.
+
+### Advanced operations
+
+Hazmat zones (protect crews with a hazmat unit or certified people; wash them down), structural
+collapse (cutting gear, secondary collapses), evacuation zones with shelters, six multi-stage disasters
+and weather. Disasters can strike a level-4 or higher career on their own; in any mode
+`?disaster=earthquake` starts one.
+
+### Challenges and scenarios
+
+Eight scored challenges and a scenario editor (Headquarters › Play). Challenges and scenarios use
+their own save slot and keep your best scores; they never touch Quick Response or career saves.
+
+### Saves
+
+Three independent slots: Quick Response (`firestation.save.v16`, the key earlier versions used), career
+(`firestation.career.v1`) and the challenge in progress. A slot holds `{ format, kind, shift, campaign }`.
+Shift saves are version 17.
+
+- A bare version-16 Quick Response save still loads; the first time it is replaced a copy is kept
+  under `<key>.bak`.
+- A save from a newer game is never read or overwritten.
+- An unreadable save is copied to `<key>.corrupt` rather than deleted.
+- Missing or damaged fields get safe defaults; a damaged person record is repaired on load.
+- Starting a new career asks first and keeps the old one under `firestation.career.v1.prev`.
+- A career is saved only while a shift is running; once a shift is filed the next shift is built
+  before the next save.
+
 ## How it works
 
 The game is a fixed 60 Hz simulation (`src/core/loop.js`) drawn to one canvas. Nothing in the
@@ -370,6 +430,9 @@ needs editing.
 ?zoom=0.8       set the opening zoom
 ?select=b7      select a building by id
 ?help           open the controls overlay
+?career          start a career (?career=riverside or lean for the other starts)
+?challenge=night start a built-in challenge by id (one-engine, no-water, night, highway, forest-siege, budget-crisis, mass-casualty, industrial)
+?disaster=earthquake  start a disaster: earthquake, hurricane, airport, industrial, siege, blocks
 ```
 
 `window.__fireStation` exposes the live state and camera, read-only, for headless probes.
@@ -386,6 +449,9 @@ src/systems/            navigation, fire, civilians, fleet, incidents, wildfires
                         effects, events, game rules and save state
 src/render/render.js    the 2.5D canvas renderer
 src/ui/hud.js           DOM HUD, unit dock, incident list and screens
+src/ui/command.js       Headquarters tabs (dispatch, people, stations, career, report, play), intel card
+src/render/overlays.js  routes with ETAs, hazard and evacuation zones, collapses, upgrade markers
+src/data/scenarios.js   the eight challenges and the scenario format and validator
 test/                   city, navigation, fire, rescue, fleet, incidents, medical, economy,
                         world (map size, sound mapping, daylight) and save tests
 tools/build.mjs         bundles src/ and the CSS into index.html
@@ -400,4 +466,4 @@ attachment; it needs no other file and no network.
 
 ## Not built yet
 
-Police units, rain and an isometric art pass. The simulation was written so those can be added without rewriting the core.
+An isometric art pass, a graphical map editor, voiced radio chatter and per-agency sirens. See DEVELOPMENT_PROGRESS.md for what is partial.
