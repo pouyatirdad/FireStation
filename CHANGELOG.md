@@ -3,6 +3,35 @@
 All notable changes to FireStation. The game is one self-contained `index.html`; rebuild it with
 `node tools/build.mjs` after changing `src/` or `styles/`.
 
+## 0.18.0 (in progress) — Depth
+
+### Milestone 1 — Hospitals and diving
+
+- **Hospital choice.** Any standing hospital can take a patient, not only the one in a base you own, and it is
+  chosen by driving time (the nearest few are routed, the quickest wins), not by straight line. A destroyed
+  hospital is unavailable at once; so is one on fire. All of it is in `CONFIG.medical.hospital` (`anyIntact`,
+  `byRoute`, `avoidBurning`, `candidates`, `retry`); switching the first three off restores the 0.17 rule exactly.
+- **Diversion on the road.** An ambulance that loses its destination while driving (even a few metres from the
+  door) says so, picks another hospital from where it is and drives on. With no hospital left the patients stay
+  aboard, one warning is given (it used to repeat at every retry) and delivery follows when one stands again.
+  The destination is saved (`hospitalId`).
+- **The emergency medical service now transports.** Its critical patients used to be stabilised and then simply
+  disappear from the street, with no transport fee and no `transported` count. They now go to a hospital in the
+  service's own ambulance (travel time from the distance), diverting or waiting in the same way, and are paid
+  and counted once, through the same `deliverPatients` an ambulance uses. The call stays on the books, and in
+  the save, until they are delivered.
+- **Water rescue preset.** It asked for "a rescue boat" by name, so a city without a boat could never answer a
+  drowning call from it. Presets have a new **Diving unit** slot (anything that can put divers in the water);
+  the built-in water preset uses it, an untouched old one is migrated on load, an edited one is kept.
+- **Dive Rescue Training (career).** A new course and certificate: a certified diver brings someone out
+  25 % faster, one without it 25 % slower (`CONFIG.water.dive`). Quick Response is unchanged.
+- Tests: `hospital.test.js` (14), `diving.test.js` (11), `parity.test.js` (2); one existing test changed
+  because it asserted the old owned-bases-only rule. `tools/parity-run.mjs` and
+  `test/fixtures/parity-quick.json` hold four deterministic Quick Response shifts recorded on 0.17.1 before any
+  change: with the old hospital rules the new code reproduces them exactly.
+- Not in this milestone: a hospital's **capacity** and diversion when it is full (milestone 3), and the save
+  schema (milestone 2).
+
 ## 0.17.1 — Vehicles keep driving after a load
 
 - **Fixed:** a vehicle driving to a call stopped where it was after a save was loaded (a browser refresh

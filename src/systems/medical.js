@@ -241,14 +241,26 @@ const distToBuilding = (x, y, b) => {
   return distToRect(x, y, r);
 };
 
-// A hospital belongs to the base it stands in, and is only there once that base is open.
-const hospitalOpen = (state, b) => b.state !== 'rubble' && (state.ownedStations?.[b.base ?? 0] ?? (b.base ?? 0) === 0);
+/**
+ * Can this hospital take a patient right now? Rubble never can. With `CONFIG.medical.hospital.anyIntact`
+ * (the default) any other standing hospital can, unless it is on fire; with it off, a hospital belongs to the
+ * base it stands in and is only there once that base is open (the 0.17 rule).
+ */
+export function hospitalAvailable(state, b) {
+  if (!b || b.state === 'rubble') return false;
+  const rule = CONFIG.medical.hospital;
+  if (rule.anyIntact) return !(rule.avoidBurning && b.state === 'burning');
+  return Boolean(state.ownedStations?.[b.base ?? 0] ?? (b.base ?? 0) === 0);
+}
+
+export const hospitalById = (state, id) => (id ? (state.city.hospitals ?? []).find((h) => h.id === id) ?? null : null);
+
+export const availableHospitals = (state) => (state.city.hospitals ?? []).filter((b) => hospitalAvailable(state, b));
 
 export function nearestHospital(state, x, y) {
   let best = null;
   let bestD = Infinity;
-  for (const b of state.city.hospitals ?? []) {
-    if (!hospitalOpen(state, b)) continue;
+  for (const b of availableHospitals(state)) {
     const d = distToBuilding(x, y, b);
     if (d < bestD) {
       bestD = d;
@@ -258,29 +270,46 @@ export function nearestHospital(state, x, y) {
   return best;
 }
 
+/** The available hospitals nearest (straight line) to a point, nearest first. */
+export function nearestHospitals(state, x, y, count) {
+  return availableHospitals(state)
+    .map((b) => ({ b, d: distToBuilding(x, y, b) }))
+    .sort((a, c) => a.d - c.d)
+    .slice(0, count)
+    .map((r) => r.b);
+}
+
 export function hospitalInReach(state, engine) {
   const range = CONFIG.medical.hospitalRange * TILE;
-  for (const b of state.city.hospitals ?? []) {
-    if (!hospitalOpen(state, b)) continue;
+  for (const b of availableHospitals(state)) {
     if (distToBuilding(engine.x, engine.y, b) <= range) return b;
   }
   return null;
 }
 
-/** Hand over everyone on the stretchers. Returns how many were delivered. */
-export function unloadCargo(state, engine, hospital) {
-  const cargo = engine.cargo ?? [];
-  if (cargo.length === 0) return 0;
+/**
+ * Hand a list of stretcher cases over at a hospital: the one place a transport is paid and counted, so a
+ * vehicle's delivery and an agency's stay consistent. Empties `cargo`; returns how many were delivered.
+ */
+export function deliverPatients(state, carrier, cargo, hospital) {
   const n = cargo.length;
-  engine.cargo = [];
-  engine.worked = true;
+  if (n === 0) return 0;
+  cargo.length = 0;
   const fee = earn(state, n * CONFIG.medical.transportFee, 'transport');
   state.stats.transported = (state.stats.transported ?? 0) + n;
   state.rating = Math.min(CONFIG.rating.start, state.rating + 3 * n);
   addEvent(
     state,
-    `${engine.name} delivered ${n} patient${n === 1 ? '' : 's'} to ${hospital.name} — ${money(fee)}`,
+    `${carrier} delivered ${n} patient${n === 1 ? '' : 's'} to ${hospital.name} — ${money(fee)}`,
     'good',
   );
   return n;
+}
+
+/** Hand over everyone on a vehicle's stretchers. Returns how many were delivered. */
+export function unloadCargo(state, engine, hospital) {
+  const cargo = engine.cargo ?? [];
+  if (cargo.length === 0) return 0;
+  engine.worked = true;
+  return deliverPatients(state, engine.name, cargo, hospital);
 }

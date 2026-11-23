@@ -13,7 +13,7 @@ import { CONFIG, TILE } from '../core/config.js';
 import { addEvent } from './events.js';
 import { spend, money } from './economy.js';
 import { isCareer } from './modifiers.js';
-import { treatPatient } from './medical.js';
+import { deliverPatients, hospitalById, nearestHospital, treatPatient } from './medical.js';
 import { rescueVictim } from './water.js';
 import { startEvacuation } from './evacuation.js';
 import { incidentPoint } from './eta.js';
@@ -29,7 +29,14 @@ export function createSupport() {
 export function restoreSupport(data) {
   const s = createSupport();
   if (!data) return s;
-  return { ...s, ...data, active: Array.isArray(data.active) ? data.active.map((a) => ({ ...a })) : [], cooldowns: { ...(data.cooldowns ?? {}) } };
+  return {
+    ...s,
+    ...data,
+    active: Array.isArray(data.active)
+      ? data.active.map((a) => ({ ...a, cargo: Array.isArray(a.cargo) ? a.cargo.map((c) => ({ ...c })) : undefined }))
+      : [],
+    cooldowns: { ...(data.cooldowns ?? {}) },
+  };
 }
 
 export function agencyStatus(state, agency) {
@@ -81,13 +88,14 @@ function applyOnArrival(state, call) {
   call.applied = true;
   const label = CONFIG.agencies[call.agency].label;
   if (call.agency === 'ems') {
-    // A crew with a full bag: it treats the worst cases near the scene.
-    const bag = { kits: 99, cargo: [], spec: { carry: 0 }, worked: false };
+    // A crew with a full bag: it treats the worst cases near the scene and takes the critical ones to a hospital.
+    const bag = { kits: 99, cargo: [], spec: { carry: CONFIG.agencies.ems.carry }, worked: false, name: label };
     const near = state.patients
       .filter((p) => !p.treated && Math.hypot(p.x - call.x, p.y - call.y) <= call.radius)
       .sort((a, b) => a.life - b.life)
       .slice(0, 4);
     for (const p of near) treatPatient(state, p, bag);
+    call.cargo = bag.cargo;
     addEvent(state, `${label} on scene — ${near.length} patient${near.length === 1 ? '' : 's'} treated`, 'good');
   } else if (call.agency === 'civil') {
     const zone = state.evac.zones.find((z) => Math.hypot(z.x - call.x, z.y - call.y) <= z.radius);
@@ -124,11 +132,52 @@ function nearestBuilding(state, x, y) {
   return best;
 }
 
+/**
+ * The service's own ambulance takes its critical patients to a hospital: the nearest one that is open when
+ * it sets off, and again when it gets there (a hospital lost on the way is not used; it drives on to the next).
+ * Nobody is left behind: with no hospital open the patients wait aboard and it tries again.
+ */
+const emsDrive = (from, h) => Math.hypot((h.x + h.w / 2) * TILE - from.x, (h.y + h.h / 2) * TILE - from.y)
+  / (CONFIG.vehicles.ambulance.speed * TILE);
+
+function deliverEmsCargo(state, call) {
+  const cargo = call.cargo;
+  if (!cargo || cargo.length === 0) return;
+  if (call.deliverAt != null && state.time < call.deliverAt) return; // still driving
+  const hospital = nearestHospital(state, call.x, call.y);
+  if (!hospital) {
+    if (!call.waiting) addEvent(state, `${CONFIG.agencies.ems.label}: no hospital open — patients wait aboard`, 'warn');
+    call.waiting = true;
+    call.hospitalId = null;
+    call.deliverAt = state.time + CONFIG.medical.hospital.retry;
+    return;
+  }
+  call.waiting = false;
+  if (call.hospitalId == null) {
+    // Setting off from the scene.
+    call.hospitalId = hospital.id;
+    call.deliverAt = state.time + emsDrive(call, hospital);
+    return;
+  }
+  if (call.hospitalId !== hospital.id) {
+    // The hospital it was heading for is gone: on to the next, from where the first one stands.
+    const lost = hospitalById(state, call.hospitalId) ?? call;
+    const from = lost.w ? { x: (lost.x + lost.w / 2) * TILE, y: (lost.y + lost.h / 2) * TILE } : lost;
+    addEvent(state, `${CONFIG.agencies.ems.label}: hospital out of service — diverted to ${hospital.name}`, 'warn');
+    call.hospitalId = hospital.id;
+    call.deliverAt = state.time + emsDrive(from, hospital);
+    return;
+  }
+  deliverPatients(state, CONFIG.agencies.ems.label, cargo, hospital);
+}
+
 export function updateSupport(state) {
   const s = state.support;
   if (!s || s.active.length === 0) return;
   for (const call of s.active) {
     if (!call.applied && state.time >= call.arriveAt) applyOnArrival(state, call);
+    if (call.agency === 'ems' && call.applied) deliverEmsCargo(state, call);
   }
-  s.active = s.active.filter((c) => state.time <= c.until);
+  // A call stays on the books until its patients have been delivered.
+  s.active = s.active.filter((c) => state.time <= c.until || (c.cargo?.length ?? 0) > 0);
 }

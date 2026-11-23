@@ -16,6 +16,14 @@ should only be extended.
 | A4 | **Shallow backups; storage limits untested** | `<slot>.replaced` is overwritten every session; `.prev` holds one career; a career save is about 230 to 300 KB and a full set of slots and backups is 1 to 1.5 MB of roughly 5 MB. | "No save silently destroyed" holds for one step back only; a full storage fails with a warning. | Keep the last three saves per slot (rotating); show sizes; handle quota with a clear message; test in a browser. | S |
 | A5 | **No automated browser test** | `main.js` mentions `tools/smoke.mjs`, which does not exist; the 0.17 browser run was manual, scripted by hand through the page. | Regressions in the UI and wiring are only caught by hand. The pane did not run animation frames. | A dependency-free smoke script (or documented checklist) driving `window.__fireStation.step()` through the flows in RELEASE_STATUS 3a; add a real-device checklist. | M |
 
+## 0.18 notes (milestone 1)
+
+- `serialize`/`restoreFleet` gained `hospitalId` by hand again; milestone 2 replaces the hand lists.
+- `engine.noHospital` and `engine.hospitalRetry` are deliberately not saved (transient: they only throttle a
+  warning and a retry); the milestone-2 coverage guard must list them as transient.
+- The EMS call stores `cargo`, `hospitalId`, `deliverAt`, `waiting` on the support record; saves keep them
+  through `restoreSupport`'s spread, which is another unvalidated path.
+
 ## B. Structural (do when a feature touches it; do not rewrite what works)
 
 | # | Debt | Evidence | Fix | Size |

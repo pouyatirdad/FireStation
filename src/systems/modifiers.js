@@ -86,6 +86,14 @@ export function clearRate(state, x, y) {
   return supportAt(state, 'police', x, y) ? 1.5 : 1;
 }
 
+/** Career only: a diver with the Dive Rescue certificate brings someone out faster than one without. */
+export function diveRate(state, crew) {
+  const person = personOf(state, crew);
+  if (!person) return 1;
+  const d = CONFIG.water.dive;
+  return person.certs?.includes('diving') ? d.certified : d.uncertified;
+}
+
 /** Is this crew member protected against hazardous materials? */
 export function hazmatProtected(state, crew, engine) {
   if (engine?.spec?.hazmat) return true;

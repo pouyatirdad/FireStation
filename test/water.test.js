@@ -81,12 +81,24 @@ test('the streets stop at the quay and the harbour dock has sixteen berths on th
 test('the hospitals are in the bases', () => {
   const state = shift();
   assert.equal(nearestHospital(state, 100 * TILE, 100 * TILE).base, 0);
-  // Station 2 hospital only counts once the base is open.
   assert.equal(state.city.hospitals.filter((h) => h.base === 1).length, 1);
-  const far = nearestHospital(state, 243 * TILE, 147 * TILE);
-  assert.equal(far.base, 0, 'used a hospital in a base that is not open');
-  commandBuyStation(state, 1);
+  // 0.18: any standing hospital takes patients, so the Station 2 hospital counts before its base is open.
   assert.equal(nearestHospital(state, 243 * TILE, 147 * TILE).base, 1);
+});
+
+test('with the 0.17 rule a hospital only counts once its base is open', () => {
+  const rule = CONFIG.medical.hospital;
+  const saved = { ...rule };
+  rule.anyIntact = false;
+  try {
+    const state = shift();
+    const far = nearestHospital(state, 243 * TILE, 147 * TILE);
+    assert.equal(far.base, 0, 'used a hospital in a base that is not open');
+    commandBuyStation(state, 1);
+    assert.equal(nearestHospital(state, 243 * TILE, 147 * TILE).base, 1);
+  } finally {
+    Object.assign(rule, saved);
+  }
 });
 
 // -------------------------------------------------------------- the dock ---

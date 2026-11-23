@@ -19,12 +19,13 @@ import { placeNear } from './places.js';
 import { rescuePerson } from './civilians.js';
 import { earn, spend } from './economy.js';
 import {
-  findPatient, hospitalInReach, isMedical, nearestHospital, nearestPatient, nearestPharmacy,
-  restockKits, treatPatient, unloadCargo,
+  findPatient, hospitalAvailable, hospitalById, hospitalInReach, isMedical, nearestHospital, nearestHospitals,
+  nearestPatient, nearestPharmacy, restockKits, treatPatient, unloadCargo,
 } from './medical.js';
+import { estimate } from './eta.js';
 import { workOnBlockade } from './blockades.js';
 import { findVictim, rescueVictim } from './water.js';
-import { clearRate, isCareer, speedMod, upgradeLevel, workRate } from './modifiers.js';
+import { clearRate, diveRate, isCareer, speedMod, upgradeLevel, workRate } from './modifiers.js';
 
 const CREW_OFFSETS = [
   { a: 0.85, r: 26 },
@@ -521,6 +522,8 @@ function vehicleBase(state, type, overrides = {}) {
     kitAcc: 0,
     patientId: null,
     cargo: [],
+    hospitalId: null, // the hospital an ambulance with patients aboard is driving to
+    noHospital: false, // (transient) it has already said there is no hospital to reach
     goal: null,
     blockadeId: null,
     victimId: null,
@@ -559,6 +562,7 @@ function savedOrder(entry) {
     blockadeId: idOrNull(entry.blockadeId),
     victimId: idOrNull(entry.victimId),
     patientId: idOrNull(entry.patientId),
+    hospitalId: idOrNull(entry.hospitalId),
     standbyFor,
     mission,
     status: typeof entry.status === 'string' && entry.status.length < 40 ? entry.status : 'in quarters',
@@ -966,6 +970,7 @@ export function orderEngine(state, engine, wx, wy, buildingId = null, wildfireId
   if (engine.spec.plane) return orderPlane(state, engine, wx, wy, buildingId, wildfireId);
   if (engine.spec.flying) return orderFlight(state, engine, wx, wy, buildingId, wildfireId);
   if (engine.spec.boat) return orderBoat(state, engine, wx, wy, buildingId, wildfireId);
+  engine.hospitalId = null; // a new order cancels a hospital run; `sendToHospital` sets it again after this
   const building = buildingOf(state, buildingId);
   let goal = null;
   if (building) {
@@ -1238,18 +1243,47 @@ export function diveVehiclesFor(state, victim) {
     .map((x) => x.e);
 }
 
-/** Take the stretcher cases to the nearest hospital. */
+/**
+ * The hospital a vehicle should take its patients to: the available one it reaches soonest by road (or, with
+ * `byRoute` off, the nearest in a straight line). Null when none can be reached.
+ */
+export function chooseHospital(state, engine) {
+  const rule = CONFIG.medical.hospital;
+  if (!rule.byRoute) return nearestHospital(state, engine.x, engine.y);
+  let best = null;
+  let bestSeconds = Infinity;
+  for (const h of nearestHospitals(state, engine.x, engine.y, rule.candidates)) {
+    const eta = estimate(state, engine, (h.x + h.w / 2) * TILE, (h.y + h.h / 2) * TILE);
+    if (eta.reachable && eta.seconds < bestSeconds) {
+      bestSeconds = eta.seconds;
+      best = h;
+    }
+  }
+  return best;
+}
+
+/** Take the stretcher cases to the best available hospital. */
 export function sendToHospital(state, engine) {
   if (!engine || !isMedical(engine)) return false;
-  const hospital = nearestHospital(state, engine.x, engine.y);
-  if (!hospital) {
-    addEvent(state, 'No hospital in the city', 'warn');
-    return false;
-  }
-  if (hospitalInReach(state, engine) && (engine.cargo?.length ?? 0) > 0) {
-    unloadCargo(state, engine, hospital);
+  const reach = hospitalInReach(state, engine);
+  if (reach && (engine.cargo?.length ?? 0) > 0) {
+    engine.noHospital = false;
+    unloadCargo(state, engine, reach);
+    engine.hospitalId = null;
     return true;
   }
+  const hospital = chooseHospital(state, engine);
+  if (!hospital) {
+    // Say so once, not every retry: the ambulance keeps its patients aboard and tries again.
+    if (!engine.noHospital) {
+      addEvent(state, (engine.cargo?.length ?? 0) > 0
+        ? `${engine.name}: no hospital it can reach — patients stay aboard`
+        : 'No hospital in the city', 'warn');
+    }
+    engine.noHospital = true;
+    return false;
+  }
+  engine.noHospital = false;
   recallCrew(state, engine);
   const ok = orderEngine(
     state,
@@ -1261,6 +1295,7 @@ export function sendToHospital(state, engine) {
   if (ok) {
     engine.targetId = null;
     engine.patientId = null;
+    engine.hospitalId = hospital.id;
     if ((engine.cargo?.length ?? 0) > 0) {
       addEvent(state, `${engine.name} taking ${engine.cargo.length} patient${engine.cargo.length === 1 ? '' : 's'} to ${hospital.name}`, 'info');
     }
@@ -1686,6 +1721,7 @@ function updateEngine(state, engine, dt) {
   }
 
   if (engine.path.length > 0) {
+    if (engine.hospitalId) divertFromLostHospital(state, engine); // checked on the road, not only when parked
     followPath(engine, dt, engine.spec.speed * TILE * (engine.spec.flying || engine.spec.boat ? 1 : state.trafficFactor ?? 1) * speedMod(state, engine));
     engine.pumping = false;
     engine.refilling = false;
@@ -1736,6 +1772,23 @@ function updateEngine(state, engine, dt) {
   else engine.status = 'standing by';
 }
 
+/**
+ * The hospital an ambulance is heading for has been lost (rubble, on fire): choose another at once, from where
+ * it is. If no other can be reached it stops, keeps its patients aboard, and `updateAmbulance` keeps trying.
+ */
+function divertFromLostHospital(state, engine) {
+  if (!engine.hospitalId || (engine.cargo?.length ?? 0) === 0) return;
+  const lost = hospitalById(state, engine.hospitalId);
+  if (hospitalAvailable(state, lost)) return;
+  engine.hospitalId = null;
+  addEvent(state, `${engine.name}: ${lost?.name ?? 'the hospital'} is out of service — finding another`, 'warn');
+  engine.hospitalRetry = state.time + CONFIG.medical.hospital.retry;
+  if (!sendToHospital(state, engine)) {
+    engine.path = [];
+    engine.goal = null;
+  }
+}
+
 function updateAmbulance(state, engine, dt) {
   if (engine.patientId) {
     const patient = findPatient(state, engine.patientId);
@@ -1746,13 +1799,18 @@ function updateAmbulance(state, engine, dt) {
   if ((engine.cargo?.length ?? 0) > 0) {
     const hospital = hospitalInReach(state, engine);
     if (hospital) {
+      engine.noHospital = false;
+      engine.hospitalId = null;
       unloadCargo(state, engine, hospital);
-    } else if (state.time >= (engine.hospitalRetry ?? 0)) {
-      const out = crewOf(state, engine).filter((c) => !c.riding);
-      if (out.length > 0 && engine.cargo.length >= engine.spec.carry) recallCrew(state, engine);
-      else if (out.length === 0) {
-        engine.hospitalRetry = state.time + 5;
-        sendToHospital(state, engine);
+    } else {
+      divertFromLostHospital(state, engine);
+      if (state.time >= (engine.hospitalRetry ?? 0)) {
+        const out = crewOf(state, engine).filter((c) => !c.riding);
+        if (out.length > 0 && engine.cargo.length >= engine.spec.carry) recallCrew(state, engine);
+        else if (out.length === 0 && (engine.path.length === 0 || !engine.hospitalId)) {
+          engine.hospitalRetry = state.time + CONFIG.medical.hospital.retry;
+          sendToHospital(state, engine);
+        }
       }
     }
   }
@@ -1849,7 +1907,7 @@ function updateDiver(state, crew, engine, dt) {
   crew.path.length = 0;
   crew.angle = angleTo(crew.x, crew.y, victim.x, victim.y);
   crew.status = 'rescuing';
-  crew.rescueTimer += dt * workRate(state, crew, 'rescue');
+  crew.rescueTimer += dt * workRate(state, crew, 'rescue') * diveRate(state, crew);
   victim.rescueTimer = crew.rescueTimer;
   const need = engine.spec.rescueTime;
   if (crew.rescueTimer >= need) {

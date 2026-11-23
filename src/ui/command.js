@@ -13,7 +13,7 @@ import {
 import { WEATHER } from '../systems/weather.js';
 import { SCENES } from '../systems/scenes.js';
 import {
-  INCIDENT_KINDS as PRESET_KINDS, availableVehicles, nearestStations, planPreset, recommendedPresets,
+  INCIDENT_KINDS as PRESET_KINDS, PRESET_ROLES, availableVehicles, diverTotal, nearestStations, planPreset, recommendedPresets, slotLabel,
 } from '../systems/presets.js';
 import { currentTarget, formatEta, incidentEtas } from '../systems/eta.js';
 import { incidentIntel } from '../systems/intel.js';
@@ -42,7 +42,7 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => (
 const money = (n) => `${n < 0 ? '−' : ''}$${Math.abs(Math.round(n)).toLocaleString('en-US')}`;
 const pct = (v) => `${Math.round(Math.max(0, Math.min(1, v)) * 100)}%`;
 const bar = (frac, cls = '') => `<div class="bar ${cls}"><i style="width:${pct(frac)}"></i></div>`;
-const vehicleLabel = (type) => CONFIG.vehicles[type]?.label ?? type;
+const vehicleLabel = (type) => slotLabel(type);
 const unitsText = (units) => Object.entries(units).map(([t, n]) => `${n}× ${vehicleLabel(t)}`).join(', ');
 const btn = (label, action, attrs = '', cls = 'btn btn--small') => `<button type="button" class="${cls}" data-action="${action}" ${attrs}>${label}</button>`;
 const section = (title, body, note = '') => `<div class="budget"><p class="menu__eyebrow">${title}</p>${note ? `<p class="station__note">${note}</p>` : ''}${body}</div>`;
@@ -176,7 +176,7 @@ const GROUND_TYPES = () => Object.keys(CONFIG.vehicles).filter((t) => !CONFIG.ve
 
 function presetEditor(state) {
   const d = ui.preset;
-  const inputs = Object.keys(CONFIG.vehicles).map((t) => `<label class="field field--num"><span>${esc(vehicleLabel(t))}</span><input type="number" min="0" max="8" value="${d.units[t] ?? 0}" data-preset-unit="${t}"></label>`).join('');
+  const inputs = [...Object.keys(PRESET_ROLES), ...Object.keys(CONFIG.vehicles)].map((t) => `<label class="field field--num"><span>${esc(vehicleLabel(t))}</span><input type="number" min="0" max="8" value="${d.units[t] ?? 0}" data-preset-unit="${t}"></label>`).join('');
   return `<div class="editor">
     <label class="field"><span>Name</span><input type="text" id="pr-name" maxlength="32" value="${esc(d.name)}"></label>
     <label class="field"><span>For</span><select id="pr-incident">${Object.entries(PRESET_KINDS).map(([k, l]) => `<option value="${k}"${d.incident === k ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
@@ -202,6 +202,8 @@ export function dispatchTab(state) {
   const avail = availableVehicles(state);
   const totals = {};
   for (const e of state.engines) totals[e.type] = (totals[e.type] ?? 0) + 1;
+  const divers = diverTotal(state);
+  if (divers > 0) totals.diver = divers;
   const fleet = Object.entries(totals).map(([t, n]) => `<span class="pill">${esc(vehicleLabel(t))} ${avail[t] ?? 0}/${n}</span>`).join(' ');
 
   let stations = '';

@@ -9,6 +9,7 @@ node tools/build.mjs                  # rebuild index.html from src/ + styles/ga
 npm test                              # node --test test/  (a few minutes: several tests simulate minutes of game time; `createCity` is cached under Node so each game after the first costs ~0.1 s)
 node --test test/fire.test.js         # a single test file
 node --test --test-name-pattern="x" test/   # a single test by name
+node tools/parity-run.mjs             # Quick Response regression run vs test/fixtures/parity-quick.json (--write only for an intended change)
 ```
 
 No dependencies; Node 18+ is only needed for build and tests. There is no linter.

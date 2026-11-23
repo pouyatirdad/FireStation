@@ -2530,6 +2530,9 @@ const CONFIG = {
     survive: [80, 130], // seconds a person lasts in the water
     reward: 420, // per person brought out
     maxVictims: 6,
+    // Career only: how fast a diver brings someone out. A crew member with the Dive Rescue certificate is
+    // quicker, one without is slower; in Quick Response everybody works at 1.
+    dive: { certified: 1.25, uncertified: 0.75 },
   },
 
   // Roads blocked by wrecks and debris, and the traffic that queues behind them.
@@ -2560,6 +2563,19 @@ const CONFIG = {
     criticalAt: 0.7, // severity at which a patient must go to a hospital
     transportFee: 260, // paid when a critical patient reaches a hospital
     hospitalRange: 4, // tiles from the hospital footprint to unload
+    hospital: {
+      // Which hospital takes a patient. With `anyIntact` every standing hospital in the city can be used, not
+      // only the one in a base the player owns; set it false for the 0.17 rule (owned bases only).
+      anyIntact: true,
+      // Choose by driving time rather than by straight line.
+      byRoute: true,
+      // A hospital that is on fire is not taking patients.
+      avoidBurning: true,
+      // How many of the nearest (straight-line) hospitals are routed when comparing driving times.
+      candidates: 4,
+      // Seconds between an ambulance's attempts to find a hospital when none can be reached.
+      retry: 5,
+    },
   },
 
   refillRange: 2.8, // tiles from a hydrant/station a vehicle can hook up
@@ -2697,6 +2713,7 @@ const CONFIG = {
       driving: { label: 'Driving Training', skill: 'driving', cost: 600, time: 150, xp: 90 },
       hazmat: { label: 'Hazmat Training', skill: 'technical', cost: 1100, time: 240, xp: 80, cert: 'hazmat' },
       technical: { label: 'Technical Rescue Training', skill: 'technical', cost: 1000, time: 240, xp: 110, cert: 'technical' },
+      diving: { label: 'Dive Rescue Training', skill: 'rescue', cost: 900, time: 200, xp: 80, cert: 'diving' },
     },
     baseSlots: 1, // trainees per station before a training centre
   },
@@ -2717,7 +2734,7 @@ const CONFIG = {
   // Support agencies: a call-out costs money, takes time to arrive and has one effect.
   agencies: {
     police: { label: 'Police', cost: 450, delay: 25, duration: 150, cooldown: 120, text: 'Closes the streets round the scene: your vehicles run at full speed there and the wreck crews work faster' },
-    ems: { label: 'Emergency medical service', cost: 700, delay: 35, duration: 90, cooldown: 150, text: 'Mass-casualty help: treats up to four injured people near the scene' },
+    ems: { label: 'Emergency medical service', cost: 700, delay: 35, duration: 90, cooldown: 150, carry: 4, text: 'Mass-casualty help: treats up to four injured people near the scene and takes the critical ones to a hospital' },
     civil: { label: 'Civil protection', cost: 600, delay: 30, duration: 240, cooldown: 180, text: 'Opens a shelter and speeds an evacuation of the area' },
     utility: { label: 'Utility services', cost: 500, delay: 20, duration: 300, cooldown: 120, text: 'Cuts gas and power to the building: no gas explosions and the fire grows slower' },
     coastguard: { label: 'Coast guard', cost: 800, delay: 40, duration: 120, cooldown: 150, text: 'Pulls people out of the water near the scene' },
@@ -4476,14 +4493,26 @@ const distToBuilding = (x, y, b) => {
   return distToRect(x, y, r);
 };
 
-// A hospital belongs to the base it stands in, and is only there once that base is open.
-const hospitalOpen = (state, b) => b.state !== 'rubble' && (state.ownedStations?.[b.base ?? 0] ?? (b.base ?? 0) === 0);
+/**
+ * Can this hospital take a patient right now? Rubble never can. With `CONFIG.medical.hospital.anyIntact`
+ * (the default) any other standing hospital can, unless it is on fire; with it off, a hospital belongs to the
+ * base it stands in and is only there once that base is open (the 0.17 rule).
+ */
+function hospitalAvailable(state, b) {
+  if (!b || b.state === 'rubble') return false;
+  const rule = CONFIG.medical.hospital;
+  if (rule.anyIntact) return !(rule.avoidBurning && b.state === 'burning');
+  return Boolean(state.ownedStations?.[b.base ?? 0] ?? (b.base ?? 0) === 0);
+}
+
+const hospitalById = (state, id) => (id ? (state.city.hospitals ?? []).find((h) => h.id === id) ?? null : null);
+
+const availableHospitals = (state) => (state.city.hospitals ?? []).filter((b) => hospitalAvailable(state, b));
 
 function nearestHospital(state, x, y) {
   let best = null;
   let bestD = Infinity;
-  for (const b of state.city.hospitals ?? []) {
-    if (!hospitalOpen(state, b)) continue;
+  for (const b of availableHospitals(state)) {
     const d = distToBuilding(x, y, b);
     if (d < bestD) {
       bestD = d;
@@ -4493,34 +4522,51 @@ function nearestHospital(state, x, y) {
   return best;
 }
 
+/** The available hospitals nearest (straight line) to a point, nearest first. */
+function nearestHospitals(state, x, y, count) {
+  return availableHospitals(state)
+    .map((b) => ({ b, d: distToBuilding(x, y, b) }))
+    .sort((a, c) => a.d - c.d)
+    .slice(0, count)
+    .map((r) => r.b);
+}
+
 function hospitalInReach(state, engine) {
   const range = CONFIG.medical.hospitalRange * TILE;
-  for (const b of state.city.hospitals ?? []) {
-    if (!hospitalOpen(state, b)) continue;
+  for (const b of availableHospitals(state)) {
     if (distToBuilding(engine.x, engine.y, b) <= range) return b;
   }
   return null;
 }
 
-/** Hand over everyone on the stretchers. Returns how many were delivered. */
-function unloadCargo(state, engine, hospital) {
-  const cargo = engine.cargo ?? [];
-  if (cargo.length === 0) return 0;
+/**
+ * Hand a list of stretcher cases over at a hospital: the one place a transport is paid and counted, so a
+ * vehicle's delivery and an agency's stay consistent. Empties `cargo`; returns how many were delivered.
+ */
+function deliverPatients(state, carrier, cargo, hospital) {
   const n = cargo.length;
-  engine.cargo = [];
-  engine.worked = true;
+  if (n === 0) return 0;
+  cargo.length = 0;
   const fee = earn(state, n * CONFIG.medical.transportFee, 'transport');
   state.stats.transported = (state.stats.transported ?? 0) + n;
   state.rating = Math.min(CONFIG.rating.start, state.rating + 3 * n);
   addEvent(
     state,
-    `${engine.name} delivered ${n} patient${n === 1 ? '' : 's'} to ${hospital.name} — ${money(fee)}`,
+    `${carrier} delivered ${n} patient${n === 1 ? '' : 's'} to ${hospital.name} — ${money(fee)}`,
     'good',
   );
   return n;
 }
 
-return { isMedical, spawnPatientAt, spawnPatient, injureEvacuees, injureRescued, restorePatients, findPatient, nearestPatient, treatPatient, updatePatients, pharmacyInReach, nearestPharmacy, restockKits, nearestHospital, hospitalInReach, unloadCargo };
+/** Hand over everyone on a vehicle's stretchers. Returns how many were delivered. */
+function unloadCargo(state, engine, hospital) {
+  const cargo = engine.cargo ?? [];
+  if (cargo.length === 0) return 0;
+  engine.worked = true;
+  return deliverPatients(state, engine.name, cargo, hospital);
+}
+
+return { isMedical, spawnPatientAt, spawnPatient, injureEvacuees, injureRescued, restorePatients, findPatient, nearestPatient, treatPatient, updatePatients, pharmacyInReach, nearestPharmacy, restockKits, hospitalAvailable, hospitalById, availableHospitals, nearestHospital, nearestHospitals, hospitalInReach, deliverPatients, unloadCargo };
 })();
 
 // ---- src/systems/civilians.js ----
@@ -7178,6 +7224,255 @@ const tileCentre = (tx, ty) => ({ x: (tx + 0.5) * TILE, y: (ty + 0.5) * TILE });
 return { districtName, placeNear, tileCentre };
 })();
 
+// ---- src/systems/modifiers.js ----
+__m["src/systems/modifiers.js"] = (function () {
+const { CONFIG } = __m["src/core/config.js"];
+const { clamp } = __m["src/core/math.js"];
+// How people, stations and support agencies change what the simulation does.
+//
+// This is a leaf module (it imports only the config) so the unit, fire and medical
+// code can ask "how fast does this crew work?" without depending on career mode.
+// In Quick Response there are no personnel records and every answer is 1.
+
+
+
+
+const isCareer = (state) => state.mode === 'career' && Boolean(state.campaign);
+
+/** The personnel record behind a crew unit, or null (Quick Response, or an unstaffed unit). */
+function personOf(state, crew) {
+  if (!crew?.personId || !isCareer(state)) return null;
+  const list = state.campaign.personnel;
+  for (let i = 0; i < list.length; i++) if (list[i].id === crew.personId) return list[i];
+  return null;
+}
+
+/** 1 when rested, falling to 1 - penalty as fatigue goes from half to full. */
+function fatigueFactor(person) {
+  const f = CONFIG.personnel.fatigue;
+  return 1 - f.penalty * clamp(((person?.fatigue ?? 0) - 0.5) / 0.5, 0, 1);
+}
+
+const skillBonus = (level) => 1 + CONFIG.personnel.skillBonus * (Math.max(1, level) - 1);
+
+/**
+ * How much faster (or slower) than the base rate this crew member works at a
+ * skill ('firefighting' | 'rescue' | 'medical' | 'driving' | 'technical').
+ */
+function workRate(state, crew, skill) {
+  const person = personOf(state, crew);
+  if (!person) return 1;
+  return skillBonus(person.skills?.[skill] ?? 1) * fatigueFactor(person);
+}
+
+/** An upgrade level at a station (0 if none, or in Quick Response). */
+function upgradeLevel(state, station, key) {
+  if (!isCareer(state)) return 0;
+  return state.campaign.stations?.[station]?.upgrades?.[key] ?? 0;
+}
+
+/** The station a vehicle is based at (index into city.stations). */
+const stationOfEngine = (state, engine) => state.city.bays[engine.bayIndex]?.station ?? 0;
+
+/** Support units that are on scene and affect the area round a point. */
+function supportAt(state, agency, x, y) {
+  const list = state.support?.active;
+  if (!list) return null;
+  for (const s of list) {
+    if (s.agency !== agency || state.time < s.arriveAt || state.time > s.until) continue;
+    if (Math.hypot(s.x - x, s.y - y) <= s.radius) return s;
+  }
+  return null;
+}
+
+/**
+ * Extra speed for a road vehicle: its best driver's skill and tiredness, the
+ * communication centre at its home station, and police traffic control.
+ * Multiplied on top of the traffic factor.
+ */
+function speedMod(state, engine) {
+  let mod = 1;
+  if (isCareer(state)) {
+    let best = 1;
+    for (const id of engine.crewIds) {
+      const crew = state.crew.find((c) => c.id === id);
+      const person = personOf(state, crew);
+      if (person) best = Math.max(best, skillBonus(person.skills.driving) * fatigueFactor(person));
+    }
+    mod *= best;
+    if (engine.status === 'responding' || engine.status === 'transporting') {
+      mod *= 1 + CONFIG.upgrades.comms.per * upgradeLevel(state, stationOfEngine(state, engine), 'comms');
+    }
+  }
+  if (!engine.spec.flying && !engine.spec.boat && supportAt(state, 'police', engine.x, engine.y)) {
+    // Streets closed ahead of the engine: no rush-hour slowdown, and a little more.
+    mod *= Math.max(1, 1 / (state.trafficFactor || 1)) * 1.08;
+  }
+  return mod;
+}
+
+/** Workers clear a wreck faster with police holding the traffic back. */
+function clearRate(state, x, y) {
+  return supportAt(state, 'police', x, y) ? 1.5 : 1;
+}
+
+/** Career only: a diver with the Dive Rescue certificate brings someone out faster than one without. */
+function diveRate(state, crew) {
+  const person = personOf(state, crew);
+  if (!person) return 1;
+  const d = CONFIG.water.dive;
+  return person.certs?.includes('diving') ? d.certified : d.uncertified;
+}
+
+/** Is this crew member protected against hazardous materials? */
+function hazmatProtected(state, crew, engine) {
+  if (engine?.spec?.hazmat) return true;
+  const person = personOf(state, crew);
+  return Boolean(person?.certs?.includes('hazmat'));
+}
+
+
+return { isCareer, personOf, fatigueFactor, skillBonus, workRate, upgradeLevel, stationOfEngine, supportAt, speedMod, clearRate, diveRate, hazmatProtected };
+})();
+
+// ---- src/systems/eta.js ----
+__m["src/systems/eta.js"] = (function () {
+const { TILE } = __m["src/core/config.js"];
+const { dist } = __m["src/core/math.js"];
+const { findPath, nearestPassable, smoothPath, tileOf } = __m["src/systems/grid.js"];
+const { speedMod } = __m["src/systems/modifiers.js"];
+// Estimated arrival times. There is no second router here: a vehicle already on
+// its way is measured along the path it is actually following, and one that is
+// still in quarters is routed with the same A* (`findPath`) the orders use.
+// Speed is the vehicle's own, times the traffic factor (rush hour, police
+// control) and its crew's driving skill, so the figure moves when conditions do.
+
+
+
+
+
+
+const CACHE_FOR = 3; // seconds of game time a computed route is reused
+const BODY_HALF = TILE * 0.46;
+
+function pathLength(from, points) {
+  let len = 0;
+  let x = from.x;
+  let y = from.y;
+  for (const p of points) {
+    len += Math.hypot(p.x - x, p.y - y);
+    x = p.x;
+    y = p.y;
+  }
+  return len;
+}
+
+/** Pixels per second the vehicle covers right now on its way. */
+function travelSpeed(state, engine) {
+  const base = engine.spec.speed * TILE;
+  if (engine.spec.flying || engine.spec.boat) return base * speedMod(state, engine);
+  return base * (state.trafficFactor ?? 1) * speedMod(state, engine);
+}
+
+function routeKey(state, engine, x, y) {
+  return `${Math.round(x)},${Math.round(y)}|${state.blockades?.length ?? 0}|${state.cutCount ?? 0}`;
+}
+
+/**
+ * Route and arrival estimate from a vehicle to a world point.
+ * Returns `{ seconds, length, points, reachable }`.
+ */
+function estimate(state, engine, x, y) {
+  const speed = travelSpeed(state, engine);
+  if (engine.spec.plane || engine.spec.flying) {
+    const length = dist(engine.x, engine.y, x, y);
+    return { seconds: length / speed + (engine.packTimer || 0), length, points: [{ x, y }], reachable: true };
+  }
+
+  // Already moving there: the path it is following is the route.
+  if (engine.path.length > 0 && engine.goal) {
+    const gx = (engine.goal.x + 0.5) * TILE;
+    const gy = (engine.goal.y + 0.5) * TILE;
+    if (dist(gx, gy, x, y) <= 16 * TILE) {
+      const length = pathLength(engine, engine.path);
+      return { seconds: length / speed + (engine.packTimer || 0), length, points: engine.path, reachable: true };
+    }
+  }
+
+  const cache = (engine.etaCache = engine.etaCache ?? {});
+  const key = routeKey(state, engine, x, y);
+  if (cache.key === key && state.time - cache.at < CACHE_FOR) {
+    const length = cache.points ? pathLength(engine, cache.points) : Infinity;
+    return { seconds: length / speed, length, points: cache.points ?? [], reachable: Boolean(cache.points) };
+  }
+
+  const mode = engine.spec.boat ? 'sail' : 'drive';
+  const goal = nearestPassable(state.nav, mode, Math.floor(x / TILE), Math.floor(y / TILE), 14);
+  let points = null;
+  if (goal) {
+    const tiles = findPath(state.nav, mode, tileOf(engine.x, engine.y), goal);
+    if (tiles) points = smoothPath(state.nav, mode, { x: engine.x, y: engine.y }, tiles, mode === 'drive' ? BODY_HALF : 0);
+  }
+  cache.key = key;
+  cache.at = state.time;
+  cache.points = points;
+  if (!points) return { seconds: Infinity, length: Infinity, points: [], reachable: false };
+  const length = pathLength(engine, points);
+  return { seconds: length / speed, length, points, reachable: true };
+}
+
+/** The point an incident (a building, forest fire, patient, victim, wreck) is at. */
+function incidentPoint(state, kind, id) {
+  if (kind === 'building') {
+    const b = state.buildings.find((x) => x.id === id);
+    return b ? { x: (b.x + b.w / 2) * TILE, y: (b.y + b.h / 2) * TILE } : null;
+  }
+  const list = { wildfire: state.wildfires, patient: state.patients, victim: state.victims, blockade: state.blockades }[kind];
+  const e = list?.find((v) => v.id === id);
+  return e ? { x: e.x, y: e.y } : null;
+}
+
+/** What a vehicle is heading for right now, as `{ kind, id }`, or null. */
+function currentTarget(engine) {
+  if (engine.targetId) return { kind: 'building', id: engine.targetId };
+  if (engine.wildfireId) return { kind: 'wildfire', id: engine.wildfireId };
+  if (engine.patientId) return { kind: 'patient', id: engine.patientId };
+  if (engine.victimId) return { kind: 'victim', id: engine.victimId };
+  if (engine.blockadeId) return { kind: 'blockade', id: engine.blockadeId };
+  if (engine.standbyFor && engine.path.length > 0) return engine.standbyFor;
+  return null;
+}
+
+/** Seconds until this vehicle reaches what it was sent to; null if it is not on its way. */
+function engineEta(state, engine) {
+  if (engine.path.length === 0 || engine.arrived) return null;
+  const t = currentTarget(engine);
+  const p = t ? incidentPoint(state, t.kind, t.id) : engine.path[engine.path.length - 1];
+  if (!p) return null;
+  return estimate(state, engine, p.x, p.y).seconds;
+}
+
+/** Every vehicle heading for an incident with its arrival time, soonest first. */
+function incidentEtas(state, kind, id) {
+  const out = [];
+  for (const engine of state.engines) {
+    const t = currentTarget(engine);
+    if (!t || t.kind !== kind || t.id !== id || engine.arrived || engine.path.length === 0) continue;
+    const eta = engineEta(state, engine);
+    if (eta != null && Number.isFinite(eta)) out.push({ engine, seconds: eta });
+  }
+  return out.sort((a, b) => a.seconds - b.seconds);
+}
+
+function formatEta(seconds) {
+  if (seconds == null || !Number.isFinite(seconds)) return '—';
+  const s = Math.max(0, Math.round(seconds));
+  return s >= 60 ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : `${s}s`;
+}
+
+return { pathLength, travelSpeed, estimate, incidentPoint, currentTarget, engineEta, incidentEtas, formatEta };
+})();
+
 // ---- src/systems/blockades.js ----
 __m["src/systems/blockades.js"] = (function () {
 const { CONFIG, TILE } = __m["src/core/config.js"];
@@ -7670,109 +7965,6 @@ function drowningCall(state, allowed = () => true, opts = {}) {
 return { findVictim, spawnVictim, restoreVictims, nearestVictim, rescueVictim, updateVictims, drowningCall };
 })();
 
-// ---- src/systems/modifiers.js ----
-__m["src/systems/modifiers.js"] = (function () {
-const { CONFIG } = __m["src/core/config.js"];
-const { clamp } = __m["src/core/math.js"];
-// How people, stations and support agencies change what the simulation does.
-//
-// This is a leaf module (it imports only the config) so the unit, fire and medical
-// code can ask "how fast does this crew work?" without depending on career mode.
-// In Quick Response there are no personnel records and every answer is 1.
-
-
-
-
-const isCareer = (state) => state.mode === 'career' && Boolean(state.campaign);
-
-/** The personnel record behind a crew unit, or null (Quick Response, or an unstaffed unit). */
-function personOf(state, crew) {
-  if (!crew?.personId || !isCareer(state)) return null;
-  const list = state.campaign.personnel;
-  for (let i = 0; i < list.length; i++) if (list[i].id === crew.personId) return list[i];
-  return null;
-}
-
-/** 1 when rested, falling to 1 - penalty as fatigue goes from half to full. */
-function fatigueFactor(person) {
-  const f = CONFIG.personnel.fatigue;
-  return 1 - f.penalty * clamp(((person?.fatigue ?? 0) - 0.5) / 0.5, 0, 1);
-}
-
-const skillBonus = (level) => 1 + CONFIG.personnel.skillBonus * (Math.max(1, level) - 1);
-
-/**
- * How much faster (or slower) than the base rate this crew member works at a
- * skill ('firefighting' | 'rescue' | 'medical' | 'driving' | 'technical').
- */
-function workRate(state, crew, skill) {
-  const person = personOf(state, crew);
-  if (!person) return 1;
-  return skillBonus(person.skills?.[skill] ?? 1) * fatigueFactor(person);
-}
-
-/** An upgrade level at a station (0 if none, or in Quick Response). */
-function upgradeLevel(state, station, key) {
-  if (!isCareer(state)) return 0;
-  return state.campaign.stations?.[station]?.upgrades?.[key] ?? 0;
-}
-
-/** The station a vehicle is based at (index into city.stations). */
-const stationOfEngine = (state, engine) => state.city.bays[engine.bayIndex]?.station ?? 0;
-
-/** Support units that are on scene and affect the area round a point. */
-function supportAt(state, agency, x, y) {
-  const list = state.support?.active;
-  if (!list) return null;
-  for (const s of list) {
-    if (s.agency !== agency || state.time < s.arriveAt || state.time > s.until) continue;
-    if (Math.hypot(s.x - x, s.y - y) <= s.radius) return s;
-  }
-  return null;
-}
-
-/**
- * Extra speed for a road vehicle: its best driver's skill and tiredness, the
- * communication centre at its home station, and police traffic control.
- * Multiplied on top of the traffic factor.
- */
-function speedMod(state, engine) {
-  let mod = 1;
-  if (isCareer(state)) {
-    let best = 1;
-    for (const id of engine.crewIds) {
-      const crew = state.crew.find((c) => c.id === id);
-      const person = personOf(state, crew);
-      if (person) best = Math.max(best, skillBonus(person.skills.driving) * fatigueFactor(person));
-    }
-    mod *= best;
-    if (engine.status === 'responding' || engine.status === 'transporting') {
-      mod *= 1 + CONFIG.upgrades.comms.per * upgradeLevel(state, stationOfEngine(state, engine), 'comms');
-    }
-  }
-  if (!engine.spec.flying && !engine.spec.boat && supportAt(state, 'police', engine.x, engine.y)) {
-    // Streets closed ahead of the engine: no rush-hour slowdown, and a little more.
-    mod *= Math.max(1, 1 / (state.trafficFactor || 1)) * 1.08;
-  }
-  return mod;
-}
-
-/** Workers clear a wreck faster with police holding the traffic back. */
-function clearRate(state, x, y) {
-  return supportAt(state, 'police', x, y) ? 1.5 : 1;
-}
-
-/** Is this crew member protected against hazardous materials? */
-function hazmatProtected(state, crew, engine) {
-  if (engine?.spec?.hazmat) return true;
-  const person = personOf(state, crew);
-  return Boolean(person?.certs?.includes('hazmat'));
-}
-
-
-return { isCareer, personOf, fatigueFactor, skillBonus, workRate, upgradeLevel, stationOfEngine, supportAt, speedMod, clearRate, hazmatProtected };
-})();
-
 // ---- src/systems/units.js ----
 __m["src/systems/units.js"] = (function () {
 const { CONFIG, TILE } = __m["src/core/config.js"];
@@ -7786,16 +7978,18 @@ const { streamImpact, spawnChips, spawnRescue } = __m["src/systems/effects.js"];
 const { placeNear } = __m["src/systems/places.js"];
 const { rescuePerson } = __m["src/systems/civilians.js"];
 const { earn, spend } = __m["src/systems/economy.js"];
-const { findPatient, hospitalInReach, isMedical, nearestHospital, nearestPatient, nearestPharmacy, restockKits, treatPatient, unloadCargo } = __m["src/systems/medical.js"];
+const { findPatient, hospitalAvailable, hospitalById, hospitalInReach, isMedical, nearestHospital, nearestHospitals, nearestPatient, nearestPharmacy, restockKits, treatPatient, unloadCargo } = __m["src/systems/medical.js"];
+const { estimate } = __m["src/systems/eta.js"];
 const { workOnBlockade } = __m["src/systems/blockades.js"];
 const { findVictim, rescueVictim } = __m["src/systems/water.js"];
-const { clearRate, isCareer, speedMod, upgradeLevel, workRate } = __m["src/systems/modifiers.js"];
+const { clearRate, diveRate, isCareer, speedMod, upgradeLevel, workRate } = __m["src/systems/modifiers.js"];
 // The engine companies and their crews: driving the road network, laying hose,
 // pulling people out and putting water on a fire.
 //
 // A shift starts with one engine and three firefighters. More engines can be
 // bought at the station; each one is independent — its own tank, hose, deck gun
 // and crew — and the selection tells the orders where to go.
+
 
 
 
@@ -8308,6 +8502,8 @@ function vehicleBase(state, type, overrides = {}) {
     kitAcc: 0,
     patientId: null,
     cargo: [],
+    hospitalId: null, // the hospital an ambulance with patients aboard is driving to
+    noHospital: false, // (transient) it has already said there is no hospital to reach
     goal: null,
     blockadeId: null,
     victimId: null,
@@ -8346,6 +8542,7 @@ function savedOrder(entry) {
     blockadeId: idOrNull(entry.blockadeId),
     victimId: idOrNull(entry.victimId),
     patientId: idOrNull(entry.patientId),
+    hospitalId: idOrNull(entry.hospitalId),
     standbyFor,
     mission,
     status: typeof entry.status === 'string' && entry.status.length < 40 ? entry.status : 'in quarters',
@@ -8753,6 +8950,7 @@ function orderEngine(state, engine, wx, wy, buildingId = null, wildfireId = null
   if (engine.spec.plane) return orderPlane(state, engine, wx, wy, buildingId, wildfireId);
   if (engine.spec.flying) return orderFlight(state, engine, wx, wy, buildingId, wildfireId);
   if (engine.spec.boat) return orderBoat(state, engine, wx, wy, buildingId, wildfireId);
+  engine.hospitalId = null; // a new order cancels a hospital run; `sendToHospital` sets it again after this
   const building = buildingOf(state, buildingId);
   let goal = null;
   if (building) {
@@ -9025,18 +9223,47 @@ function diveVehiclesFor(state, victim) {
     .map((x) => x.e);
 }
 
-/** Take the stretcher cases to the nearest hospital. */
+/**
+ * The hospital a vehicle should take its patients to: the available one it reaches soonest by road (or, with
+ * `byRoute` off, the nearest in a straight line). Null when none can be reached.
+ */
+function chooseHospital(state, engine) {
+  const rule = CONFIG.medical.hospital;
+  if (!rule.byRoute) return nearestHospital(state, engine.x, engine.y);
+  let best = null;
+  let bestSeconds = Infinity;
+  for (const h of nearestHospitals(state, engine.x, engine.y, rule.candidates)) {
+    const eta = estimate(state, engine, (h.x + h.w / 2) * TILE, (h.y + h.h / 2) * TILE);
+    if (eta.reachable && eta.seconds < bestSeconds) {
+      bestSeconds = eta.seconds;
+      best = h;
+    }
+  }
+  return best;
+}
+
+/** Take the stretcher cases to the best available hospital. */
 function sendToHospital(state, engine) {
   if (!engine || !isMedical(engine)) return false;
-  const hospital = nearestHospital(state, engine.x, engine.y);
-  if (!hospital) {
-    addEvent(state, 'No hospital in the city', 'warn');
-    return false;
-  }
-  if (hospitalInReach(state, engine) && (engine.cargo?.length ?? 0) > 0) {
-    unloadCargo(state, engine, hospital);
+  const reach = hospitalInReach(state, engine);
+  if (reach && (engine.cargo?.length ?? 0) > 0) {
+    engine.noHospital = false;
+    unloadCargo(state, engine, reach);
+    engine.hospitalId = null;
     return true;
   }
+  const hospital = chooseHospital(state, engine);
+  if (!hospital) {
+    // Say so once, not every retry: the ambulance keeps its patients aboard and tries again.
+    if (!engine.noHospital) {
+      addEvent(state, (engine.cargo?.length ?? 0) > 0
+        ? `${engine.name}: no hospital it can reach — patients stay aboard`
+        : 'No hospital in the city', 'warn');
+    }
+    engine.noHospital = true;
+    return false;
+  }
+  engine.noHospital = false;
   recallCrew(state, engine);
   const ok = orderEngine(
     state,
@@ -9048,6 +9275,7 @@ function sendToHospital(state, engine) {
   if (ok) {
     engine.targetId = null;
     engine.patientId = null;
+    engine.hospitalId = hospital.id;
     if ((engine.cargo?.length ?? 0) > 0) {
       addEvent(state, `${engine.name} taking ${engine.cargo.length} patient${engine.cargo.length === 1 ? '' : 's'} to ${hospital.name}`, 'info');
     }
@@ -9473,6 +9701,7 @@ function updateEngine(state, engine, dt) {
   }
 
   if (engine.path.length > 0) {
+    if (engine.hospitalId) divertFromLostHospital(state, engine); // checked on the road, not only when parked
     followPath(engine, dt, engine.spec.speed * TILE * (engine.spec.flying || engine.spec.boat ? 1 : state.trafficFactor ?? 1) * speedMod(state, engine));
     engine.pumping = false;
     engine.refilling = false;
@@ -9523,6 +9752,23 @@ function updateEngine(state, engine, dt) {
   else engine.status = 'standing by';
 }
 
+/**
+ * The hospital an ambulance is heading for has been lost (rubble, on fire): choose another at once, from where
+ * it is. If no other can be reached it stops, keeps its patients aboard, and `updateAmbulance` keeps trying.
+ */
+function divertFromLostHospital(state, engine) {
+  if (!engine.hospitalId || (engine.cargo?.length ?? 0) === 0) return;
+  const lost = hospitalById(state, engine.hospitalId);
+  if (hospitalAvailable(state, lost)) return;
+  engine.hospitalId = null;
+  addEvent(state, `${engine.name}: ${lost?.name ?? 'the hospital'} is out of service — finding another`, 'warn');
+  engine.hospitalRetry = state.time + CONFIG.medical.hospital.retry;
+  if (!sendToHospital(state, engine)) {
+    engine.path = [];
+    engine.goal = null;
+  }
+}
+
 function updateAmbulance(state, engine, dt) {
   if (engine.patientId) {
     const patient = findPatient(state, engine.patientId);
@@ -9533,13 +9779,18 @@ function updateAmbulance(state, engine, dt) {
   if ((engine.cargo?.length ?? 0) > 0) {
     const hospital = hospitalInReach(state, engine);
     if (hospital) {
+      engine.noHospital = false;
+      engine.hospitalId = null;
       unloadCargo(state, engine, hospital);
-    } else if (state.time >= (engine.hospitalRetry ?? 0)) {
-      const out = crewOf(state, engine).filter((c) => !c.riding);
-      if (out.length > 0 && engine.cargo.length >= engine.spec.carry) recallCrew(state, engine);
-      else if (out.length === 0) {
-        engine.hospitalRetry = state.time + 5;
-        sendToHospital(state, engine);
+    } else {
+      divertFromLostHospital(state, engine);
+      if (state.time >= (engine.hospitalRetry ?? 0)) {
+        const out = crewOf(state, engine).filter((c) => !c.riding);
+        if (out.length > 0 && engine.cargo.length >= engine.spec.carry) recallCrew(state, engine);
+        else if (out.length === 0 && (engine.path.length === 0 || !engine.hospitalId)) {
+          engine.hospitalRetry = state.time + CONFIG.medical.hospital.retry;
+          sendToHospital(state, engine);
+        }
       }
     }
   }
@@ -9636,7 +9887,7 @@ function updateDiver(state, crew, engine, dt) {
   crew.path.length = 0;
   crew.angle = angleTo(crew.x, crew.y, victim.x, victim.y);
   crew.status = 'rescuing';
-  crew.rescueTimer += dt * workRate(state, crew, 'rescue');
+  crew.rescueTimer += dt * workRate(state, crew, 'rescue') * diveRate(state, crew);
   victim.rescueTimer = crew.rescueTimer;
   const need = engine.spec.rescueTime;
   if (crew.rescueTimer >= need) {
@@ -10169,7 +10420,7 @@ function updateCrew(state, crew, dt) {
   }
 }
 
-return { createUnits, vehicleSpec, vehicleCost, isFirefighter, defaultTool, toolCount, vehicleTools, toolsFree, canDive, equipCrew, crewForTool, cuttable, cutTile, restoreCuts, cutList, orderCut, ownsStation, freeBay, stationCapacity, totalBays, totalBerths, buyVehicle, sellVehicle, addVehicle, clearFleet, buyEngine, restoreFleet, findUnit, buildingOf, crewOf, unstaffed, addCrewMember, removeCrewMember, engineOfCrew, engineForUnit, activeEngine, nearestHydrant, nearestWater, boatCanReach, orderEngine, orderEngineToWildfire, orderCrew, deployCrew, recallCrew, sendEngineHome, toggleHydrant, repathEngines, orderEngineToBlockade, pickEngineForBlockade, orderEngineToVictim, diveVehiclesFor, sendToHospital, orderAmbulanceToPatient, pickAmbulanceFor, sendToPharmacy, urgentFire, dispatchEngine, updateUnits, hydrantInReach };
+return { createUnits, vehicleSpec, vehicleCost, isFirefighter, defaultTool, toolCount, vehicleTools, toolsFree, canDive, equipCrew, crewForTool, cuttable, cutTile, restoreCuts, cutList, orderCut, ownsStation, freeBay, stationCapacity, totalBays, totalBerths, buyVehicle, sellVehicle, addVehicle, clearFleet, buyEngine, restoreFleet, findUnit, buildingOf, crewOf, unstaffed, addCrewMember, removeCrewMember, engineOfCrew, engineForUnit, activeEngine, nearestHydrant, nearestWater, boatCanReach, orderEngine, orderEngineToWildfire, orderCrew, deployCrew, recallCrew, sendEngineHome, toggleHydrant, repathEngines, orderEngineToBlockade, pickEngineForBlockade, orderEngineToVictim, diveVehiclesFor, chooseHospital, sendToHospital, orderAmbulanceToPatient, pickAmbulanceFor, sendToPharmacy, urgentFire, dispatchEngine, updateUnits, hydrantInReach };
 })();
 
 // ---- src/systems/dispatch.js ----
@@ -10425,144 +10676,6 @@ function returnAll(state) {
 return { isFree, openJobs, cost, order, dispatchAll, returnAll };
 })();
 
-// ---- src/systems/eta.js ----
-__m["src/systems/eta.js"] = (function () {
-const { TILE } = __m["src/core/config.js"];
-const { dist } = __m["src/core/math.js"];
-const { findPath, nearestPassable, smoothPath, tileOf } = __m["src/systems/grid.js"];
-const { speedMod } = __m["src/systems/modifiers.js"];
-// Estimated arrival times. There is no second router here: a vehicle already on
-// its way is measured along the path it is actually following, and one that is
-// still in quarters is routed with the same A* (`findPath`) the orders use.
-// Speed is the vehicle's own, times the traffic factor (rush hour, police
-// control) and its crew's driving skill, so the figure moves when conditions do.
-
-
-
-
-
-
-const CACHE_FOR = 3; // seconds of game time a computed route is reused
-const BODY_HALF = TILE * 0.46;
-
-function pathLength(from, points) {
-  let len = 0;
-  let x = from.x;
-  let y = from.y;
-  for (const p of points) {
-    len += Math.hypot(p.x - x, p.y - y);
-    x = p.x;
-    y = p.y;
-  }
-  return len;
-}
-
-/** Pixels per second the vehicle covers right now on its way. */
-function travelSpeed(state, engine) {
-  const base = engine.spec.speed * TILE;
-  if (engine.spec.flying || engine.spec.boat) return base * speedMod(state, engine);
-  return base * (state.trafficFactor ?? 1) * speedMod(state, engine);
-}
-
-function routeKey(state, engine, x, y) {
-  return `${Math.round(x)},${Math.round(y)}|${state.blockades?.length ?? 0}|${state.cutCount ?? 0}`;
-}
-
-/**
- * Route and arrival estimate from a vehicle to a world point.
- * Returns `{ seconds, length, points, reachable }`.
- */
-function estimate(state, engine, x, y) {
-  const speed = travelSpeed(state, engine);
-  if (engine.spec.plane || engine.spec.flying) {
-    const length = dist(engine.x, engine.y, x, y);
-    return { seconds: length / speed + (engine.packTimer || 0), length, points: [{ x, y }], reachable: true };
-  }
-
-  // Already moving there: the path it is following is the route.
-  if (engine.path.length > 0 && engine.goal) {
-    const gx = (engine.goal.x + 0.5) * TILE;
-    const gy = (engine.goal.y + 0.5) * TILE;
-    if (dist(gx, gy, x, y) <= 16 * TILE) {
-      const length = pathLength(engine, engine.path);
-      return { seconds: length / speed + (engine.packTimer || 0), length, points: engine.path, reachable: true };
-    }
-  }
-
-  const cache = (engine.etaCache = engine.etaCache ?? {});
-  const key = routeKey(state, engine, x, y);
-  if (cache.key === key && state.time - cache.at < CACHE_FOR) {
-    const length = cache.points ? pathLength(engine, cache.points) : Infinity;
-    return { seconds: length / speed, length, points: cache.points ?? [], reachable: Boolean(cache.points) };
-  }
-
-  const mode = engine.spec.boat ? 'sail' : 'drive';
-  const goal = nearestPassable(state.nav, mode, Math.floor(x / TILE), Math.floor(y / TILE), 14);
-  let points = null;
-  if (goal) {
-    const tiles = findPath(state.nav, mode, tileOf(engine.x, engine.y), goal);
-    if (tiles) points = smoothPath(state.nav, mode, { x: engine.x, y: engine.y }, tiles, mode === 'drive' ? BODY_HALF : 0);
-  }
-  cache.key = key;
-  cache.at = state.time;
-  cache.points = points;
-  if (!points) return { seconds: Infinity, length: Infinity, points: [], reachable: false };
-  const length = pathLength(engine, points);
-  return { seconds: length / speed, length, points, reachable: true };
-}
-
-/** The point an incident (a building, forest fire, patient, victim, wreck) is at. */
-function incidentPoint(state, kind, id) {
-  if (kind === 'building') {
-    const b = state.buildings.find((x) => x.id === id);
-    return b ? { x: (b.x + b.w / 2) * TILE, y: (b.y + b.h / 2) * TILE } : null;
-  }
-  const list = { wildfire: state.wildfires, patient: state.patients, victim: state.victims, blockade: state.blockades }[kind];
-  const e = list?.find((v) => v.id === id);
-  return e ? { x: e.x, y: e.y } : null;
-}
-
-/** What a vehicle is heading for right now, as `{ kind, id }`, or null. */
-function currentTarget(engine) {
-  if (engine.targetId) return { kind: 'building', id: engine.targetId };
-  if (engine.wildfireId) return { kind: 'wildfire', id: engine.wildfireId };
-  if (engine.patientId) return { kind: 'patient', id: engine.patientId };
-  if (engine.victimId) return { kind: 'victim', id: engine.victimId };
-  if (engine.blockadeId) return { kind: 'blockade', id: engine.blockadeId };
-  if (engine.standbyFor && engine.path.length > 0) return engine.standbyFor;
-  return null;
-}
-
-/** Seconds until this vehicle reaches what it was sent to; null if it is not on its way. */
-function engineEta(state, engine) {
-  if (engine.path.length === 0 || engine.arrived) return null;
-  const t = currentTarget(engine);
-  const p = t ? incidentPoint(state, t.kind, t.id) : engine.path[engine.path.length - 1];
-  if (!p) return null;
-  return estimate(state, engine, p.x, p.y).seconds;
-}
-
-/** Every vehicle heading for an incident with its arrival time, soonest first. */
-function incidentEtas(state, kind, id) {
-  const out = [];
-  for (const engine of state.engines) {
-    const t = currentTarget(engine);
-    if (!t || t.kind !== kind || t.id !== id || engine.arrived || engine.path.length === 0) continue;
-    const eta = engineEta(state, engine);
-    if (eta != null && Number.isFinite(eta)) out.push({ engine, seconds: eta });
-  }
-  return out.sort((a, b) => a.seconds - b.seconds);
-}
-
-function formatEta(seconds) {
-  if (seconds == null || !Number.isFinite(seconds)) return '—';
-  const s = Math.max(0, Math.round(seconds));
-  return s >= 60 ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : `${s}s`;
-}
-
-return { pathLength, travelSpeed, estimate, incidentPoint, currentTarget, engineEta, incidentEtas, formatEta };
-})();
-
 // ---- src/systems/presets.js ----
 __m["src/systems/presets.js"] = (function () {
 const { CONFIG, TILE } = __m["src/core/config.js"];
@@ -10571,7 +10684,7 @@ const { addEvent } = __m["src/systems/events.js"];
 const { cost, isFree, order } = __m["src/systems/dispatch.js"];
 const { estimate, currentTarget, incidentPoint } = __m["src/systems/eta.js"];
 const { isMedical } = __m["src/systems/medical.js"];
-const { orderEngine, sendEngineHome, ownsStation, unstaffed } = __m["src/systems/units.js"];
+const { canDive, orderEngine, sendEngineHome, ownsStation, toolsFree, unstaffed } = __m["src/systems/units.js"];
 const { findPatient } = __m["src/systems/medical.js"];
 // Dispatch presets: named vehicle combinations ("Building fire: 2 engines, a
 // ladder, an ambulance and a rescue unit") that go to one incident with one
@@ -10601,6 +10714,23 @@ const INCIDENT_KINDS = {
   any: 'Any incident',
 };
 
+/**
+ * Slots that name a job rather than a vehicle type. A `diver` slot is filled by whatever can put divers in the
+ * water: a rescue boat, or an engine or rescue unit with diving gear free. (The old water preset asked for a
+ * rescue boat by name, so a city without one could never answer a drowning call from its preset.)
+ */
+const PRESET_ROLES = {
+  diver: { label: 'Diving unit' },
+};
+
+const slotLabel = (type) => PRESET_ROLES[type]?.label ?? CONFIG.vehicles[type]?.label ?? type;
+
+/** Does this vehicle fill this slot? */
+function fitsSlot(engine, type) {
+  if (type === 'diver') return canDive(engine);
+  return engine.type === type;
+}
+
 const MAX_NAME = 32;
 const MAX_PER_TYPE = 8;
 const MAX_TOTAL = 14;
@@ -10611,7 +10741,7 @@ function defaultPresets() {
     { id: 'preset-forest', name: 'Forest fire', incident: 'wildfire', units: { engine: 2, tanker: 1, helicopter: 1 } },
     { id: 'preset-accident', name: 'Major traffic accident', incident: 'accident', units: { rescue: 1, ambulance: 2, engine: 1 } },
     { id: 'preset-medical', name: 'Medical emergency', incident: 'medical', units: { ambulance: 1 } },
-    { id: 'preset-water', name: 'Water rescue', incident: 'water', units: { rescueboat: 1, ambulance: 1 } },
+    { id: 'preset-water', name: 'Water rescue', incident: 'water', units: { diver: 1, ambulance: 1 } },
     { id: 'preset-hazmat', name: 'Hazmat incident', incident: 'hazmat', units: { hazmat: 1, engine: 1, ambulance: 1 } },
   ];
 }
@@ -10620,10 +10750,22 @@ function restorePresets(list) {
   if (!Array.isArray(list)) return defaultPresets();
   const clean = [];
   for (const p of list) {
-    const v = validatePreset(p, []);
+    const v = validatePreset(migratePreset(p), []);
     if (v.ok) clean.push(v.preset);
   }
   return clean;
+}
+
+/**
+ * Saves from before 0.18 hold the water preset as "a rescue boat and an ambulance". If it is still exactly
+ * that (the player has not changed it), it becomes "a diving unit and an ambulance"; an edited one is kept.
+ */
+function migratePreset(p) {
+  const u = p?.units;
+  if (p?.id === 'preset-water' && u && Object.keys(u).length === 2 && u.rescueboat === 1 && u.ambulance === 1) {
+    return { ...p, units: { diver: 1, ambulance: 1 } };
+  }
+  return p;
 }
 
 /** Check a preset; returns `{ ok, preset }` (normalised) or `{ ok: false, error }`. */
@@ -10638,7 +10780,7 @@ function validatePreset(input, others = []) {
   const units = {};
   let total = 0;
   for (const [type, raw] of Object.entries(input.units ?? {})) {
-    if (!CONFIG.vehicles[type]) return { ok: false, error: `Unknown vehicle: ${type}` };
+    if (!CONFIG.vehicles[type] && !PRESET_ROLES[type]) return { ok: false, error: `Unknown vehicle: ${type}` };
     const n = Math.floor(Number(raw));
     if (!Number.isFinite(n) || n < 0) return { ok: false, error: `Bad count for ${type}` };
     if (n === 0) continue;
@@ -10736,11 +10878,15 @@ function nearestStations(state, x, y) {
   return out.sort((a, b) => a.distance - b.distance);
 }
 
+/** How many vehicles in the fleet can put divers in the water. */
+const diverTotal = (state) => state.engines.filter((e) => canDive(e)).length;
+
 function availableVehicles(state) {
   const counts = {};
   for (const e of state.engines) {
     if (!isFree(state, e) || unstaffed(state, e)) continue;
     counts[e.type] = (counts[e.type] ?? 0) + 1;
+    if (canDive(e) && (e.spec.diver || toolsFree(state, e, 'diving') > 0)) counts.diver = (counts.diver ?? 0) + 1;
   }
   return counts;
 }
@@ -10787,7 +10933,7 @@ function planPreset(state, preset, target) {
   plan.station = nearestStations(state, job.x, job.y)[0] ?? null;
   const used = new Set();
   for (const [type, want] of Object.entries(preset.units)) {
-    const on = state.engines.filter((e) => e.type === type && onJob(state, e, target) && !used.has(e.id));
+    const on = state.engines.filter((e) => fitsSlot(e, type) && onJob(state, e, target) && !used.has(e.id));
     for (const e of on.slice(0, want)) {
       used.add(e.id);
       plan.already.push(e);
@@ -10796,7 +10942,7 @@ function planPreset(state, preset, target) {
     if (need <= 0) continue;
     const ranked = [];
     for (const e of state.engines) {
-      if (e.type !== type || used.has(e.id) || !isFree(state, e)) continue;
+      if (!fitsSlot(e, type) || used.has(e.id) || !isFree(state, e)) continue;
       if (unstaffed(state, e)) continue;
       if (!Number.isFinite(fitness(state, e, job))) continue;
       const eta = estimate(state, e, job.x, job.y);
@@ -10812,10 +10958,10 @@ function planPreset(state, preset, target) {
     if (need > 0) plan.missing[type] = need;
   }
   for (const [type, n] of Object.entries(plan.missing)) {
-    const owned = state.engines.filter((e) => e.type === type).length;
+    const owned = state.engines.filter((e) => fitsSlot(e, type)).length;
     plan.warnings.push(owned === 0
-      ? `No ${CONFIG.vehicles[type].label} in the fleet (${n} wanted)`
-      : `${n} more ${CONFIG.vehicles[type].label} wanted — all busy or unable to reach`);
+      ? `No ${slotLabel(type)} in the fleet (${n} wanted)`
+      : `${n} more ${slotLabel(type)} wanted — all busy or unable to reach`);
   }
   if (plan.assignments.length === 0 && plan.already.length === 0 && plan.warnings.length === 0) {
     plan.warnings.push('Nothing to send');
@@ -10880,7 +11026,7 @@ function redirectDispatch(state, engineId, target) {
   return ok;
 }
 
-return { INCIDENT_KINDS, defaultPresets, restorePresets, validatePreset, createPreset, updatePreset, deletePreset, findPreset, jobFor, presetKindFor, recommendedPresets, nearestStations, availableVehicles, planPreset, applyPreset, cancelDispatch, redirectDispatch };
+return { INCIDENT_KINDS, PRESET_ROLES, slotLabel, fitsSlot, defaultPresets, restorePresets, validatePreset, createPreset, updatePreset, deletePreset, findPreset, jobFor, presetKindFor, recommendedPresets, nearestStations, diverTotal, availableVehicles, planPreset, applyPreset, cancelDispatch, redirectDispatch };
 })();
 
 // ---- src/systems/intel.js ----
@@ -11302,7 +11448,7 @@ const { CONFIG, TILE } = __m["src/core/config.js"];
 const { addEvent } = __m["src/systems/events.js"];
 const { spend, money } = __m["src/systems/economy.js"];
 const { isCareer } = __m["src/systems/modifiers.js"];
-const { treatPatient } = __m["src/systems/medical.js"];
+const { deliverPatients, hospitalById, nearestHospital, treatPatient } = __m["src/systems/medical.js"];
 const { rescueVictim } = __m["src/systems/water.js"];
 const { startEvacuation } = __m["src/systems/evacuation.js"];
 const { incidentPoint } = __m["src/systems/eta.js"];
@@ -11337,7 +11483,14 @@ function createSupport() {
 function restoreSupport(data) {
   const s = createSupport();
   if (!data) return s;
-  return { ...s, ...data, active: Array.isArray(data.active) ? data.active.map((a) => ({ ...a })) : [], cooldowns: { ...(data.cooldowns ?? {}) } };
+  return {
+    ...s,
+    ...data,
+    active: Array.isArray(data.active)
+      ? data.active.map((a) => ({ ...a, cargo: Array.isArray(a.cargo) ? a.cargo.map((c) => ({ ...c })) : undefined }))
+      : [],
+    cooldowns: { ...(data.cooldowns ?? {}) },
+  };
 }
 
 function agencyStatus(state, agency) {
@@ -11389,13 +11542,14 @@ function applyOnArrival(state, call) {
   call.applied = true;
   const label = CONFIG.agencies[call.agency].label;
   if (call.agency === 'ems') {
-    // A crew with a full bag: it treats the worst cases near the scene.
-    const bag = { kits: 99, cargo: [], spec: { carry: 0 }, worked: false };
+    // A crew with a full bag: it treats the worst cases near the scene and takes the critical ones to a hospital.
+    const bag = { kits: 99, cargo: [], spec: { carry: CONFIG.agencies.ems.carry }, worked: false, name: label };
     const near = state.patients
       .filter((p) => !p.treated && Math.hypot(p.x - call.x, p.y - call.y) <= call.radius)
       .sort((a, b) => a.life - b.life)
       .slice(0, 4);
     for (const p of near) treatPatient(state, p, bag);
+    call.cargo = bag.cargo;
     addEvent(state, `${label} on scene — ${near.length} patient${near.length === 1 ? '' : 's'} treated`, 'good');
   } else if (call.agency === 'civil') {
     const zone = state.evac.zones.find((z) => Math.hypot(z.x - call.x, z.y - call.y) <= z.radius);
@@ -11432,13 +11586,54 @@ function nearestBuilding(state, x, y) {
   return best;
 }
 
+/**
+ * The service's own ambulance takes its critical patients to a hospital: the nearest one that is open when
+ * it sets off, and again when it gets there (a hospital lost on the way is not used; it drives on to the next).
+ * Nobody is left behind: with no hospital open the patients wait aboard and it tries again.
+ */
+const emsDrive = (from, h) => Math.hypot((h.x + h.w / 2) * TILE - from.x, (h.y + h.h / 2) * TILE - from.y)
+  / (CONFIG.vehicles.ambulance.speed * TILE);
+
+function deliverEmsCargo(state, call) {
+  const cargo = call.cargo;
+  if (!cargo || cargo.length === 0) return;
+  if (call.deliverAt != null && state.time < call.deliverAt) return; // still driving
+  const hospital = nearestHospital(state, call.x, call.y);
+  if (!hospital) {
+    if (!call.waiting) addEvent(state, `${CONFIG.agencies.ems.label}: no hospital open — patients wait aboard`, 'warn');
+    call.waiting = true;
+    call.hospitalId = null;
+    call.deliverAt = state.time + CONFIG.medical.hospital.retry;
+    return;
+  }
+  call.waiting = false;
+  if (call.hospitalId == null) {
+    // Setting off from the scene.
+    call.hospitalId = hospital.id;
+    call.deliverAt = state.time + emsDrive(call, hospital);
+    return;
+  }
+  if (call.hospitalId !== hospital.id) {
+    // The hospital it was heading for is gone: on to the next, from where the first one stands.
+    const lost = hospitalById(state, call.hospitalId) ?? call;
+    const from = lost.w ? { x: (lost.x + lost.w / 2) * TILE, y: (lost.y + lost.h / 2) * TILE } : lost;
+    addEvent(state, `${CONFIG.agencies.ems.label}: hospital out of service — diverted to ${hospital.name}`, 'warn');
+    call.hospitalId = hospital.id;
+    call.deliverAt = state.time + emsDrive(from, hospital);
+    return;
+  }
+  deliverPatients(state, CONFIG.agencies.ems.label, cargo, hospital);
+}
+
 function updateSupport(state) {
   const s = state.support;
   if (!s || s.active.length === 0) return;
   for (const call of s.active) {
     if (!call.applied && state.time >= call.arriveAt) applyOnArrival(state, call);
+    if (call.agency === 'ems' && call.applied) deliverEmsCargo(state, call);
   }
-  s.active = s.active.filter((c) => state.time <= c.until);
+  // A call stays on the books until its patients have been delivered.
+  s.active = s.active.filter((c) => state.time <= c.until || (c.cargo?.length ?? 0) > 0);
 }
 
 return { UNLOCK, createSupport, restoreSupport, agencyStatus, allAgencies, callAgency, updateSupport };
@@ -16213,6 +16408,7 @@ function serialize(state) {
       blockadeId: e.blockadeId ?? null,
       victimId: e.victimId ?? null,
       patientId: e.patientId ?? null,
+      hospitalId: e.hospitalId ?? null,
       standbyFor: e.standbyFor ? { kind: e.standbyFor.kind, id: e.standbyFor.id } : null,
       mission: e.mission ? { ...e.mission } : null,
       status: e.status,
@@ -16534,7 +16730,7 @@ const { SKILL_EFFECT, SKILL_LABEL, SKILLS, overall, rankLabel, salaryOf } = __m[
 const { CHALLENGES, DISASTER_KINDS, INCIDENT_KINDS, LOCATION_TYPES, deleteScenarioFrom, findChallenge, newScenarioTemplate, saveScenarioTo } = __m["src/data/scenarios.js"];
 const { WEATHER } = __m["src/systems/weather.js"];
 const { SCENES } = __m["src/systems/scenes.js"];
-const { INCIDENT_KINDS: PRESET_KINDS, availableVehicles, nearestStations, planPreset, recommendedPresets } = __m["src/systems/presets.js"];
+const { INCIDENT_KINDS: PRESET_KINDS, PRESET_ROLES, availableVehicles, diverTotal, nearestStations, planPreset, recommendedPresets, slotLabel } = __m["src/systems/presets.js"];
 const { currentTarget, formatEta, incidentEtas } = __m["src/systems/eta.js"];
 const { incidentIntel } = __m["src/systems/intel.js"];
 const { allAgencies } = __m["src/systems/agencies.js"];
@@ -16583,7 +16779,7 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => (
 const money = (n) => `${n < 0 ? '−' : ''}$${Math.abs(Math.round(n)).toLocaleString('en-US')}`;
 const pct = (v) => `${Math.round(Math.max(0, Math.min(1, v)) * 100)}%`;
 const bar = (frac, cls = '') => `<div class="bar ${cls}"><i style="width:${pct(frac)}"></i></div>`;
-const vehicleLabel = (type) => CONFIG.vehicles[type]?.label ?? type;
+const vehicleLabel = (type) => slotLabel(type);
 const unitsText = (units) => Object.entries(units).map(([t, n]) => `${n}× ${vehicleLabel(t)}`).join(', ');
 const btn = (label, action, attrs = '', cls = 'btn btn--small') => `<button type="button" class="${cls}" data-action="${action}" ${attrs}>${label}</button>`;
 const section = (title, body, note = '') => `<div class="budget"><p class="menu__eyebrow">${title}</p>${note ? `<p class="station__note">${note}</p>` : ''}${body}</div>`;
@@ -16717,7 +16913,7 @@ const GROUND_TYPES = () => Object.keys(CONFIG.vehicles).filter((t) => !CONFIG.ve
 
 function presetEditor(state) {
   const d = ui.preset;
-  const inputs = Object.keys(CONFIG.vehicles).map((t) => `<label class="field field--num"><span>${esc(vehicleLabel(t))}</span><input type="number" min="0" max="8" value="${d.units[t] ?? 0}" data-preset-unit="${t}"></label>`).join('');
+  const inputs = [...Object.keys(PRESET_ROLES), ...Object.keys(CONFIG.vehicles)].map((t) => `<label class="field field--num"><span>${esc(vehicleLabel(t))}</span><input type="number" min="0" max="8" value="${d.units[t] ?? 0}" data-preset-unit="${t}"></label>`).join('');
   return `<div class="editor">
     <label class="field"><span>Name</span><input type="text" id="pr-name" maxlength="32" value="${esc(d.name)}"></label>
     <label class="field"><span>For</span><select id="pr-incident">${Object.entries(PRESET_KINDS).map(([k, l]) => `<option value="${k}"${d.incident === k ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
@@ -16743,6 +16939,8 @@ function dispatchTab(state) {
   const avail = availableVehicles(state);
   const totals = {};
   for (const e of state.engines) totals[e.type] = (totals[e.type] ?? 0) + 1;
+  const divers = diverTotal(state);
+  if (divers > 0) totals.diver = divers;
   const fleet = Object.entries(totals).map(([t, n]) => `<span class="pill">${esc(vehicleLabel(t))} ${avail[t] ?? 0}/${n}</span>`).join(' ');
 
   let stations = '';

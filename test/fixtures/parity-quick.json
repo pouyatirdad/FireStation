@@ -1,0 +1,130 @@
+[
+  {
+    "key": "7/101/600",
+    "stats": {
+      "saved": 9,
+      "lost": 0,
+      "alarms": 11,
+      "rescued": 10,
+      "casualties": 0,
+      "escaped": 44,
+      "treated": 22,
+      "transported": 10
+    },
+    "credits": 43506,
+    "rating": 100,
+    "ledger": {
+      "vehicle": -4200,
+      "rescue": 1200,
+      "knockdown": 2314,
+      "incident": 7650,
+      "treatment": 3520,
+      "transport": 2600,
+      "kits": -108,
+      "donation": 530
+    },
+    "events": 507,
+    "engines": 4,
+    "burning": 2,
+    "patients": 2,
+    "victims": 0,
+    "wildfires": 0
+  },
+  {
+    "key": "7/202/600",
+    "stats": {
+      "saved": 8,
+      "lost": 0,
+      "alarms": 8,
+      "rescued": 11,
+      "casualties": 0,
+      "escaped": 111,
+      "treated": 26,
+      "transported": 9
+    },
+    "credits": 43770,
+    "rating": 100,
+    "ledger": {
+      "vehicle": -6400,
+      "treatment": 4160,
+      "rescue": 1320,
+      "incident": 9470,
+      "transport": 2340,
+      "knockdown": 2392,
+      "kits": -12,
+      "donation": 500
+    },
+    "events": 548,
+    "engines": 6,
+    "burning": 0,
+    "patients": 1,
+    "victims": 0,
+    "wildfires": 0
+  },
+  {
+    "key": "11/303/480",
+    "stats": {
+      "saved": 5,
+      "lost": 4,
+      "alarms": 20,
+      "rescued": 9,
+      "casualties": 3,
+      "escaped": 108,
+      "treated": 21,
+      "transported": 9,
+      "cleared": 1
+    },
+    "credits": 36986,
+    "rating": 38,
+    "ledger": {
+      "vehicle": -4650,
+      "treatment": 3360,
+      "rescue": 1080,
+      "knockdown": 1976,
+      "incident": 6100,
+      "transport": 2340,
+      "loss": -1120,
+      "casualty": -2100
+    },
+    "events": 488,
+    "engines": 5,
+    "burning": 11,
+    "patients": 1,
+    "victims": 0,
+    "wildfires": 0
+  },
+  {
+    "key": "7/404/600",
+    "stats": {
+      "saved": 4,
+      "lost": 1,
+      "alarms": 13,
+      "rescued": 8,
+      "casualties": 0,
+      "escaped": 73,
+      "treated": 19,
+      "transported": 11,
+      "dived": 6,
+      "cleared": 1
+    },
+    "credits": 38322,
+    "rating": 93,
+    "ledger": {
+      "vehicle": -5400,
+      "rescue": 3480,
+      "knockdown": 936,
+      "incident": 3460,
+      "treatment": 3040,
+      "transport": 2860,
+      "kits": -24,
+      "donation": 530,
+      "loss": -560
+    },
+    "events": 515,
+    "engines": 5,
+    "burning": 8,
+    "patients": 2,
+    "victims": 0,
+    "wildfires": 0
+  }
+]

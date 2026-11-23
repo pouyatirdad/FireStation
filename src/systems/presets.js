@@ -12,7 +12,7 @@ import { addEvent } from './events.js';
 import { cost, isFree, order } from './dispatch.js';
 import { estimate, currentTarget, incidentPoint } from './eta.js';
 import { isMedical } from './medical.js';
-import { orderEngine, sendEngineHome, ownsStation, unstaffed } from './units.js';
+import { canDive, orderEngine, sendEngineHome, ownsStation, toolsFree, unstaffed } from './units.js';
 import { findPatient } from './medical.js';
 
 
@@ -26,6 +26,23 @@ export const INCIDENT_KINDS = {
   any: 'Any incident',
 };
 
+/**
+ * Slots that name a job rather than a vehicle type. A `diver` slot is filled by whatever can put divers in the
+ * water: a rescue boat, or an engine or rescue unit with diving gear free. (The old water preset asked for a
+ * rescue boat by name, so a city without one could never answer a drowning call from its preset.)
+ */
+export const PRESET_ROLES = {
+  diver: { label: 'Diving unit' },
+};
+
+export const slotLabel = (type) => PRESET_ROLES[type]?.label ?? CONFIG.vehicles[type]?.label ?? type;
+
+/** Does this vehicle fill this slot? */
+export function fitsSlot(engine, type) {
+  if (type === 'diver') return canDive(engine);
+  return engine.type === type;
+}
+
 const MAX_NAME = 32;
 const MAX_PER_TYPE = 8;
 const MAX_TOTAL = 14;
@@ -36,7 +53,7 @@ export function defaultPresets() {
     { id: 'preset-forest', name: 'Forest fire', incident: 'wildfire', units: { engine: 2, tanker: 1, helicopter: 1 } },
     { id: 'preset-accident', name: 'Major traffic accident', incident: 'accident', units: { rescue: 1, ambulance: 2, engine: 1 } },
     { id: 'preset-medical', name: 'Medical emergency', incident: 'medical', units: { ambulance: 1 } },
-    { id: 'preset-water', name: 'Water rescue', incident: 'water', units: { rescueboat: 1, ambulance: 1 } },
+    { id: 'preset-water', name: 'Water rescue', incident: 'water', units: { diver: 1, ambulance: 1 } },
     { id: 'preset-hazmat', name: 'Hazmat incident', incident: 'hazmat', units: { hazmat: 1, engine: 1, ambulance: 1 } },
   ];
 }
@@ -45,10 +62,22 @@ export function restorePresets(list) {
   if (!Array.isArray(list)) return defaultPresets();
   const clean = [];
   for (const p of list) {
-    const v = validatePreset(p, []);
+    const v = validatePreset(migratePreset(p), []);
     if (v.ok) clean.push(v.preset);
   }
   return clean;
+}
+
+/**
+ * Saves from before 0.18 hold the water preset as "a rescue boat and an ambulance". If it is still exactly
+ * that (the player has not changed it), it becomes "a diving unit and an ambulance"; an edited one is kept.
+ */
+function migratePreset(p) {
+  const u = p?.units;
+  if (p?.id === 'preset-water' && u && Object.keys(u).length === 2 && u.rescueboat === 1 && u.ambulance === 1) {
+    return { ...p, units: { diver: 1, ambulance: 1 } };
+  }
+  return p;
 }
 
 /** Check a preset; returns `{ ok, preset }` (normalised) or `{ ok: false, error }`. */
@@ -63,7 +92,7 @@ export function validatePreset(input, others = []) {
   const units = {};
   let total = 0;
   for (const [type, raw] of Object.entries(input.units ?? {})) {
-    if (!CONFIG.vehicles[type]) return { ok: false, error: `Unknown vehicle: ${type}` };
+    if (!CONFIG.vehicles[type] && !PRESET_ROLES[type]) return { ok: false, error: `Unknown vehicle: ${type}` };
     const n = Math.floor(Number(raw));
     if (!Number.isFinite(n) || n < 0) return { ok: false, error: `Bad count for ${type}` };
     if (n === 0) continue;
@@ -161,11 +190,15 @@ export function nearestStations(state, x, y) {
   return out.sort((a, b) => a.distance - b.distance);
 }
 
+/** How many vehicles in the fleet can put divers in the water. */
+export const diverTotal = (state) => state.engines.filter((e) => canDive(e)).length;
+
 export function availableVehicles(state) {
   const counts = {};
   for (const e of state.engines) {
     if (!isFree(state, e) || unstaffed(state, e)) continue;
     counts[e.type] = (counts[e.type] ?? 0) + 1;
+    if (canDive(e) && (e.spec.diver || toolsFree(state, e, 'diving') > 0)) counts.diver = (counts.diver ?? 0) + 1;
   }
   return counts;
 }
@@ -212,7 +245,7 @@ export function planPreset(state, preset, target) {
   plan.station = nearestStations(state, job.x, job.y)[0] ?? null;
   const used = new Set();
   for (const [type, want] of Object.entries(preset.units)) {
-    const on = state.engines.filter((e) => e.type === type && onJob(state, e, target) && !used.has(e.id));
+    const on = state.engines.filter((e) => fitsSlot(e, type) && onJob(state, e, target) && !used.has(e.id));
     for (const e of on.slice(0, want)) {
       used.add(e.id);
       plan.already.push(e);
@@ -221,7 +254,7 @@ export function planPreset(state, preset, target) {
     if (need <= 0) continue;
     const ranked = [];
     for (const e of state.engines) {
-      if (e.type !== type || used.has(e.id) || !isFree(state, e)) continue;
+      if (!fitsSlot(e, type) || used.has(e.id) || !isFree(state, e)) continue;
       if (unstaffed(state, e)) continue;
       if (!Number.isFinite(fitness(state, e, job))) continue;
       const eta = estimate(state, e, job.x, job.y);
@@ -237,10 +270,10 @@ export function planPreset(state, preset, target) {
     if (need > 0) plan.missing[type] = need;
   }
   for (const [type, n] of Object.entries(plan.missing)) {
-    const owned = state.engines.filter((e) => e.type === type).length;
+    const owned = state.engines.filter((e) => fitsSlot(e, type)).length;
     plan.warnings.push(owned === 0
-      ? `No ${CONFIG.vehicles[type].label} in the fleet (${n} wanted)`
-      : `${n} more ${CONFIG.vehicles[type].label} wanted — all busy or unable to reach`);
+      ? `No ${slotLabel(type)} in the fleet (${n} wanted)`
+      : `${n} more ${slotLabel(type)} wanted — all busy or unable to reach`);
   }
   if (plan.assignments.length === 0 && plan.already.length === 0 && plan.warnings.length === 0) {
     plan.warnings.push('Nothing to send');

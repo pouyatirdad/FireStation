@@ -755,6 +755,7 @@ export function serialize(state) {
       blockadeId: e.blockadeId ?? null,
       victimId: e.victimId ?? null,
       patientId: e.patientId ?? null,
+      hospitalId: e.hospitalId ?? null,
       standbyFor: e.standbyFor ? { kind: e.standbyFor.kind, id: e.standbyFor.id } : null,
       mission: e.mission ? { ...e.mission } : null,
       status: e.status,

@@ -187,6 +187,9 @@ export const CONFIG = {
     survive: [80, 130], // seconds a person lasts in the water
     reward: 420, // per person brought out
     maxVictims: 6,
+    // Career only: how fast a diver brings someone out. A crew member with the Dive Rescue certificate is
+    // quicker, one without is slower; in Quick Response everybody works at 1.
+    dive: { certified: 1.25, uncertified: 0.75 },
   },
 
   // Roads blocked by wrecks and debris, and the traffic that queues behind them.
@@ -217,6 +220,19 @@ export const CONFIG = {
     criticalAt: 0.7, // severity at which a patient must go to a hospital
     transportFee: 260, // paid when a critical patient reaches a hospital
     hospitalRange: 4, // tiles from the hospital footprint to unload
+    hospital: {
+      // Which hospital takes a patient. With `anyIntact` every standing hospital in the city can be used, not
+      // only the one in a base the player owns; set it false for the 0.17 rule (owned bases only).
+      anyIntact: true,
+      // Choose by driving time rather than by straight line.
+      byRoute: true,
+      // A hospital that is on fire is not taking patients.
+      avoidBurning: true,
+      // How many of the nearest (straight-line) hospitals are routed when comparing driving times.
+      candidates: 4,
+      // Seconds between an ambulance's attempts to find a hospital when none can be reached.
+      retry: 5,
+    },
   },
 
   refillRange: 2.8, // tiles from a hydrant/station a vehicle can hook up
@@ -354,6 +370,7 @@ export const CONFIG = {
       driving: { label: 'Driving Training', skill: 'driving', cost: 600, time: 150, xp: 90 },
       hazmat: { label: 'Hazmat Training', skill: 'technical', cost: 1100, time: 240, xp: 80, cert: 'hazmat' },
       technical: { label: 'Technical Rescue Training', skill: 'technical', cost: 1000, time: 240, xp: 110, cert: 'technical' },
+      diving: { label: 'Dive Rescue Training', skill: 'rescue', cost: 900, time: 200, xp: 80, cert: 'diving' },
     },
     baseSlots: 1, // trainees per station before a training centre
   },
@@ -374,7 +391,7 @@ export const CONFIG = {
   // Support agencies: a call-out costs money, takes time to arrive and has one effect.
   agencies: {
     police: { label: 'Police', cost: 450, delay: 25, duration: 150, cooldown: 120, text: 'Closes the streets round the scene: your vehicles run at full speed there and the wreck crews work faster' },
-    ems: { label: 'Emergency medical service', cost: 700, delay: 35, duration: 90, cooldown: 150, text: 'Mass-casualty help: treats up to four injured people near the scene' },
+    ems: { label: 'Emergency medical service', cost: 700, delay: 35, duration: 90, cooldown: 150, carry: 4, text: 'Mass-casualty help: treats up to four injured people near the scene and takes the critical ones to a hospital' },
     civil: { label: 'Civil protection', cost: 600, delay: 30, duration: 240, cooldown: 180, text: 'Opens a shelter and speeds an evacuation of the area' },
     utility: { label: 'Utility services', cost: 500, delay: 20, duration: 300, cooldown: 120, text: 'Cuts gas and power to the building: no gas explosions and the fire grows slower' },
     coastguard: { label: 'Coast guard', cost: 800, delay: 40, duration: 120, cooldown: 150, text: 'Pulls people out of the water near the scene' },

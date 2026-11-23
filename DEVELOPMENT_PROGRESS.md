@@ -16,6 +16,7 @@ status. **Version 0.17.1 — release candidate** (0.17.1 fixes vehicles stopping
 | 0.15 | Multi-agency support | Done |
 | 0.16 | Challenge Mode and scenario editor | Done |
 | 0.17 | Final QA, polish and release | Done, with the limits listed below |
+| 0.18 M1 | Hospitals (choice, diversion, EMS transport) and diving | Done on `feature/0.18-depth`; M2–M5 not started |
 
 ## Features (each has working simulation logic and tests)
 
@@ -128,6 +129,12 @@ the view and animated from the clock; the Headquarters panel is rebuilt at most 
 the game runs and almost never while it is paused.
 
 ## Remaining limitations and known issues
+
+- 0.18 M1: hospitals have no **capacity** yet, so a "full hospital" cannot divert an ambulance (milestone 3);
+  the EMS service's ambulance is an abstraction (a timer from the straight-line distance, not a vehicle on the
+  map); with no hospital standing, patients wait aboard indefinitely (there is no release order); the new hospital
+  rules also apply in Quick Response, where they change who is taken where by a small amount (parity run: same
+  fires, calls and fleet, a few patients differently treated).
 
 - No real-device, real-time or audible testing (see above). Audio output has never been listened to.
 - Station budgets are monthly spending limits with refusal of purchases, not a separate bank account:
