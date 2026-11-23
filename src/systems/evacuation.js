@@ -5,17 +5,18 @@
 // cannot kill anyone when it burns or blows. The zone lifts by itself when the
 // danger is over and the residents go home.
 
+import { clone, registerPersistence } from './persistence.js';
 import { CONFIG, TILE } from '../core/config.js';
 import { findPath, smoothPath, standTileForRect, tileCenter } from './grid.js';
 import { addEvent } from './events.js';
 import { supportAt } from './modifiers.js';
+import { nextId } from './persistence.js';
 
 const SHELTER_TYPES = ['school', 'mall', 'hospital', 'hotel'];
 const MAX_ZONES = 4;
 const MIN_ZONE_TIME = 60; // seconds
 const COLORS = ['#3d6fb0', '#b0553d', '#4f7a45', '#8a5a9e', '#b08a3a', '#5e6b78'];
 
-let seq = 1;
 
 export function createEvacuation() {
   return { zones: [], stats: { evacuated: 0, sheltered: 0, unsheltered: 0, zones: 0 } };
@@ -26,10 +27,6 @@ export function restoreEvacuation(data) {
   if (!data || !Array.isArray(data.zones)) return e;
   e.zones = data.zones.map((z) => ({ ...z, queue: [...(z.queue ?? [])] }));
   e.stats = { ...e.stats, ...(data.stats ?? {}) };
-  for (const z of e.zones) {
-    const m = /(\d+)$/.exec(z.id ?? '');
-    if (m) seq = Math.max(seq, Number(m[1]) + 1);
-  }
   return e;
 }
 
@@ -79,7 +76,7 @@ export function startEvacuation(state, target) {
     return dup;
   }
   const zone = {
-    id: `evac${seq++}`, x: target.x, y: target.y, radius, label: target.label ?? 'the area',
+    id: nextId(state, 'evac'), x: target.x, y: target.y, radius, label: target.label ?? 'the area',
     startedAt: state.time, acc: 0, queue: [], total: 0, evacuated: 0, closed: true, shelter: null, boosted: false,
   };
   const list = state.buildings
@@ -210,3 +207,9 @@ export function evacuateIncident(state, kind, id) {
   return startEvacuation(state, target);
 }
 
+registerPersistence({
+  key: 'evac',
+  order: 84,
+  save: (state) => clone(state.evac),
+  load: (state, data) => { state.evac = restoreEvacuation(data.evac); },
+});

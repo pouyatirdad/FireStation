@@ -26,6 +26,8 @@ import { estimate } from './eta.js';
 import { workOnBlockade } from './blockades.js';
 import { findVictim, rescueVictim } from './water.js';
 import { clearRate, diveRate, diveReach, isCareer, speedMod, upgradeLevel, workRate } from './modifiers.js';
+import { registerPersistence } from './persistence.js';
+import { SCHEMAS, applyFields, loadFields, saveFields, uniqueById } from './schema.js';
 
 const CREW_OFFSETS = [
   { a: 0.85, r: 26 },
@@ -369,9 +371,9 @@ function spawnVehicle(state, type, station = null) {
   return engine;
 }
 
-function spawnCrew(state, engine) {
-  const number = state.nextCrew++;
-  const crew = {
+/** A crew member with every field at its starting value (not yet in the lists). */
+function crewBase(engine, number) {
+  return {
     id: `crew${number}`,
     kind: 'crew',
     number,
@@ -400,8 +402,14 @@ function spawnCrew(state, engine) {
     fetchTimer: 0,
     cut: null,
     boarding: false,
+    contamination: 0,
+    warnedHazard: false,
     status: 'aboard',
   };
+}
+
+function spawnCrew(state, engine) {
+  const crew = crewBase(engine, state.nextCrew++);
   engine.crewIds.push(crew.id);
   state.crew.push(crew);
   return crew;
@@ -533,106 +541,62 @@ function vehicleBase(state, type, overrides = {}) {
   };
 }
 
-const finite = (n) => typeof n === 'number' && Number.isFinite(n);
-const idOrNull = (v) => (typeof v === 'string' && v.length > 0 && v.length < 64 ? v : null);
-
 /**
- * The part of a saved vehicle that is its current order: the route it is driving, where it is
- * going, what it was sent to, whether it has arrived. Anything missing or damaged means "no
- * order", which is what saves written before routes were kept look like.
+ * Rebuild the fleet from a save. Every field goes through the engine and crew schemas (schema.js): wrong types
+ * and out-of-range numbers are repaired, unknown fields are kept, duplicate ids are dropped, and a vehicle's
+ * route, orders and timers come back as they were. `issues` collects what was repaired.
  */
-function savedOrder(entry) {
-  const path = Array.isArray(entry.path)
-    ? entry.path.filter((p) => p && finite(p.x) && finite(p.y)).slice(0, 4000).map((p) => ({ x: p.x, y: p.y }))
-    : [];
-  const goal = entry.goal && Number.isInteger(entry.goal.x) && Number.isInteger(entry.goal.y) && path.length > 0
-    ? { x: entry.goal.x, y: entry.goal.y } : null;
-  const m = entry.mission;
-  const mission = m && finite(m.x) && finite(m.y) && (m.mode === 'attack' || m.mode === 'refill')
-    ? { x: m.x, y: m.y, tid: idOrNull(m.tid), wid: idOrNull(m.wid), mode: m.mode } : null;
-  const s = entry.standbyFor;
-  const standbyFor = s && idOrNull(s.id) && idOrNull(s.kind) ? { kind: s.kind, id: s.id } : null;
-  const hasOrder = path.length > 0 || mission != null;
-  return {
-    path,
-    goal,
-    arrived: hasOrder ? Boolean(entry.arrived) : entry.arrived === true,
-    packTimer: finite(entry.packTimer) && entry.packTimer > 0 ? Math.min(entry.packTimer, 10) : 0,
-    wildfireId: idOrNull(entry.wildfireId),
-    blockadeId: idOrNull(entry.blockadeId),
-    victimId: idOrNull(entry.victimId),
-    patientId: idOrNull(entry.patientId),
-    hospitalId: idOrNull(entry.hospitalId),
-    standbyFor,
-    mission,
-    status: typeof entry.status === 'string' && entry.status.length < 40 ? entry.status : 'in quarters',
-  };
-}
-
-/** Rebuild the fleet from a save file. */
-export function restoreFleet(state, saved = {}) {
+export function restoreFleet(state, saved = {}, issues = []) {
   state.engines = [];
   state.crew = [];
   state.vehicleCount = {};
   state.nextCrew = 1;
 
-  for (const entry of saved.engines ?? []) {
+  const engines = uniqueById(saved.engines, 'engines');
+  issues.push(...engines.issues);
+  for (const entry of engines.list) {
     const type = CONFIG.vehicles[entry.type] ? entry.type : 'engine';
     const engine = vehicleBase(state, type, {
       id: entry.id,
-      number: entry.number ?? 1,
-      name: entry.name ?? CONFIG.vehicles[type].label,
-      bayIndex: entry.bayIndex ?? 0,
-      hotkey: entry.hotkey ?? '',
-      x: entry.x ?? state.city.spawn.x,
-      y: entry.y ?? state.city.spawn.y,
-      angle: entry.angle ?? state.city.spawn.angle,
-      water: entry.water ?? CONFIG.vehicles[type].capacity,
-      targetId: entry.targetId ?? null,
-      supply: entry.supply ?? null,
-      kits: entry.kits ?? CONFIG.vehicles[type].kits ?? 0,
-      cargo: (entry.cargo ?? []).map((c) => ({ ...c })),
-      ...savedOrder(entry),
+      number: Math.max(1, Math.round(Number(entry.number) || 1)),
+      name: CONFIG.vehicles[type].label,
     });
+    const loaded = loadFields(SCHEMAS.engine, { ...entry, type }, engine, { keep: true, where: `engine ${entry.id}` });
+    issues.push(...loaded.issues);
+    applyFields(engine, loaded);
+    if (engine.name === '') engine.name = CONFIG.vehicles[type].label;
+    if (engine.path.length === 0) engine.goal = null; // a destination only means something with a route
     state.vehicleCount[type] = Math.max(state.vehicleCount[type] ?? 0, engine.number);
     state.engines.push(engine);
   }
 
-  for (const entry of saved.crews ?? []) {
+  const crews = uniqueById(saved.crews, 'crews');
+  issues.push(...crews.issues);
+  for (const entry of crews.list) {
     const engine = state.engines.find((e) => e.id === entry.engineId);
-    if (!engine) continue;
-    const number = entry.number ?? state.nextCrew;
-    const crew = {
-      id: entry.id ?? `crew${number}`,
-      kind: 'crew',
-      number,
-      name: entry.name ?? `Crew ${number}`,
-      engineId: engine.id,
-      personId: entry.personId ?? null,
-      x: entry.x ?? engine.x,
-      y: entry.y ?? engine.y,
-      angle: 0,
-      path: [],
-      riding: entry.riding !== false,
-      targetId: entry.targetId ?? null,
-      spraying: false,
-      think: 0,
-      warned: false,
-      rescueTimer: 0,
-      rescueId: null,
-      wildfireId: entry.wildfireId ?? null,
-      patientId: null,
-      treatTimer: 0,
-      idleFor: 0,
-      victimId: null,
-      medic: Boolean(engine.spec?.medical),
-      tool: entry.riding !== false ? defaultTool(engine) : entry.tool ?? defaultTool(engine),
-      fetch: null,
-      fetchTimer: 0,
-      cut: entry.riding !== false || !entry.cut ? null : { ...entry.cut, timer: 0 },
-      boarding: false,
-      status: entry.riding !== false ? 'aboard' : 'standing by',
-    };
+    if (!engine) {
+      issues.push(`crew ${entry.id} belongs to a vehicle that is not in the save and was dropped`);
+      continue;
+    }
+    const number = Number.isFinite(entry.number) && entry.number >= 1 ? Math.round(entry.number) : state.nextCrew;
+    const crew = crewBase(engine, number);
+    crew.id = entry.id;
+    crew.engineId = engine.id;
+    crew.medic = Boolean(engine.spec?.medical);
+    const loaded = loadFields(SCHEMAS.crew, entry, crew, { keep: true, where: `crew ${entry.id}` });
+    issues.push(...loaded.issues);
+    applyFields(crew, loaded);
+    if (!('name' in entry)) crew.name = `Crew ${number}`;
+    if (crew.riding) {
+      // Aboard: nobody is working, the gear is stowed (a damaged save cannot leave a rider with a job).
+      Object.assign(crew, {
+        path: [], rescueId: null, patientId: null, victimId: null, fetch: null, cut: null, boarding: false,
+        tool: defaultTool(engine), status: 'aboard',
+      });
+    } else {
+      if (!('tool' in entry) || crew.tool == null) crew.tool = defaultTool(engine);
+      if (!('status' in entry)) crew.status = 'standing by';
+    }
     state.nextCrew = Math.max(state.nextCrew, number + 1);
     engine.crewIds.push(crew.id);
     state.crew.push(crew);
@@ -644,6 +608,22 @@ export function restoreFleet(state, saved = {}) {
   state.selected = null;
   return state.engines;
 }
+
+registerPersistence({
+  key: 'fleet',
+  keys: ['engines', 'crews', 'cut'],
+  fields: ['engines', 'crew', 'cut'],
+  order: 40,
+  save: (state) => ({
+    engines: state.engines.map((e) => saveFields(SCHEMAS.engine, e)),
+    crews: state.crew.map((c) => saveFields(SCHEMAS.crew, c)),
+    cut: cutList(state),
+  }),
+  load: (state, data, ctx) => {
+    restoreCuts(state, Array.isArray(data.cut) ? data.cut : []);
+    restoreFleet(state, { engines: data.engines, crews: data.crews }, ctx.issues);
+  },
+});
 
 export function findUnit(state, id) {
   return state.units.find((u) => u.id === id) ?? null;

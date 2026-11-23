@@ -8,6 +8,7 @@
 // `dir` is the direction the wind blows TOWARD, in radians, 0 = east and
 // positive turning clockwise on screen (y grows downward).
 
+import { registerPersistence } from './persistence.js';
 import { TAU, clamp } from '../core/math.js';
 import { addEvent } from './events.js';
 
@@ -73,3 +74,12 @@ export function windFrom(dir) {
 export function windLabel(wind) {
   return `${windFrom(wind.dir)} ${Math.round(wind.speed * KMH)} km/h`;
 }
+
+registerPersistence({
+  key: 'wind',
+  order: 37,
+  save: (state) => ({ ...state.wind }),
+  load: (state, data) => {
+    if (data.wind && typeof data.wind === 'object') state.wind = { ...state.wind, ...data.wind };
+  },
+});

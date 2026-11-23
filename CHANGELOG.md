@@ -39,6 +39,44 @@ All notable changes to FireStation. The game is one self-contained `index.html`;
 - Not in this milestone: a hospital's **capacity** and diversion when it is full (milestone 3), and the save
   schema (milestone 2).
 
+### Milestone 2 — Save architecture and data integrity
+
+- **Declarative schemas** (`src/systems/schema.js`) for the seven saved entities (building, engine, crew, patient,
+  victim, blockade, wildfire). Every field is declared as *saved* (type, default, bounds), *derived* (rebuilt from the
+  city seed or the vehicle spec) or *transient* (with the reason). A coverage test plays busy Quick, Career and
+  Challenge games and fails if a live entity or the live state has a field nobody declared.
+- **Persistence registry** (`src/systems/persistence.js`): `registerPersistence({ key, save, load, order })`. Each
+  system saves and loads what it owns (fleet in units.js, patients in medical.js, buildings in fire.js, and so on);
+  `serialize` and `loadState` in game.js are now thin and keep only the clock, the money, the mode and the id counters.
+- **Fields the 0.17 save lost, now kept:** crew routes and tasks (path, rescue/treatment timers, fetch, boarding,
+  contamination), patient `leaveAt` and treatment timer, victim rescue timer and diver, vehicle timers and warning
+  latches (kit accumulator, return timer, hospital retry), building timers (`spreadTimer`, `dryTime`, `runaway`,
+  `ignitedAt`, which also drives the speed bonus), blockade creation time, and the incidents cycle index.
+- **Per-game id counters** (`state.ids`, saved): patients, victims, wrecks, wildfires and evacuation zones were numbered
+  by counters shared by every game in the page; each game now numbers its own, a load continues from the saved counter
+  and the highest id in use, and ids cannot collide after a load.
+- **Damaged data:** wrong types, non-finite or out-of-range numbers are repaired field by field and reported
+  (`state.loadReport.issues`, summarised to the player); duplicate ids are dropped (first wins); vehicles, buildings and
+  blockades that do not exist are ignored; references to things that no longer exist are cleared; a crew member
+  aboard cannot load with a job. Unknown fields are not discarded: they are kept (`entity.extra`, `state.saveExtras`)
+  and written back.
+- **Smaller saves:** only buildings that changed are saved. A busy Quick Response save went from 215–235 KB to
+  15–38 KB.
+- **Versions:** shift save 18 (additive step 17 → 18), campaign 2 (additive step 1 → 2 adding `meta`; the campaign now
+  has its own migration chain). A newer shift or campaign is never read down or overwritten.
+- **Backups and storage safety:** the last three saves of a slot are kept (`<key>.gen1` … `.gen3`, at least two
+  minutes apart so autosaves do not wash the history away). A write that the browser refuses leaves the live save
+  untouched, gives up older backups one by one to make room (and puts them back if that did not help); the written
+  text is read back and the previous save restored if it differs; a live save that was cut short is replaced on load by
+  the newest readable backup and a copy of the damaged text is kept. The envelope records how many vehicles it
+  holds so an incomplete save is detected.
+- **Genuine legacy fixtures** (`test/fixtures/legacy`): a 0.9 save made by `master` (`4a6cd57`) and 0.17.1 Quick,
+  Career and Challenge saves made by `bcd36bb`, each produced by that checkout's own code
+  (`tools/make-legacy-fixture.mjs`; provenance in the fixtures' README). All four load with nothing repaired.
+- Tests: 66 new (`schema`, `saveload`, `backups`, `legacy`); 462 in all. Quick Response parity still exact.
+- Smoke-tested in a real browser page: new game and save, reload and restore in the middle of an incident, a career,
+  a challenge, and the genuine 0.9 save upgraded and saved again.
+
 ## 0.17.1 — Vehicles keep driving after a load
 
 - **Fixed:** a vehicle driving to a call stopped where it was after a save was loaded (a browser refresh

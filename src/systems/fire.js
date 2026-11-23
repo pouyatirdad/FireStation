@@ -1,5 +1,7 @@
 // Fire, smoke and debris. Fire is the only thing in the game that can win.
 
+import { registerPersistence } from './persistence.js';
+import { SCHEMAS, applyFields, loadFields, saveFields, uniqueById } from './schema.js';
 import { CONFIG, TILE } from '../core/config.js';
 import { clamp, lerp, rectsTouch } from '../core/math.js';
 import { addEvent } from './events.js';
@@ -221,3 +223,59 @@ export function updateFire(state, dt) {
     }
   }
 }
+
+// ------------------------------------------------------------------ saving ---
+
+// What each building looked like when the game was created: a building still like that is not saved, and
+// one missing from a save is left as the city seed made it.
+const startingLook = new WeakMap();
+
+/** Remember every building's starting state (called once, when the game is created). */
+export function snapshotBuildings(state) {
+  for (const b of state.buildings) startingLook.set(b, JSON.stringify(saveFields(SCHEMAS.building, b)));
+}
+
+export function serializeBuildings(state) {
+  const out = [];
+  for (const b of state.buildings) {
+    const entry = saveFields(SCHEMAS.building, b);
+    if (startingLook.get(b) !== JSON.stringify(entry)) out.push(entry);
+  }
+  return out;
+}
+
+/**
+ * Put the saved buildings back. A save from before 0.18 lists every building and keeps the leak, collapse,
+ * cut-utility and evacuation fields apart in `buildingExtras`; both forms are read.
+ */
+export function restoreBuildings(state, list, extras, issues = []) {
+  const unique = uniqueById(list, 'buildings');
+  issues.push(...unique.issues);
+  const legacy = new Map((Array.isArray(extras) ? extras : []).filter((e) => e && typeof e.id === 'string').map((e) => [e.id, e]));
+  const byId = new Map(state.buildings.map((b) => [b.id, b]));
+  const seen = new Set();
+  for (const entry of unique.list) {
+    const b = byId.get(entry.id);
+    if (!b) {
+      issues.push(`building ${entry.id} is not in this city and was ignored`);
+      continue;
+    }
+    seen.add(entry.id);
+    const merged = legacy.has(entry.id) ? { ...legacy.get(entry.id), ...entry } : entry;
+    applyFields(b, loadFields(SCHEMAS.building, merged, b, { keep: true, where: `building ${entry.id}` }));
+    b.tookHold = b.neglect >= 0.5;
+  }
+  // Extras for a building the list does not mention (a hand-made save).
+  for (const [id, e] of legacy) {
+    const b = byId.get(id);
+    if (!b || seen.has(id)) continue;
+    applyFields(b, loadFields(SCHEMAS.building, e, b, { keep: true, where: `building ${id}` }));
+  }
+}
+
+registerPersistence({
+  key: 'buildings',
+  order: 20,
+  save: (state) => serializeBuildings(state),
+  load: (state, data, ctx) => restoreBuildings(state, data.buildings, data.buildingExtras, ctx.issues),
+});

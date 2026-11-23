@@ -6,6 +6,7 @@
 // deadline and you forfeit a quarter of the fee. Progress is counted from the
 // moment you accept, off the same stats the rest of the game keeps.
 
+import { clone, registerPersistence } from './persistence.js';
 import { CONFIG } from '../core/config.js';
 import { addEvent } from './events.js';
 import { earn, money, spend } from './economy.js';
@@ -115,3 +116,10 @@ export function updateContracts(state) {
     }
   }
 }
+
+registerPersistence({
+  key: 'contracts',
+  order: 35,
+  save: (state) => clone(state.contracts),
+  load: (state, data) => { state.contracts = restoreContracts(data.contracts); },
+});

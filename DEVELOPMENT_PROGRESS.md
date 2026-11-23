@@ -16,7 +16,8 @@ status. **Version 0.17.1 — release candidate** (0.17.1 fixes vehicles stopping
 | 0.15 | Multi-agency support | Done |
 | 0.16 | Challenge Mode and scenario editor | Done |
 | 0.17 | Final QA, polish and release | Done, with the limits listed below |
-| 0.18 M1 | Hospitals (choice, diversion, EMS transport) and diving | Done on `feature/0.18-depth`; M2–M5 not started |
+| 0.18 M1 | Hospitals (choice, diversion, EMS transport) and diving | Done on `feature/0.18-depth` |
+| 0.18 M2 | Save architecture and data integrity | Done on `feature/0.18-depth`; M3–M5 not started |
 
 ## Features (each has working simulation logic and tests)
 
@@ -130,6 +131,11 @@ the game runs and almost never while it is paused.
 
 ## Remaining limitations and known issues
 
+- 0.18 M2: legacy compatibility is proven for shift versions 16 and 17 (four genuine fixtures); a save older than
+  version 16 still cannot be migrated. Campaign v2 only adds `meta`: people gain their new fields (morale, rest) in
+  M4 through the same chain. The save keeps at most three earlier generations per slot; there is no UI yet to
+  choose a generation other than *Recover an earlier save*. Entities not covered by a schema (the contracts, report,
+  support, evacuation and scenario sections) are still copied as plain JSON, not validated field by field.
 - 0.18 M1: hospitals have no **capacity** yet, so a "full hospital" cannot divert an ambulance (milestone 3);
   the EMS service's ambulance is an abstraction (a timer from the straight-line distance, not a vehicle on the
   map); with no hospital standing, patients wait aboard indefinitely (the release order is deferred, see the decision below); the new hospital
@@ -171,4 +177,18 @@ the game runs and almost never while it is paused.
 
 ## Save migration
 
-See README, Saves.
+See README, Saves. Since 0.18 M2 the shift is saved by the persistence registry and its entities by the schemas
+(src/systems/schema.js, src/systems/persistence.js): shift version 18, campaign version 2, additive migration steps
+in saves.js (`STEPS`, `CAMPAIGN_STEPS`). To add a field: declare it in the entity's schema (saved, derived or
+transient with a reason) or, for a whole new system, register a section; the coverage test in test/schema.test.js
+will fail until you do. Bump `SHIFT_VERSION` (persistence.js) and add a step when the format changes.
+
+M2 decisions:
+- Schemas declare every field of an entity, including the ones that are not saved, so "forgotten" is impossible
+  and "deliberately not saved" is documented. A field marked *derived* is checked against a fresh city.
+- Unknown fields are kept rather than dropped (forward-compatible and visible), at the cost of an `extra` bag.
+- A first load may clear a reference that points at nothing (a goal without a route, a patient who was taken
+  away); after that a load is a fixed point. The test states exactly that.
+- Rotation of backups happens *before* the new write, so a crash between the two steps loses nothing; a failed write
+  leaves the earlier saves in place (the rotated copy is harmless).
+- Re-sealing a saved blockade does not re-plan every vehicle's route (it used to), so a route comes back as it was.

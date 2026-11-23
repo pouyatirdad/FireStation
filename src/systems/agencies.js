@@ -9,6 +9,7 @@
 //   utility     cuts gas and power to a building: no explosion, slower fire
 //   coastguard  pulls people out of the water near the scene
 
+import { clone, registerPersistence } from './persistence.js';
 import { CONFIG, TILE } from '../core/config.js';
 import { addEvent } from './events.js';
 import { spend, money } from './economy.js';
@@ -181,3 +182,10 @@ export function updateSupport(state) {
   // A call stays on the books until its patients have been delivered.
   s.active = s.active.filter((c) => state.time <= c.until || (c.cargo?.length ?? 0) > 0);
 }
+
+registerPersistence({
+  key: 'support',
+  order: 83,
+  save: (state) => clone(state.support),
+  load: (state, data) => { state.support = restoreSupport(data.support); },
+});

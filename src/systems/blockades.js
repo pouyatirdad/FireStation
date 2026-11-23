@@ -14,8 +14,8 @@ import { V_ROADS, H_ROADS } from '../data/city.js';
 import { addEvent } from './events.js';
 import { earn, money } from './economy.js';
 import { roadFactor } from './weather.js';
-
-let seq = 1;
+import { nextId, registerPersistence } from './persistence.js';
+import { SCHEMAS, applyFields, loadFields, saveFields, uniqueById } from './schema.js';
 
 // ---------------------------------------------------------- blockades ---
 
@@ -76,7 +76,7 @@ export function addBlockade(state, rect, opts = {}) {
     }
   }
   const blockade = {
-    id: `wreck${seq++}`,
+    id: nextId(state, 'wreck'),
     kind: 'blockade',
     name: opts.name ?? 'Blocked road',
     place: opts.place ?? '',
@@ -104,19 +104,34 @@ export function addBlockade(state, rect, opts = {}) {
 }
 
 /** Bring a blockade back from a save (the nav is rebuilt from the city, so re-seal it). */
-export function restoreBlockades(state, list = []) {
+export function restoreBlockades(state, list = [], issues = []) {
   state.blockades = [];
-  for (const saved of list) {
-    const b = addBlockade(state, saved, { ...saved });
-    b.id = saved.id ?? b.id;
-    b.progress = saved.progress ?? 0;
-    b.fuelAt = saved.fuelAt ?? null;
-    b.fuelDone = Boolean(saved.fuelDone);
-    const match = /(\d+)$/.exec(b.id);
-    if (match) seq = Math.max(seq, Number(match[1]) + 1);
+  // Re-sealing the streets must not re-plan every vehicle's route: the saved routes already avoid them.
+  const onChange = state.onBlockadeChange;
+  state.onBlockadeChange = null;
+  const unique = uniqueById(list, 'blockades');
+  issues.push(...unique.issues);
+  for (const entry of unique.list) {
+    const loaded = loadFields(SCHEMAS.blockade, entry, null, { where: `blockade ${entry.id}` });
+    issues.push(...loaded.issues);
+    const v = loaded.values;
+    if (v.tx + v.tw > state.nav.w || v.ty + v.th > state.nav.h) {
+      issues.push(`blockade ${entry.id} is outside the map and was dropped`);
+      continue;
+    }
+    const b = addBlockade(state, v, v);
+    applyFields(b, { values: { id: v.id, progress: v.progress, fuelAt: v.fuelAt, fuelDone: v.fuelDone, createdAt: v.createdAt }, extra: loaded.extra });
   }
+  state.onBlockadeChange = onChange;
   return state.blockades;
 }
+
+registerPersistence({
+  key: 'blockades',
+  order: 70,
+  save: (state) => state.blockades.map((b) => saveFields(SCHEMAS.blockade, b)),
+  load: (state, data, ctx) => restoreBlockades(state, data.blockades, ctx.issues),
+});
 
 export const findBlockade = (state, id) => state.blockades.find((b) => b.id === id) ?? null;
 

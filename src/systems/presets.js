@@ -6,6 +6,7 @@
 // Presets are data on `state.presets`, saved with the shift and (in a career) with
 // the campaign. Orders go through the same `order` the dispatch-all code uses.
 
+import { clone, registerPersistence } from './persistence.js';
 import { CONFIG, TILE } from '../core/config.js';
 import { dist } from '../core/math.js';
 import { addEvent } from './events.js';
@@ -337,3 +338,10 @@ export function redirectDispatch(state, engineId, target) {
   if (ok) addEvent(state, `${engine.name} redirected`, 'info');
   return ok;
 }
+
+registerPersistence({
+  key: 'presets',
+  order: 81,
+  save: (state) => clone(state.presets),
+  load: (state, data) => { state.presets = restorePresets(data.presets); },
+});

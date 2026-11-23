@@ -5,6 +5,7 @@
 // judges the result. It is a separate mode (`state.mode === 'challenge'`) with
 // its own save slot, so it can never touch a career.
 
+import { clone, registerPersistence } from './persistence.js';
 import { TILE } from '../core/config.js';
 import { addEvent } from './events.js';
 import { ignite } from './fire.js';
@@ -230,3 +231,10 @@ export function updateScenario(state, dt) {
     return finish(state, false, ['time ran out with incidents still open']);
   }
 }
+
+registerPersistence({
+  key: 'scenario',
+  order: 85,
+  save: (state) => clone(state.scenario ?? null),
+  load: (state, data) => { state.scenario = state.mode === 'challenge' ? data.scenario : null; },
+});

@@ -18,7 +18,9 @@ should only be extended.
 
 ## 0.18 notes (milestone 1)
 
-- `serialize`/`restoreFleet` gained `hospitalId` by hand again; milestone 2 replaces the hand lists.
+- (Done in M2) `serialize`/`restoreFleet` hand lists are replaced by schemas and the persistence registry. Still
+  open: the contracts, report, support, evacuation, disaster and scenario sections are saved as plain JSON copies with
+  no field-level validation; a schema for each would finish the job. `campaign` people have no schema yet (M4).
 - `engine.noHospital` and `engine.hospitalRetry` are deliberately not saved (transient: they only throttle a
   warning and a retry); the milestone-2 coverage guard must list them as transient.
 - The EMS call stores `cargo`, `hospitalId`, `deliverAt`, `waiting` on the support record; saves keep them

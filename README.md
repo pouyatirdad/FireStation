@@ -320,7 +320,7 @@ their own save slot and keep your best scores; they never touch Quick Response o
 
 Three independent slots: Quick Response (`firestation.save.v16`, the key earlier versions used), career
 (`firestation.career.v1`) and the challenge in progress. A slot holds `{ format, kind, shift, campaign }`.
-Shift saves are version 17.
+Shift saves are version 18 and campaigns version 2 (0.18).
 
 - A bare version-16 Quick Response save still loads; the first time it is replaced a copy is kept
   under `<key>.bak`.
@@ -333,6 +333,16 @@ Shift saves are version 17.
   replaces. An unloadable save says why instead of failing silently.
 - A career is saved only while a shift is running; once a shift is filed the next shift is built
   before the next save.
+- **The last three saves of each slot are kept** (`<key>.gen1` newest, `.gen2`, `.gen3`), at least two minutes
+  apart, and appear under *Recover an earlier save*. If the browser refuses a save (storage full), the save already
+  there is left exactly as it was and older backups are given up to make room; if what was stored does not read
+  back correctly the previous save is put back. A save cut short by a crash is replaced on load by the newest
+  readable backup, and a copy of the damaged one is kept.
+- A load repairs damaged values (a wrong type, an impossible number, a reference to something that is gone,
+  a duplicated id), keeps fields it does not know, and tells you how many were repaired (the details are in the
+  browser console).
+- Saves are small: only buildings that changed are written. A shift in the middle of a busy incident is
+  15–40 KB (it was over 200 KB), so with three backups a slot takes well under 200 KB.
 
 ## How it works
 
@@ -406,8 +416,9 @@ simulation knows about the DOM, and nothing in the renderer changes the simulati
   dispatch log.
 - **Wildfires** (`src/systems/wildfire.js`) are growing areas that spread into buildings and are
   fought from the tree line.
-- **Save** (`serialize` / `loadState` in `src/systems/game.js`) stores time, credits, building
-  states, the fleet, fires and wildfires in `localStorage`.
+- **Save** (`serialize` / `loadState` in `src/systems/game.js`) asks each system for its part through the
+  persistence registry (`src/systems/persistence.js`); the entities' fields are declared in
+  `src/systems/schema.js`. Everything goes to `localStorage`.
 - **Rendering** (`src/render/render.js`) is a shallow 2.5D: footprints, lifted roofs, south walls,
   one painter's list for buildings, units and patients. Only the roads, trees and buildings in view
   are drawn, level-of-detail drops detail when zoomed out, district labels scale with the zoom and a

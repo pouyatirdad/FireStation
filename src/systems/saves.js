@@ -1,20 +1,25 @@
 // Saving and loading, safely.
 //
 // A save slot holds an *envelope*: `{ format, kind, savedAt, shift, campaign? }`.
-// The shift is `serialize(state)` (version 17); the campaign is a career's
-// persistent data. Rules this module keeps:
+// The shift is `serialize(state)` (version 18); the campaign is a career's
+// persistent data (version 2). Rules this module keeps:
 //
 //   - an old Quick Response save (a bare shift, version 16) still loads, and is
 //     copied to `<key>.bak` before anything overwrites it;
-//   - a save from a newer game (higher format) is never read down or overwritten;
-//   - a save that cannot be parsed is copied to `<key>.corrupt`, never deleted;
-//   - missing or damaged fields get safe defaults instead of failing the load.
+//   - a save from a newer game (higher format or version) is never read down or overwritten;
+//   - a save that cannot be parsed is copied to `<key>.corrupt`, never deleted, and the newest
+//     readable backup generation is offered instead;
+//   - missing or damaged fields get safe defaults instead of failing the load (see schema.js);
+//   - the last three saves of a slot are kept (`<key>.gen1` newest ... `.gen3`), at least
+//     `BACKUP_EVERY_MS` apart; a write that fails (storage full, blocked, or not read back the way
+//     it was written) leaves the live save as it was, and frees older backups before giving up.
 //
 // Storage is passed in (the browser's localStorage, or a stub in the tests).
 
 import { CONFIG } from '../core/config.js';
 import { clamp } from '../core/math.js';
 import { CAMPAIGN_VERSION, createCampaign } from './campaign.js';
+import { OLDEST_SHIFT as OLDEST, SHIFT_VERSION as CURRENT_SHIFT } from './persistence.js';
 import { emptyTotals } from './careerStats.js';
 import { createFinance } from './finance.js';
 import { createObjectives } from './objectives.js';
@@ -23,8 +28,13 @@ import { restoreScenarios } from '../data/scenarios.js';
 import { SKILLS } from '../data/personnel.js';
 
 export const ENVELOPE_FORMAT = 2;
-export const SHIFT_VERSION = 17;
-export const OLDEST_SHIFT = 16;
+export const SHIFT_VERSION = CURRENT_SHIFT;
+export const OLDEST_SHIFT = OLDEST;
+
+/** How many earlier saves of a slot are kept, and how far apart (milliseconds) they are at least. */
+export const GENERATIONS = 3;
+export const BACKUP_EVERY_MS = 120000;
+const GEN_SUFFIXES = Array.from({ length: GENERATIONS }, (_, i) => `.gen${i + 1}`);
 
 export const KEYS = {
   quick: 'firestation.save.v16', // kept: Quick Response saves written by earlier versions live here
@@ -45,7 +55,34 @@ const STEPS = {
     mode: 'quick', // everything before 17 was Quick Response
     presets: null, report: null, support: null, evac: null, disaster: null, scenario: null, rules: {},
   }),
+  // 18 adds: id counters per game (`ids`; the loader also derives them from the ids in use), the fields the
+  // entity schemas now keep (timers, crew routes and tasks, patient and victim state, building timers), and
+  // buildings saved only when they changed. All of it is additive: a version 17 shift lists every building and
+  // keeps its leak/collapse extras apart in `buildingExtras`, and the loaders still read that form.
+  17: (d) => ({ ...d, version: 18, ids: d.ids && typeof d.ids === 'object' ? d.ids : {} }),
 };
+
+/** One step per campaign version: each takes a campaign of version n and returns n + 1. */
+const CAMPAIGN_STEPS = {
+  // 2 adds `meta` (where the campaign came from). Nothing else changes; people gain their new fields in the
+  // release that uses them, through this same chain.
+  1: (c) => ({ ...c, version: 2, meta: { migratedFrom: 1 } }),
+};
+
+/** Bring a campaign up to the current version. `{ ok, data, from }`, `{ newer: true }` or `{ ok: false }`. */
+export function migrateCampaign(input) {
+  if (!input || typeof input !== 'object') return { ok: false, error: 'Not a campaign' };
+  const from = Number(input.version ?? 1);
+  if (!Number.isFinite(from) || from < 1) return { ok: false, error: 'The campaign has no usable version' };
+  if (from > CAMPAIGN_VERSION) return { ok: false, newer: true, error: 'newer' };
+  let c = { ...input, version: from };
+  while (c.version < CAMPAIGN_VERSION) {
+    const step = CAMPAIGN_STEPS[c.version];
+    if (!step) return { ok: false, error: `No migration from campaign version ${c.version}` };
+    c = step(c);
+  }
+  return { ok: true, data: c, from };
+}
 
 /** Bring a shift save up to the current version. `{ ok, data, from }` or `{ ok: false, error }`. */
 export function migrateShift(input) {
@@ -92,9 +129,11 @@ export function normalizeShift(d) {
   return { ok: true, errors, data: out };
 }
 
-export function normalizeCampaign(c) {
-  if (!c || typeof c !== 'object') return null;
-  if (Number(c.version) > CAMPAIGN_VERSION) return { newer: true };
+export function normalizeCampaign(input) {
+  const m = migrateCampaign(input);
+  if (m.newer) return { newer: true };
+  if (!m.ok) return null;
+  const c = m.data;
   const base = createCampaign({ name: c.name, scenario: c.scenario in { harbor: 1, riverside: 1, lean: 1 } ? c.scenario : 'harbor', seed: fin(c.seed, null) });
   const out = {
     ...base,
@@ -117,6 +156,7 @@ export function normalizeCampaign(c) {
     history: { months: arr(c.history?.months), shifts: arr(c.history?.shifts) },
     presets: restorePresets(c.presets),
     unlocked: arr(c.unlocked),
+    meta: c.meta && typeof c.meta === 'object' ? { ...c.meta } : { migratedFrom: null },
   };
   if (out.fleet.length === 0) out.fleet = base.fleet;
   out.objectives.completed = out.objectives.completed && typeof out.objectives.completed === 'object' ? out.objectives.completed : {};
@@ -189,6 +229,15 @@ export function inspectRaw(raw) {
   }
   const n = normalizeShift(migrated.data);
   if (!n.ok) return { status: 'corrupt', error: n.errors[0] };
+  // The envelope records how many vehicles and buildings it was written with; fewer means a write was cut short.
+  const check = value.check;
+  if (check && typeof check === 'object') {
+    for (const k of ['engines', 'crews', 'patients']) {
+      if (Number.isFinite(check[k]) && Array.isArray(migrated.data[k]) && migrated.data[k].length !== check[k]) {
+        return { status: 'corrupt', error: `The save is incomplete (${k}: ${migrated.data[k].length} of ${check[k]})` };
+      }
+    }
+  }
 
   let campaign = null;
   if (value.kind === 'career') {
@@ -222,6 +271,18 @@ export function readSlot(storage, key) {
   const result = inspectRaw(raw);
   if (result.status === 'corrupt') {
     keepCopy(storage, `${key}.corrupt`, raw);
+    // The live save is damaged (a write that was cut short, say): offer the newest backup that reads.
+    for (const suffix of GEN_SUFFIXES) {
+      let backup = null;
+      try {
+        backup = storage.getItem(key + suffix);
+      } catch { continue; }
+      if (backup == null) continue;
+      const info = inspectRaw(backup);
+      if (info.status === 'ok' || info.status === 'migrated') {
+        return { ...info, recoveredFrom: key + suffix, damaged: result.error, warnings: [...(info.warnings ?? []), `The latest save was damaged (${result.error}); the previous one was loaded`] };
+      }
+    }
     result.error = `${result.error}; a copy was kept`;
   }
   return result;
@@ -230,6 +291,9 @@ export function readSlot(storage, key) {
 // ------------------------------------------------------------ recovery ---
 
 const BACKUP_SUFFIXES = {
+  '.gen1': 'the previous save',
+  '.gen2': 'the save before that',
+  '.gen3': 'the oldest kept save',
   '.bak': 'the Quick Response save from before it was upgraded',
   '.prev': 'the career that was replaced by a new one',
   '.replaced': 'the save that was replaced by a restore',
@@ -287,13 +351,44 @@ function keepCopy(storage, key, raw) {
   } catch { /* nothing more can be done */ }
 }
 
-/**
- * Write a slot. Refuses to overwrite a save from a newer game, and keeps a
- * copy of an old-format save the first time it is replaced.
- */
-export function writeSlot(storage, key, { kind, shift, campaign = null }) {
+const savedAtOf = (raw) => {
+  const p = parse(raw);
+  return p.ok && p.value && Number.isFinite(p.value.savedAt) ? p.value.savedAt : 0;
+};
+
+/** Keep `existing` (the save about to be replaced) as generation 1 when it is old enough; shift the others down. */
+function rotate(storage, key, existing, now) {
   try {
-    const existing = storage.getItem(key);
+    const g1 = storage.getItem(key + GEN_SUFFIXES[0]);
+    const when = savedAtOf(existing) || now;
+    if (g1 != null && when - savedAtOf(g1) < BACKUP_EVERY_MS) return false;
+    for (let i = GENERATIONS - 1; i >= 1; i--) {
+      const older = storage.getItem(key + GEN_SUFFIXES[i - 1]);
+      if (older != null) storage.setItem(key + GEN_SUFFIXES[i], older);
+    }
+    storage.setItem(key + GEN_SUFFIXES[0], existing);
+    return true;
+  } catch {
+    return false; // no room for a backup is no reason to refuse the save itself
+  }
+}
+
+/** Backups that may be given up, oldest first, to make room for a live save. */
+const EXPENDABLE = [...GEN_SUFFIXES].reverse().concat(['.replaced', '.prev', '.bak']);
+
+/**
+ * Write a slot. Refuses to overwrite a save from a newer game, keeps a copy of an old-format save the first
+ * time it is replaced, keeps the last three saves, and never loses the live save to a failed write:
+ *   - the new text is built before anything is touched;
+ *   - if the browser refuses it (storage full), older backups are given up one at a time and the write is
+ *     tried again, and if it still fails the live save is exactly what it was;
+ *   - after the write the text is read back; if it is not what was written the previous save is put back.
+ * Returns `{ ok, ... }`; on failure `reason` is 'newer', 'quota', 'storage' or 'verify'.
+ */
+export function writeSlot(storage, key, { kind, shift, campaign = null }, { now = Date.now() } = {}) {
+  let existing = null;
+  try {
+    existing = storage.getItem(key);
     if (existing != null) {
       const p = parse(existing);
       if (p.ok && p.value && typeof p.value === 'object') {
@@ -304,12 +399,61 @@ export function writeSlot(storage, key, { kind, shift, campaign = null }) {
         if (p.value.format == null) keepCopy(storage, `${key}.bak`, existing);
       }
     }
-    const envelope = { format: ENVELOPE_FORMAT, kind, savedAt: Date.now(), shift, ...(campaign ? { campaign } : {}) };
-    storage.setItem(key, JSON.stringify(envelope));
-    return { ok: true };
-  } catch (e) {
+  } catch {
     return { ok: false, reason: 'storage', error: 'Could not save — the browser blocked storage' };
   }
+
+  let text;
+  try {
+    const check = { engines: shift.engines?.length ?? 0, crews: shift.crews?.length ?? 0, patients: shift.patients?.length ?? 0 };
+    text = JSON.stringify({ format: ENVELOPE_FORMAT, kind, savedAt: now, check, shift, ...(campaign ? { campaign } : {}) });
+  } catch {
+    return { ok: false, reason: 'storage', error: 'Could not save — the shift could not be written out' };
+  }
+
+  if (existing != null) rotate(storage, key, existing, now);
+
+  const freed = []; // [suffix, text] of the backups given up, so they can be put back if it was no use
+  const attempt = () => {
+    try {
+      storage.setItem(key, text);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  let wrote = attempt();
+  for (const suffix of EXPENDABLE) {
+    if (wrote) break;
+    try {
+      const old = storage.getItem(key + suffix);
+      if (old == null) continue;
+      storage.removeItem(key + suffix);
+      freed.push([suffix, old]);
+    } catch { continue; }
+    wrote = attempt();
+  }
+  if (!wrote) {
+    // Giving the backups up did not help (the save is simply too big): put them back.
+    for (const [suffix, old] of freed) {
+      try {
+        storage.setItem(key + suffix, old);
+      } catch { /* best effort */ }
+    }
+    return { ok: false, reason: 'quota', error: 'Could not save — the browser has no room left; the previous save is unchanged' };
+  }
+
+  let back = null;
+  try {
+    back = storage.getItem(key);
+  } catch { /* read-back is best-effort */ }
+  if (back !== text) {
+    try {
+      if (existing != null) storage.setItem(key, existing);
+    } catch { /* nothing more can be done */ }
+    return { ok: false, reason: 'verify', error: 'Could not save — what was stored did not match; the previous save was put back' };
+  }
+  return { ok: true, bytes: text.length, ...(freed.length ? { freed: freed.map(([suffix]) => suffix.slice(1)) } : {}) };
 }
 
 /**

@@ -10,12 +10,12 @@ import { spawnSmoke } from './effects.js';
 import { placeNear } from './places.js';
 import { alignment } from './wind.js';
 import { emit } from './hooks.js';
-
-let seq = 1;
+import { nextId, registerPersistence } from './persistence.js';
+import { SCHEMAS, applyFields, loadFields, saveFields, uniqueById } from './schema.js';
 
 export function startWildfire(state, x, y, reward = 2200, opts = {}) {
   const wildfire = {
-    id: `wildfire${seq++}`,
+    id: nextId(state, 'wildfire'),
     kind: 'wildfire',
     name: opts.name ?? 'Forest fire',
     x,
@@ -34,21 +34,24 @@ export function startWildfire(state, x, y, reward = 2200, opts = {}) {
   return wildfire;
 }
 
-export function restoreWildfires(state, list = []) {
-  state.wildfires = list.map((w) => ({
-    ...w,
-    radius: w.radius ?? 2.5 * TILE,
-    maxRadius: w.maxRadius ?? 18 * TILE,
-    intensity: w.intensity ?? 0.55,
-    spreadTimer: w.spreadTimer ?? 5,
-    smokeAcc: 0,
-  }));
-  for (const wf of state.wildfires) {
-    const match = /(\d+)$/.exec(wf.id ?? '');
-    if (match) seq = Math.max(seq, Number(match[1]) + 1);
-  }
+export function restoreWildfires(state, list = [], issues = []) {
+  const unique = uniqueById(list, 'wildfires');
+  issues.push(...unique.issues);
+  state.wildfires = unique.list.map((entry) => {
+    const wildfire = { kind: 'wildfire', id: entry.id, smokeAcc: 0 };
+    const loaded = loadFields(SCHEMAS.wildfire, entry, wildfire, { where: `wildfire ${entry.id}` });
+    issues.push(...loaded.issues);
+    return applyFields(wildfire, loaded);
+  });
   return state.wildfires;
 }
+
+registerPersistence({
+  key: 'wildfires',
+  order: 50,
+  save: (state) => (state.wildfires ?? []).map((w) => saveFields(SCHEMAS.wildfire, w)),
+  load: (state, data, ctx) => restoreWildfires(state, data.wildfires, ctx.issues),
+});
 
 export function updateWildfires(state, dt) {
   if (!state.wildfires || state.wildfires.length === 0) return;

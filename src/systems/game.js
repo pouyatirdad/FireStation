@@ -10,22 +10,22 @@ import {
   activeEngine, buildingOf, buyVehicle, freeBay, createUnits, deployCrew, dispatchEngine,
   engineForUnit, orderAmbulanceToPatient, orderCrew, orderEngine, orderEngineToWildfire,
   orderEngineToBlockade, pickAmbulanceFor, pickEngineForBlockade, recallCrew, repathEngines,
-  restoreFleet, sellVehicle, sendEngineHome, sendToHospital, sendToPharmacy,
+  sellVehicle, sendEngineHome, sendToHospital, sendToPharmacy,
   toggleHydrant, updateUnits, isFirefighter, unstaffed,
   boatCanReach, diveVehiclesFor, orderEngineToVictim,
-  canDive, crewForTool, cutList, equipCrew, orderCut, restoreCuts,
+  canDive, crewForTool, equipCrew, orderCut,
 } from './units.js';
 import {
-  findVictim, nearestVictim, restoreVictims, updateVictims,
+  findVictim, nearestVictim, updateVictims,
 } from './water.js';
 import {
   repayLoan, takeLoan, toggleInsurance,
 } from './economy.js';
 import {
-  acceptContract, createContracts, restoreContracts, updateContracts,
+  acceptContract, createContracts, updateContracts,
 } from './contracts.js';
 import {
-  createTraffic, findBlockade, restoreBlockades, updateTraffic,
+  createTraffic, findBlockade, updateTraffic,
 } from './blockades.js';
 import { explode, updateChains } from './chains.js';
 import { dispatchAll, returnAll } from './dispatch.js';
@@ -33,19 +33,19 @@ import { bindHotkey, engineByKey } from '../core/hotkeys.js';
 import { createWind, updateWind } from './wind.js';
 import { createLedger, spend, updateEconomy } from './economy.js';
 import {
-  findPatient, isMedical, nearestPatient, restorePatients, updatePatients,
+  findPatient, isMedical, nearestPatient, updatePatients,
 } from './medical.js';
-import { activeFires, ignite, updateFire } from './fire.js';
+import { activeFires, ignite, snapshotBuildings, updateFire } from './fire.js';
 import { addEvent } from './events.js';
 import { spawnDebris, updateEffects } from './effects.js';
 import { updateFleeing } from './civilians.js';
 import { updateIncidents } from './incidents.js';
-import { restoreWildfires, updateWildfires } from './wildfire.js';
+import { updateWildfires } from './wildfire.js';
 import { applyStationEffects, chargeStation, refundStation, stationBlock, stationBudgetBlock, vehicleBlock } from './stations.js';
-import { createReport, observe, restoreReport } from './report.js';
-import { defaultPresets, restorePresets } from './presets.js';
-import { createSupport, restoreSupport, updateSupport } from './agencies.js';
-import { createEvacuation, restoreEvacuation, updateEvacuation } from './evacuation.js';
+import { createReport, observe } from './report.js';
+import { defaultPresets } from './presets.js';
+import { createSupport, updateSupport } from './agencies.js';
+import { createEvacuation, updateEvacuation } from './evacuation.js';
 import { updateHazards } from './hazmat.js';
 import { updateCollapse } from './collapse.js';
 import { updateDisaster } from './disasters.js';
@@ -54,7 +54,9 @@ import { updateCareerFinance } from './finance.js';
 import { updateObjectives } from './objectives.js';
 import { updateScenario } from './challenges.js';
 import { isCareer, stationOfEngine } from './modifiers.js';
-import { setWeather } from './weather.js';
+import {
+  SHIFT_VERSION, clone, loadSections, ownedKeys, registerPersistence, reserveIds, saveSections, LEGACY_KEYS,
+} from './persistence.js';
 
 export function createGame(seed = CONFIG.city.seed) {
   const city = createCity(seed);
@@ -111,6 +113,7 @@ export function createGame(seed = CONFIG.city.seed) {
     disaster: null,
     // UI-only scratch space: pointer hover, minimap rect, last toast shown.
     ui: { hover: null, minimap: null, seenEvent: 0 },
+    ids: {}, // id counters per kind of entity, saved with the shift
   };
 
   state.report = createReport(state);
@@ -119,6 +122,7 @@ export function createGame(seed = CONFIG.city.seed) {
   state.onDestroyed = (building) => spawnDebris(state, building);
   state.onExplosion = (building) => explode(state, building);
   state.onBlockadeChange = () => repathEngines(state);
+  snapshotBuildings(state);
   return state;
 }
 
@@ -701,10 +705,41 @@ export function commandSellVehicle(state, id = null) {
 export { orderEngine, orderCrew };
 
 // ------------------------------------------------------------------- save ---
+//
+// The shift is saved by the persistence registry (persistence.js): every system registers the part it owns
+// (units.js the fleet, medical.js the patients, fire.js the buildings, and so on). What stays here is what
+// belongs to the shift as a whole: the clock, the money, the mode, the id counters, and the repair of
+// references between entities.
 
-export function serialize(state) {
-  return {
-    version: 17,
+const fin = (v, fallback, min = -Infinity, max = Infinity) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : fallback);
+
+registerPersistence({
+  key: 'mode',
+  keys: ['mode', 'rules'],
+  fields: ['mode', 'rules', 'campaign'],
+  order: 5,
+  save: (state) => ({ mode: state.mode, rules: clone(state.rules) }),
+  load: (state, data, ctx) => {
+    const career = data.mode === 'career';
+    state.mode = career && ctx.campaign ? 'career' : data.mode === 'challenge' && data.scenario ? 'challenge' : 'quick';
+    if (career && !ctx.campaign) ctx.issues.push('this was a career save but its career data is missing: loaded as a Quick Response shift');
+    state.campaign = state.mode === 'career' ? ctx.campaign : null;
+    state.rules = data.rules && typeof data.rules === 'object' && !Array.isArray(data.rules) ? { ...data.rules } : {};
+  },
+});
+
+registerPersistence({
+  key: 'core',
+  keys: [
+    'seed', 'time', 'clock', 'credits', 'rating', 'stats', 'incidentsEnabled', 'nextCallAt', 'nextBigAt', 'eventSeq',
+    'events', 'loan', 'insured', 'ownedStations', 'shiftDue', 'incidentPace', 'rngSeed', 'cycleIndex',
+  ],
+  fields: [
+    'seed', 'time', 'clock', 'credits', 'rating', 'stats', 'incidentsEnabled', 'nextCallAt', 'nextBigAt', 'eventSeq',
+    'events', 'loan', 'insured', 'ownedStations', 'shiftDue', 'incidentPace', 'rngSeed', 'cycleIndex', 'saveExtras',
+  ],
+  order: 10,
+  save: (state) => ({
     seed: state.seed,
     time: state.time,
     clock: state.clock,
@@ -716,196 +751,142 @@ export function serialize(state) {
     nextBigAt: state.nextBigAt,
     eventSeq: state.eventSeq,
     events: state.events.slice(0, 30).map((e) => ({ ...e })),
-    buildings: state.buildings.map((b) => ({
-      id: b.id,
-      state: b.state,
-      fire: b.fire,
-      integrity: b.integrity,
-      trapped: b.trapped ?? 0,
-      occupants: b.occupants ?? 0,
-      evacuated: Boolean(b.evacuated),
-      reward: b.reward ?? 0,
-      incidentType: b.incidentType ?? null,
-      incidentLabel: b.incidentLabel ?? null,
-      neglect: b.neglect ?? 0,
-      hazmat: Boolean(b.hazmat),
-      big: Boolean(b.big),
-    })),
-    engines: state.engines.map((e) => ({
-      id: e.id,
-      type: e.type,
-      number: e.number,
-      name: e.name,
-      bayIndex: e.bayIndex,
-      hotkey: e.hotkey ?? '',
-      x: e.x,
-      y: e.y,
-      angle: e.angle,
-      water: e.water,
-      targetId: e.targetId,
-      supply: e.supply,
-      kits: e.kits,
-      cargo: (e.cargo ?? []).map((c) => ({ ...c })),
-      // The current order, so a vehicle that is driving to a call keeps driving after a load.
-      path: e.path.map((p) => ({ x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10 })),
-      goal: e.goal ? { x: e.goal.x, y: e.goal.y } : null,
-      arrived: Boolean(e.arrived),
-      packTimer: e.packTimer ?? 0,
-      wildfireId: e.wildfireId ?? null,
-      blockadeId: e.blockadeId ?? null,
-      victimId: e.victimId ?? null,
-      patientId: e.patientId ?? null,
-      hospitalId: e.hospitalId ?? null,
-      standbyFor: e.standbyFor ? { kind: e.standbyFor.kind, id: e.standbyFor.id } : null,
-      mission: e.mission ? { ...e.mission } : null,
-      status: e.status,
-    })),
-    crews: state.crew.map((c) => ({
-      id: c.id,
-      number: c.number,
-      name: c.name,
-      engineId: c.engineId,
-      personId: c.personId ?? null,
-      x: c.x,
-      y: c.y,
-      riding: c.riding,
-      targetId: c.targetId,
-      wildfireId: c.wildfireId,
-      tool: c.fetch ?? c.tool,
-      cut: c.cut ? { ...c.cut } : null,
-    })),
-    cut: cutList(state),
-    wildfires: (state.wildfires ?? []).map((w) => ({ ...w })),
-    patients: state.patients.map((p) => ({
-      id: p.id,
-      x: p.x,
-      y: p.y,
-      buildingId: p.buildingId,
-      buildingName: p.buildingName,
-      severity: p.severity,
-      life: p.life,
-      maxLife: p.maxLife,
-      treated: p.treated,
-      critical: p.critical,
-      claimedBy: p.claimedBy ?? null,
-      medicId: p.medicId ?? null,
-    })),
-    blockades: state.blockades.map((b) => ({
-      id: b.id, name: b.name, place: b.place, tx: b.tx, ty: b.ty, tw: b.tw, th: b.th,
-      progress: b.progress, big: b.big, reward: b.reward, fuelAt: b.fuelAt,
-      fuelDone: b.fuelDone, debris: b.debris,
-    })),
-    wind: { ...state.wind },
-    ownedStations: [...state.ownedStations],
-    victims: state.victims.map((v) => ({
-      id: v.id, x: v.x, y: v.y, label: v.label, life: v.life, maxLife: v.maxLife,
-    })),
     loan: state.loan,
     insured: state.insured,
-    contracts: JSON.parse(JSON.stringify(state.contracts)),
-    ledger: { ...state.ledger, lastCharges: state.ledger.lastCharges ? { ...state.ledger.lastCharges } : null, by: { ...(state.ledger.by ?? {}) } },
-    ...serializeExtras(state),
-  };
-}
-
-/** The parts of a shift added after save version 16 (all JSON-safe copies). */
-function serializeExtras(state) {
-  const copy = (v) => (v == null ? v : JSON.parse(JSON.stringify(v)));
-  return {
-    mode: state.mode,
-    rules: copy(state.rules),
-    weather: copy(state.weather),
-    presets: copy(state.presets),
-    report: copy(state.report),
-    support: copy(state.support),
-    evac: copy(state.evac),
-    disaster: copy(state.disaster),
-    scenario: copy(state.scenario),
+    ownedStations: [...state.ownedStations],
     shiftDue: Boolean(state.shiftDue),
     incidentPace: state.incidentPace ?? 1,
     rngSeed: state.rngSeed,
-    buildingExtras: state.buildings
-      .filter((b) => b.leak || b.collapse || b.utilityCut || b.evacZone)
-      .map((b) => ({ id: b.id, leak: b.leak ?? 0, collapse: copy(b.collapse ?? null), utilityCut: Boolean(b.utilityCut), evacZone: b.evacZone ?? null, evacOccupants: b.evacOccupants ?? null })),
+    cycleIndex: Number.isFinite(state.cycleIndex) ? state.cycleIndex : null,
+  }),
+  load: (state, data, ctx) => {
+    state.time = fin(data.time, 0, 0);
+    state.clock = fin(data.clock, CONFIG.clockStart);
+    state.credits = fin(data.credits, CONFIG.economy.start);
+    state.rating = fin(data.rating, CONFIG.rating.start, 0, 100);
+    const stats = data.stats && typeof data.stats === 'object' && !Array.isArray(data.stats) ? data.stats : {};
+    for (const [k, v] of Object.entries(stats)) {
+      if (typeof v === 'number' && Number.isFinite(v)) state.stats[k] = v;
+      else ctx.issues.push(`stat ${k} was damaged and was ignored`);
+    }
+    state.events = (Array.isArray(data.events) ? data.events : [])
+      .filter((e) => e && typeof e === 'object' && typeof e.text === 'string').slice(0, 60).map((e) => ({ ...e }));
+    state.eventSeq = fin(data.eventSeq, state.events.length, 0);
+    state.incidentsEnabled = data.incidentsEnabled !== false;
+    state.nextCallAt = fin(data.nextCallAt, CONFIG.incidents.firstCall);
+    state.nextBigAt = fin(data.nextBigAt, CONFIG.incidents.bigAfter + 30);
+    state.ownedStations = state.city.stations.map((_, i) => Boolean(data.ownedStations?.[i] ?? i === 0));
+    state.loan = fin(data.loan, 0, 0);
+    state.insured = Boolean(data.insured);
+    state.shiftDue = Boolean(data.shiftDue);
+    state.incidentPace = fin(data.incidentPace, 1, 0, 100);
+    if (Number.isFinite(data.rngSeed)) state.rngSeed = data.rngSeed;
+    if (Number.isFinite(data.cycleIndex)) state.cycleIndex = data.cycleIndex;
+  },
+});
+
+/**
+ * Every reference from one entity to another must point at something that exists; one that does not (a
+ * damaged or hand-edited save, or a vehicle sent to something that ended in the same tick) is cleared, and
+ * the repair is reported.
+ */
+function repairReferences(state, issues) {
+  const ids = (list) => new Set((list ?? []).map((x) => x.id));
+  const buildings = ids(state.buildings);
+  const engines = ids(state.engines);
+  const crew = ids(state.crew);
+  const patients = ids(state.patients);
+  const victims = ids(state.victims);
+  const wildfires = ids(state.wildfires);
+  const blockades = ids(state.blockades);
+  const hospitals = ids(state.city.hospitals);
+  const fix = (owner, field, set, label) => {
+    if (owner[field] != null && !set.has(owner[field])) {
+      issues.push(`${label} pointed at a ${field} that does not exist; cleared`);
+      owner[field] = null;
+    }
   };
+  for (const e of state.engines) {
+    const L = `vehicle ${e.id}`;
+    fix(e, 'targetId', buildings, L);
+    fix(e, 'wildfireId', wildfires, L);
+    fix(e, 'blockadeId', blockades, L);
+    fix(e, 'victimId', victims, L);
+    fix(e, 'patientId', patients, L);
+    fix(e, 'hospitalId', hospitals, L);
+    if (e.standbyFor) {
+      const pool = { building: buildings, wildfire: wildfires, patient: patients, victim: victims, blockade: blockades }[e.standbyFor.kind];
+      if (!pool || !pool.has(e.standbyFor.id)) e.standbyFor = null;
+    }
+  }
+  for (const c of state.crew) {
+    const L = `crew ${c.id}`;
+    fix(c, 'targetId', buildings, L);
+    fix(c, 'rescueId', buildings, L);
+    fix(c, 'wildfireId', wildfires, L);
+    fix(c, 'patientId', patients, L);
+    fix(c, 'victimId', victims, L);
+  }
+  for (const p of state.patients) {
+    fix(p, 'claimedBy', engines, `patient ${p.id}`);
+    fix(p, 'medicId', crew, `patient ${p.id}`);
+  }
+  for (const v of state.victims) fix(v, 'diverId', crew, `victim ${v.id}`);
 }
 
-/** Put the extras back. Missing parts (a save from an older version) keep the defaults createGame gave. */
-function restoreExtras(state, data, campaign) {
-  state.mode = data.mode === 'career' && campaign ? 'career' : data.mode === 'challenge' && data.scenario ? 'challenge' : 'quick';
-  state.campaign = state.mode === 'career' ? campaign : null;
-  state.rules = data.rules && typeof data.rules === 'object' ? { ...data.rules } : {};
-  state.presets = restorePresets(data.presets);
-  state.report = restoreReport(state, data.report);
-  state.support = restoreSupport(data.support);
-  state.evac = restoreEvacuation(data.evac);
-  state.disaster = data.disaster ?? null;
-  state.scenario = state.mode === 'challenge' ? data.scenario : null;
-  state.shiftDue = Boolean(data.shiftDue);
-  state.incidentPace = data.incidentPace ?? 1;
+registerPersistence({
+  key: 'references',
+  keys: [],
+  order: 95,
+  save: () => ({}),
+  load: (state, data, ctx) => repairReferences(state, ctx.issues),
+});
+
+registerPersistence({
+  key: 'luck',
+  keys: [],
+  order: 96,
+  save: () => ({}),
   // A loaded shift carries on with fresh luck instead of replaying the calls it started with.
-  if (Number.isFinite(data.rngSeed)) state.rngSeed = data.rngSeed;
-  state.rng = new Rng(state.rngSeed + Math.floor(state.time) * 31 + 1);
-  if (data.weather?.kind) setWeather(state, data.weather.kind);
-  const byId = new Map(state.buildings.map((b) => [b.id, b]));
-  for (const e of data.buildingExtras ?? []) {
-    const b = byId.get(e.id);
-    if (!b) continue;
-    b.leak = e.leak ?? 0;
-    b.collapse = e.collapse ?? null;
-    b.utilityCut = Boolean(e.utilityCut);
-    b.evacZone = e.evacZone ?? null;
-    b.evacOccupants = e.evacOccupants ?? null;
-  }
+  load: (state) => { state.rng = new Rng(state.rngSeed + Math.floor(state.time) * 31 + 1); },
+});
+
+registerPersistence({
+  key: 'ids',
+  order: 99,
+  save: (state) => ({ ...state.ids }),
+  load: (state, data) => {
+    reserveIds(state, data.ids, {
+      patient: state.patients, victim: state.victims, wreck: state.blockades, wildfire: state.wildfires, evac: state.evac?.zones,
+    });
+  },
+});
+
+/**
+ * The shift as plain JSON. Whatever a save carried that no section knows (a field from a newer build, a
+ * hand-added one) is kept in `state.saveExtras` when it is loaded and written back here.
+ */
+export function serialize(state) {
+  return { version: SHIFT_VERSION, ...saveSections(state), ...(state.saveExtras ?? {}) };
 }
 
 export function loadState(data, campaign = null) {
-  const state = createGame(data.seed ?? CONFIG.city.seed);
-  state.time = data.time ?? 0;
-  state.clock = data.clock ?? CONFIG.clockStart;
-  state.credits = data.credits ?? CONFIG.economy.start;
-  state.rating = data.rating ?? CONFIG.rating.start;
-  state.stats = { ...state.stats, ...(data.stats ?? {}) };
-  state.events = (data.events ?? []).map((e) => ({ ...e }));
-  state.eventSeq = data.eventSeq ?? state.events.length;
-  state.incidentsEnabled = data.incidentsEnabled !== false;
-  state.nextCallAt = data.nextCallAt ?? CONFIG.incidents.firstCall;
-  state.nextBigAt = data.nextBigAt ?? CONFIG.incidents.bigAfter + 30;
-
-  const byId = new Map(state.buildings.map((b) => [b.id, b]));
-  for (const saved of data.buildings ?? []) {
-    const b = byId.get(saved.id);
-    if (!b) continue;
-    b.state = saved.state ?? 'ok';
-    b.fire = saved.fire ?? 0;
-    b.integrity = saved.integrity ?? b.maxIntegrity;
-    b.trapped = saved.trapped ?? 0;
-    b.occupants = saved.occupants ?? 0;
-    b.evacuated = Boolean(saved.evacuated);
-    b.reward = saved.reward ?? 0;
-    b.incidentType = saved.incidentType ?? null;
-    b.incidentLabel = saved.incidentLabel ?? null;
-    b.neglect = saved.neglect ?? 0;
-    b.tookHold = (saved.neglect ?? 0) >= 0.5;
-    b.hazmat = Boolean(saved.hazmat);
-    b.big = Boolean(saved.big);
+  const input = data && typeof data === 'object' ? data : {};
+  const state = createGame(Number.isFinite(input.seed) ? input.seed : CONFIG.city.seed);
+  const issues = [];
+  loadSections(state, input, { campaign, issues });
+  const known = ownedKeys();
+  const extras = {};
+  for (const [k, v] of Object.entries(input)) {
+    if (k !== 'version' && !known.has(k) && !LEGACY_KEYS.includes(k)) extras[k] = v;
   }
-
-  state.ownedStations = state.city.stations.map((_, i) => Boolean(data.ownedStations?.[i] ?? i === 0));
-  restoreVictims(state, data.victims ?? []);
-  state.loan = data.loan ?? 0;
-  state.insured = Boolean(data.insured);
-  state.contracts = restoreContracts(data.contracts);
-  restoreCuts(state, data.cut ?? []);
-  restoreFleet(state, { engines: data.engines ?? [], crews: data.crews ?? [] });
-  restoreWildfires(state, data.wildfires ?? []);
-  restorePatients(state, data.patients ?? []);
-  restoreBlockades(state, data.blockades ?? []);
-  if (data.wind) state.wind = { ...state.wind, ...data.wind };
-  if (data.ledger) state.ledger = { ...createLedger(), ...data.ledger };
-  restoreExtras(state, data, campaign);
+  if (Object.keys(extras).length > 0) {
+    state.saveExtras = extras;
+    issues.push(`the save has fields this version does not know (${Object.keys(extras).join(', ')}); they are kept`);
+  }
   if (isCareer(state)) applyStationEffects(state);
   state.running = true;
   state.paused = false;
+  state.loadReport = { issues };
   return state;
 }

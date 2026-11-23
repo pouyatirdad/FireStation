@@ -1,7 +1,7 @@
 # Release status — FireStation 0.17.1
 
-> 0.18.0 is being built on `feature/0.18-depth` in five milestones. Milestone 1 (hospitals and diving) is
-> complete and tested; its changes are listed in CHANGELOG.md. This audit describes 0.17.1; items 5.x below
+> 0.18.0 is being built on `feature/0.18-depth` in five milestones. Milestones 1 (hospitals and diving) and 2
+> (save architecture) are complete and tested; its changes are listed in CHANGELOG.md. This audit describes 0.17.1; items 5.x below
 > about hospitals and the water preset are fixed on the feature branch only.
 
 Audit date: 2026-11-20 (updated for 0.17.1, which fixes bug 1 below). This file says what is **verified**, what is only **implemented**, and what is

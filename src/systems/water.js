@@ -10,11 +10,12 @@ import { CONFIG, TILE } from '../core/config.js';
 import { SEA_Y } from '../data/city.js';
 import { addEvent } from './events.js';
 import { earn, money, spend } from './economy.js';
+import { nextId, registerPersistence } from './persistence.js';
+import { SCHEMAS, applyFields, loadFields, saveFields, uniqueById } from './schema.js';
 import { nearestPassable, tileOf } from './grid.js';
 import { spawnPatientAt } from './medical.js';
 import { districtName } from './places.js';
 
-let seq = 1;
 
 export const findVictim = (state, id) => state.victims.find((v) => v.id === id) ?? null;
 
@@ -23,7 +24,7 @@ export function spawnVictim(state, x, y, label) {
   const [lo, hi] = CONFIG.water.survive;
   const life = state.rng.range(lo, hi);
   const victim = {
-    id: `victim${seq++}`,
+    id: nextId(state, 'victim'),
     kind: 'victim',
     name: 'Person in the water',
     x,
@@ -38,16 +39,24 @@ export function spawnVictim(state, x, y, label) {
   return victim;
 }
 
-export function restoreVictims(state, list = []) {
-  state.victims = list.map((v) => ({
-    kind: 'victim', name: 'Person in the water', rescueTimer: 0, diverId: null, ...v,
-  }));
-  for (const v of state.victims) {
-    const m = /(\d+)$/.exec(v.id ?? '');
-    if (m) seq = Math.max(seq, Number(m[1]) + 1);
-  }
+export function restoreVictims(state, list = [], issues = []) {
+  const unique = uniqueById(list, 'victims');
+  issues.push(...unique.issues);
+  state.victims = unique.list.map((entry) => {
+    const victim = { kind: 'victim', name: 'Person in the water', id: entry.id };
+    const loaded = loadFields(SCHEMAS.victim, entry, victim, { where: `victim ${entry.id}` });
+    issues.push(...loaded.issues);
+    return applyFields(victim, loaded);
+  });
   return state.victims;
 }
+
+registerPersistence({
+  key: 'victims',
+  order: 30,
+  save: (state) => state.victims.map((v) => saveFields(SCHEMAS.victim, v)),
+  load: (state, data, ctx) => restoreVictims(state, data.victims, ctx.issues),
+});
 
 /** The nearest victim a diver could still reach, optionally one nobody has claimed. */
 export function nearestVictim(state, x, y, { unclaimed = false, maxDist = Infinity } = {}) {

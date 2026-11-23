@@ -13,8 +13,8 @@ import { dist, distToRect } from '../core/math.js';
 import { addEvent } from './events.js';
 import { earn, money, spend } from './economy.js';
 import { standTileForRect, tileCenter } from './grid.js';
-
-let seq = 1;
+import { nextId, registerPersistence } from './persistence.js';
+import { SCHEMAS, applyFields, loadFields, saveFields, uniqueById } from './schema.js';
 
 export const isMedical = (engine) => Boolean(engine?.spec?.medical);
 
@@ -37,7 +37,7 @@ export function spawnPatientAt(state, {
   const [lo, hi] = CONFIG.medical.survive;
   const survive = hi - (hi - lo) * sev;
   const patient = {
-    id: `patient${seq++}`,
+    id: nextId(state, 'patient'),
     kind: 'patient',
     name: 'Injured person',
     x,
@@ -99,22 +99,24 @@ export function injureRescued(state, building) {
   return spawnPatient(state, building, state.rng.range(0.4, 1));
 }
 
-export function restorePatients(state, list = []) {
-  state.patients = list.map((p) => ({
-    kind: 'patient',
-    name: 'Injured person',
-    treatTimer: 0,
-    claimedBy: null,
-    medicId: null,
-    leaveAt: 0,
-    ...p,
-  }));
-  for (const p of state.patients) {
-    const match = /(\d+)$/.exec(p.id ?? '');
-    if (match) seq = Math.max(seq, Number(match[1]) + 1);
-  }
+export function restorePatients(state, list = [], issues = []) {
+  const unique = uniqueById(list, 'patients');
+  issues.push(...unique.issues);
+  state.patients = unique.list.map((entry) => {
+    const patient = { kind: 'patient', name: 'Injured person', id: entry.id };
+    const loaded = loadFields(SCHEMAS.patient, entry, patient, { where: `patient ${entry.id}` });
+    issues.push(...loaded.issues);
+    return applyFields(patient, loaded);
+  });
   return state.patients;
 }
+
+registerPersistence({
+  key: 'patients',
+  order: 60,
+  save: (state) => state.patients.map((p) => saveFields(SCHEMAS.patient, p)),
+  load: (state, data, ctx) => restorePatients(state, data.patients, ctx.issues),
+});
 
 export const findPatient =(state, id) => state.patients.find((p) => p.id === id) ?? null;
 

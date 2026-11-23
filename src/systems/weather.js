@@ -1,3 +1,4 @@
+import { clone, registerPersistence } from './persistence.js';
 // Weather and light: a leaf module. Weather only changes two things the rest of
 // the game already models — how fast vehicles can drive and how hard the wind
 // blows — so it needs no system of its own. Scenarios and challenges set it;
@@ -31,3 +32,12 @@ export function setWeather(state, kind) {
 }
 
 export const roadFactor = (state) => state.weather?.roadFactor ?? 1;
+
+registerPersistence({
+  key: 'weather',
+  order: 86,
+  save: (state) => clone(state.weather),
+  load: (state, data) => {
+    if (data.weather?.kind) setWeather(state, data.weather.kind);
+  },
+});

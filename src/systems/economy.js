@@ -9,6 +9,7 @@
 // Credits may go negative (the city never closes the station) but nothing can be
 // bought while they are below the price.
 
+import { clone, registerPersistence } from './persistence.js';
 import { CONFIG } from '../core/config.js';
 import { clamp } from '../core/math.js';
 import { addEvent } from './events.js';
@@ -211,3 +212,12 @@ export function updateEconomy(state, dt) {
   }
 
 }
+
+registerPersistence({
+  key: 'ledger',
+  order: 36,
+  save: (state) => ({ ...state.ledger, lastCharges: state.ledger.lastCharges ? { ...state.ledger.lastCharges } : null, by: { ...(state.ledger.by ?? {}) } }),
+  load: (state, data) => {
+    if (data.ledger && typeof data.ledger === 'object') state.ledger = { ...createLedger(), ...clone(data.ledger) };
+  },
+});

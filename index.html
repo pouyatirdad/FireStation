@@ -2852,8 +2852,154 @@ const overall = (person) => SKILLS.reduce((sum, s) => sum + (person.skills?.[s] 
 return { SKILLS, SKILL_LABEL, SKILL_EFFECT, rankFor, rankLabel, makePerson, salaryOf, overall };
 })();
 
+// ---- src/systems/persistence.js ----
+__m["src/systems/persistence.js"] = (function () {
+// The persistence registry: each system saves and loads the part of a shift it owns.
+//
+//   registerPersistence({ key, save(state), load(state, data, ctx), order })
+//
+// `serialize` (game.js) asks every registered section for its part and merges them; `loadState` hands every
+// section the whole saved shift in `order`. A system registers itself when its module is imported, so adding
+// a field to a system means changing that system, not game.js.
+//
+//   key     the section's name, and the top-level key of the save its value is stored under
+//   keys    (optional) when a section owns several top-level keys, `save` returns an object holding those keys
+//   fields  (optional) the live state fields the section owns when they are not just `key` (state.crew for the
+//           'crews' key); the coverage test checks every live field is owned by a section or listed in TRANSIENT_STATE
+//   save    state -> JSON-safe value (or the object of `keys`)
+//   load    (state, data, ctx) -> void. `data` is the WHOLE saved shift (so a section can read what it needs,
+//           including keys written by an older version); `ctx.issues` collects what was repaired, `ctx.campaign`
+//           is the career's campaign (or null)
+//   order   load order, low first (fleet before the things that point at vehicles, and so on)
+//
+// Top-level fields of the live state that are not owned by any section are listed in TRANSIENT_STATE with
+// the reason they are not saved; a test fails when the live state has a field that is neither.
+//
+// This module is a leaf: it imports nothing from the game.
+
+/** The shift save format this build writes; `OLDEST_SHIFT` is the oldest it can still migrate. */
+const SHIFT_VERSION = 18;
+const OLDEST_SHIFT = 16;
+
+/** Keys an older save carries that a section still reads itself, so they are not "unknown". */
+const LEGACY_KEYS = ['buildingExtras'];
+
+const sections = new Map();
+
+function registerPersistence({ key, save, load, order = 50, keys = null, fields = null }) {
+  if (typeof key !== 'string' || typeof save !== 'function' || typeof load !== 'function') {
+    throw new Error('registerPersistence needs { key, save, load }');
+  }
+  sections.set(key, { key, save, load, order, keys: keys ?? [key], fields: fields ?? (keys ? [] : [key]) });
+}
+
+/** Every live state field some section owns. */
+const ownedStateFields = () => new Set(persistenceSections().flatMap((s) => s.fields));
+
+const persistenceSections = () => [...sections.values()].sort((a, b) => a.order - b.order);
+
+/** Every top-level key of a save that some section owns. */
+const ownedKeys = () => new Set(persistenceSections().flatMap((s) => s.keys));
+
+/** Ask every section for its part of the save. */
+function saveSections(state) {
+  const out = {};
+  for (const s of persistenceSections()) {
+    const part = s.save(state);
+    if (s.keys.length === 1 && s.keys[0] === s.key) out[s.key] = part;
+    else Object.assign(out, part); // a section that owns several keys returns them as an object
+  }
+  return out;
+}
+
+/** Hand every section the saved shift. Returns the issues the sections reported. */
+function loadSections(state, data, ctx = {}) {
+  const issues = ctx.issues ?? [];
+  const full = { ...ctx, issues };
+  for (const s of persistenceSections()) s.load(state, data, full);
+  return issues;
+}
+
+/**
+ * Top-level fields of the live state that are deliberately NOT saved, and why. (Fields that a section
+ * owns are not listed here; fields of the entities have their own schemas.)
+ */
+const TRANSIENT_STATE = {
+  city: 'rebuilt from the seed',
+  nav: 'rebuilt from the city, the blockades and the cuts',
+  running: 'set by loadState',
+  paused: 'set by loadState',
+  over: 'a finished shift is not saved',
+  speed: 'a view setting; the game loop owns it',
+  rng: 'a loaded shift carries on with fresh luck derived from rngSeed and the clock',
+  streams: 'per-frame list of water jets',
+  hoses: 'per-frame list of hose lines',
+  fx: 'particles',
+  fleeing: 'decorative people running from a fire; the numbers that matter (escaped, rescued) are counted when they leave',
+  hazards: 'recomputed every tick from the leaking buildings',
+  cutCount: 'derived from the cut list',
+  selected: 'the UI selection',
+  ui: 'UI scratch space',
+  units: 'derived: engines and crew',
+  vehicleCount: 'derived from the engines\' numbers',
+  nextCrew: 'derived from the crew numbers',
+  activeEngineId: 'the UI selection',
+  traffic: 'ambient cars, regenerated',
+  trafficFactor: 'recomputed from the clock every tick',
+  rushNow: 'recomputed from the clock every tick',
+  onDestroyed: 'callback',
+  onExplosion: 'callback',
+  onBlockadeChange: 'callback',
+  lastEvent: 'a pointer to the newest log entry',
+  hooks: 'listeners registered by the running game',
+  objAcc: 'a one-second accumulator for the objectives check',
+  saveStatus: 'a label for the HUD',
+  loadReport: 'what the last load repaired; recomputed by every load',
+  shiftSummary: 'a finished career shift is filed, not saved as a shift in progress',
+  onSave: 'callback',
+};
+
+// ---------------------------------------------------------------- id counters ---
+
+/**
+ * The next id for a kind of entity ("patient" -> "patient1", "patient2", ...). Counters live on the game
+ * (`state.ids`), are saved with it, and never go back, so two games in one page do not share numbering and a
+ * loaded game cannot hand out an id it already has.
+ */
+function nextId(state, name) {
+  const ids = (state.ids = state.ids ?? {});
+  ids[name] = (ids[name] ?? 0) + 1;
+  return `${name}${ids[name]}`;
+}
+
+const SUFFIX = /(\d+)$/;
+
+/** After a load: the counters carry on from the saved ones, and from the highest id already in use. */
+function reserveIds(state, saved, lists) {
+  const ids = {};
+  if (saved && typeof saved === 'object') {
+    for (const [k, v] of Object.entries(saved)) if (Number.isFinite(v) && v >= 0 && v < 1e9) ids[k] = Math.floor(v);
+  }
+  for (const [name, list] of Object.entries(lists)) {
+    for (const item of list ?? []) {
+      const m = typeof item?.id === 'string' && item.id.startsWith(name) ? SUFFIX.exec(item.id) : null;
+      if (m) ids[name] = Math.max(ids[name] ?? 0, Number(m[1]));
+    }
+  }
+  state.ids = ids;
+  return ids;
+}
+
+/** A JSON-safe deep copy (null and undefined pass through). */
+const clone = (v) => (v == null ? v : JSON.parse(JSON.stringify(v)));
+
+return { SHIFT_VERSION, OLDEST_SHIFT, LEGACY_KEYS, registerPersistence, ownedStateFields, persistenceSections, ownedKeys, saveSections, loadSections, TRANSIENT_STATE, nextId, reserveIds, clone };
+})();
+
 // ---- src/systems/weather.js ----
 __m["src/systems/weather.js"] = (function () {
+const { clone, registerPersistence } = __m["src/systems/persistence.js"];
+
 // Weather and light: a leaf module. Weather only changes two things the rest of
 // the game already models — how fast vehicles can drive and how hard the wind
 // blows — so it needs no system of its own. Scenarios and challenges set it;
@@ -2887,6 +3033,15 @@ function setWeather(state, kind) {
 }
 
 const roadFactor = (state) => state.weather?.roadFactor ?? 1;
+
+registerPersistence({
+  key: 'weather',
+  order: 86,
+  save: (state) => clone(state.weather),
+  load: (state, data) => {
+    if (data.weather?.kind) setWeather(state, data.weather.kind);
+  },
+});
 
 return { WEATHER, daylightLevel, setWeather, roadFactor };
 })();
@@ -3547,6 +3702,407 @@ function addEvent(state, text, tone = 'info') {
 return { addEvent };
 })();
 
+// ---- src/systems/schema.js ----
+__m["src/systems/schema.js"] = (function () {
+// Declarative save schemas for the entities of a shift.
+//
+// A schema lists EVERY field an entity can have and says what happens to it in a save:
+//
+//   saved       written to the save, read back with a type check, bounds and a default
+//   derived     rebuilt from the city seed or the vehicle spec when a shift is loaded (a test checks that it
+//               has not changed since the shift started, so it really is derived)
+//   transient   deliberately not saved, with the reason written next to it (caches, per-frame flags,
+//               cosmetic accumulators, values recomputed every tick)
+//
+// A test (test/schema.test.js) plays busy games and fails if a live entity has a field that no schema
+// declares, so a new field cannot silently miss the save: it has to be declared here, as one of the three.
+//
+// How damaged data is handled (`loadFields`):
+//   - a saved field of the wrong type, not finite, or out of bounds is repaired (clamped, or replaced by its
+//     default) and reported in `issues`; the entity itself is kept;
+//   - a field that is missing takes its default silently (that is what an older save looks like);
+//   - a field the schema does not know is NOT discarded: it is kept in `extra`, written back by `saveFields`,
+//     and reported once as an unknown field (a save from a slightly newer build keeps its extras, and a typo
+//     in a hand-edited save is visible instead of vanishing).
+//
+// This module is a leaf: it imports nothing from the game.
+
+const MAX_STR = 120;
+
+// --------------------------------------------------------------- field kinds ---
+
+const saved = (kind, def, extra = {}) => ({ persist: 'saved', kind, def, ...extra });
+
+/** A finite number, clamped to [min, max]. */
+const num = (def = 0, min = -Infinity, max = Infinity) => saved('number', def, { min, max });
+/** A whole number, clamped to [min, max]. */
+const int = (def = 0, min = -Infinity, max = Infinity) => saved('int', def, { min, max });
+const bool = (def = false) => saved('bool', def);
+/** A string. Over `max` it is cut, unless `cut` is false, when a too-long value is treated as damaged. */
+const str = (def = '', max = MAX_STR, cut = true) => saved('string', def, { max, cut });
+/** A string or null. */
+const optStr = (max = MAX_STR) => saved('optString', null, { max });
+/** One of a fixed list. */
+const oneOf = (values, def) => saved('enum', def ?? values[0], { values });
+/** A reference to another entity's id (a short string) or null. */
+const ref = () => saved('ref', null);
+/** Anything JSON; `clean(value)` returns the repaired value or `undefined` if it cannot be repaired. */
+const json = (def, clean = null, out = null) => saved('json', def, { clean, out });
+
+/** A field that is rebuilt on load (from the city seed, the vehicle spec or other saved fields). */
+const derived = (reason) => ({ persist: 'derived', reason });
+/** A field that is deliberately not saved. */
+const transient = (reason) => ({ persist: 'transient', reason });
+
+const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
+const isPoint = (p) => p && typeof p === 'object' && isNum(p.x) && isNum(p.y);
+
+/** An array of {x, y} points (a route); bad points are dropped, long routes are cut; saved to a tenth of a pixel. */
+const route = (max = 4000) => json([], (v) => (Array.isArray(v)
+  ? v.filter(isPoint).slice(0, max).map((p) => ({ x: p.x, y: p.y }))
+  : undefined), (v) => v.map((p) => ({ x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10 })));
+
+const cleanKit = (v) => (Array.isArray(v)
+  ? v.filter((c) => c && typeof c === 'object').slice(0, 64).map((c) => ({ ...c }))
+  : undefined);
+
+const cleanObj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? JSON.parse(JSON.stringify(v)) : undefined);
+
+// ----------------------------------------------------------------- the seven ---
+
+const BUILDING_STATES = ['ok', 'burning', 'out', 'rubble'];
+
+const SCHEMAS = {};
+const define = (name, fields) => { SCHEMAS[name] = { name, fields }; return SCHEMAS[name]; };
+
+/**
+ * A building. Only the dynamic fields are saved; everything about what a building *is* comes from the city
+ * seed. A building whose saved fields are all as they were at the start of the shift is left out of the save
+ * altogether (`serializeBuildings` in fire.js), which is most of the 1,100 buildings.
+ */
+define('building', {
+  id: ref(),
+  state: oneOf(BUILDING_STATES, 'ok'),
+  fire: num(0, 0, 1),
+  integrity: num((b) => b.maxIntegrity, 0, Infinity),
+  trapped: int(0, 0, 10000),
+  occupants: int(0, 0, 100000),
+  evacuated: bool(false),
+  reward: num(0, 0, 1e7),
+  incidentType: optStr(),
+  incidentLabel: optStr(),
+  neglect: num(0, 0, 1e6),
+  hazmat: bool(false),
+  big: bool(false),
+  leak: num(0, 0, 1e6),
+  collapse: json(null, (v) => (v === null ? null : cleanObj(v))),
+  utilityCut: bool(false),
+  evacZone: optStr(),
+  evacOccupants: saved('optInt', null, { min: 0, max: 100000 }),
+  spreadTimer: num(0, -1e6, 1e6),
+  dryTime: num(0, 0, 1e6),
+  runaway: bool(false),
+  ignitedAt: saved('optNumber', null),
+  // what a building is: the city seed gives it back
+  type: derived('city seed'),
+  zone: derived('city seed'),
+  waterfront: derived('city seed'),
+  sizeClass: derived('city seed'),
+  name: derived('city seed'),
+  x: derived('city seed'),
+  y: derived('city seed'),
+  w: derived('city seed'),
+  h: derived('city seed'),
+  floors: derived('city seed'),
+  elevation: derived('city seed'),
+  roofColor: derived('city seed'),
+  maxIntegrity: derived('city seed'),
+  risk: derived('city seed'),
+  details: derived('city seed'),
+  stationIndex: derived('city seed'),
+  base: derived('city seed'),
+  smokeAcc: transient('cosmetic smoke-puff accumulator'),
+  tookHold: transient('recomputed from `neglect` when a shift is loaded'),
+});
+
+define('engine', {
+  id: ref(),
+  type: str('engine', 32),
+  number: int(1, 1, 9999),
+  name: str('', 60),
+  bayIndex: int(0, 0, 255),
+  hotkey: str('', 2),
+  x: num(0, -1e7, 1e7),
+  y: num(0, -1e7, 1e7),
+  angle: num(0, -1e4, 1e4),
+  water: num((e) => e.capacity ?? 0, 0, 1e7),
+  targetId: ref(),
+  supply: json(null, (v) => (v === null ? null : cleanObj(v))),
+  kits: num(0, 0, 999),
+  cargo: json([], cleanKit),
+  path: route(),
+  goal: json(null, (v) => (v === null ? null : (v && Number.isInteger(v.x) && Number.isInteger(v.y) ? { x: v.x, y: v.y } : undefined))),
+  arrived: bool(false),
+  packTimer: num(0, 0, 10),
+  wildfireId: ref(),
+  blockadeId: ref(),
+  victimId: ref(),
+  patientId: ref(),
+  hospitalId: ref(),
+  standbyFor: json(null, (v) => (v === null ? null : (v && typeof v.id === 'string' && typeof v.kind === 'string' ? { kind: v.kind, id: v.id } : undefined))),
+  mission: json(null, (v) => (v === null ? null : (v && isNum(v.x) && isNum(v.y) && (v.mode === 'attack' || v.mode === 'refill') ? { ...v } : undefined))),
+  status: str('in quarters', 40, false),
+  kitAcc: num(0, 0, 100),
+  worked: bool(false),
+  returnIn: saved('optNumber', null),
+  hospitalRetry: saved('optNumber', null),
+  emptyWarned: bool(false),
+  fullNotified: bool(false),
+  lowWarned: bool(false),
+  noHospital: bool(false),
+  dryHome: json(null, (v) => (v === null || typeof v === 'boolean' ? v : undefined)),
+  refilling: transient('set every tick by the vehicle update from its supply'),
+  pumping: transient('set every tick by the vehicle update from its crews'),
+  etaCache: transient('a route cache; rebuilt on demand'),
+  kind: derived('always "engine"'),
+  spec: derived('the vehicle type\'s spec, copied from CONFIG.vehicles by type'),
+  base: derived('the vehicle type\'s spec in CONFIG.vehicles'),
+  capacity: derived('from the spec'),
+  crewIds: derived('rebuilt from the crew list (each crew member names its engine)'),
+});
+
+define('crew', {
+  id: ref(),
+  number: int(1, 1, 99999),
+  name: str('', 60),
+  engineId: ref(),
+  personId: ref(),
+  x: num(0, -1e7, 1e7),
+  y: num(0, -1e7, 1e7),
+  angle: num(0, -1e4, 1e4),
+  riding: bool(true),
+  targetId: ref(),
+  wildfireId: ref(),
+  tool: saved('optString', null, { max: 24 }),
+  fetch: saved('optString', null, { max: 24 }),
+  fetchTimer: num(0, 0, 1e4),
+  cut: json(null, (v) => (v === null ? null : cleanObj(v))),
+  path: route(2000),
+  rescueTimer: num(0, 0, 1e4),
+  rescueId: ref(),
+  patientId: ref(),
+  treatTimer: num(0, 0, 1e4),
+  victimId: ref(),
+  idleFor: num(0, 0, 1e6),
+  boarding: bool(false),
+  think: num(0, -1e4, 1e4),
+  warned: bool(false),
+  warnedHazard: bool(false),
+  contamination: num(0, 0, 1e4),
+  status: str('aboard', 40, false),
+  kind: derived('always "crew"'),
+  medic: derived('from the vehicle spec'),
+  spraying: transient('set every tick by the crew update from its target'),
+});
+
+define('patient', {
+  id: ref(),
+  x: num(0, -1e7, 1e7),
+  y: num(0, -1e7, 1e7),
+  buildingId: ref(),
+  buildingName: str('somewhere', 80),
+  severity: num(0.5, 0, 1),
+  critical: bool(false),
+  life: num(1, -1e6, 1e6),
+  maxLife: num(1, 0, 1e6),
+  treated: bool(false),
+  treatTimer: num(0, 0, 1e4),
+  claimedBy: ref(),
+  medicId: ref(),
+  leaveAt: num(0, 0, 1e9),
+  reason: optStr(),
+  kind: derived('always "patient"'),
+  name: derived('a constant label'),
+});
+
+define('victim', {
+  id: ref(),
+  x: num(0, -1e7, 1e7),
+  y: num(0, -1e7, 1e7),
+  label: str('the water', 80),
+  life: num(1, -1e6, 1e6),
+  maxLife: num(1, 0, 1e6),
+  rescueTimer: num(0, 0, 1e4),
+  diverId: ref(),
+  kind: derived('always "victim"'),
+  name: derived('a constant label'),
+});
+
+define('blockade', {
+  id: ref(),
+  name: str('Blocked road', 80),
+  place: str('', 80),
+  tx: int(0, 0, 100000),
+  ty: int(0, 0, 100000),
+  tw: int(1, 1, 1000),
+  th: int(1, 1, 1000),
+  progress: num(0, 0, 1),
+  big: bool(false),
+  reward: num(0, 0, 1e7),
+  fuelAt: saved('optNumber', null),
+  fuelDone: bool(false),
+  debris: bool(false),
+  createdAt: num(0, -1e9, 1e9),
+  kind: derived('always "blockade"'),
+  x: derived('from the tile box (tx, tw)'),
+  y: derived('from the tile box (ty, th)'),
+  w: derived('from the tile box'),
+  h: derived('from the tile box'),
+  saved: derived('the tiles sealed by the wreck, found again by sealing the street when it is restored'),
+});
+
+define('wildfire', {
+  id: ref(),
+  name: str('Forest fire', 80),
+  x: num(0, -1e7, 1e7),
+  y: num(0, -1e7, 1e7),
+  radius: num(80, 0, 1e6),
+  maxRadius: num(576, 0, 1e6),
+  intensity: num(0.55, 0, 1),
+  reward: num(0, 0, 1e7),
+  spreadTimer: num(5, -1e4, 1e4),
+  big: bool(true),
+  kind: derived('always "wildfire"'),
+  smokeAcc: transient('cosmetic smoke-puff accumulator'),
+});
+
+// ------------------------------------------------------------------ helpers ---
+
+/** The default of a field: a value, or a function of the entity it belongs to. */
+const defaultOf = (field, entity) => {
+  const d = typeof field.def === 'function' ? field.def(entity ?? {}) : field.def;
+  return d && typeof d === 'object' ? JSON.parse(JSON.stringify(d)) : d;
+};
+
+const SHORT = 64;
+
+/** Check one value against a field; returns the repaired value, or `undefined` if it cannot be used. */
+function check(field, v, entity) {
+  switch (field.kind) {
+    case 'number': return isNum(v) ? Math.min(field.max, Math.max(field.min, v)) : undefined;
+    case 'optNumber': return v === null ? null : isNum(v) ? v : undefined;
+    case 'int': return isNum(v) ? Math.min(field.max, Math.max(field.min, Math.round(v))) : undefined;
+    case 'optInt': return v === null ? null : isNum(v) ? Math.min(field.max, Math.max(field.min, Math.round(v))) : undefined;
+    case 'bool': return typeof v === 'boolean' ? v : undefined;
+    case 'string': return typeof v === 'string' && (field.cut || v.length <= field.max) ? v.slice(0, field.max) : undefined;
+    case 'optString': return v === null ? null : typeof v === 'string' ? v.slice(0, field.max ?? MAX_STR) : undefined;
+    case 'enum': return field.values.includes(v) ? v : undefined;
+    case 'ref': return v === null ? null : typeof v === 'string' && v.length > 0 && v.length < SHORT ? v : undefined;
+    case 'json': {
+      if (field.clean) return field.clean(v, entity);
+      return v === undefined ? undefined : JSON.parse(JSON.stringify(v));
+    }
+    default: return undefined;
+  }
+}
+
+const fieldNames = (schema, which = null) => Object.entries(schema.fields)
+  .filter(([, f]) => which == null || f.persist === which).map(([k]) => k);
+
+/** Every field the schema declares, in any category. */
+const declaredNames = (schema) => new Set(Object.keys(schema.fields));
+
+/**
+ * The saved form of an entity: its `saved` fields, plus any unknown fields it carries in `extra`.
+ * With `compact`, fields equal to their default are left out (the loader puts the default back).
+ */
+function saveFields(schema, entity, { compact = false } = {}) {
+  const out = {};
+  for (const [name, f] of Object.entries(schema.fields)) {
+    if (f.persist !== 'saved') continue;
+    let v = entity[name];
+    if (v === undefined) v = defaultOf(f, entity);
+    if (compact && JSON.stringify(v) === JSON.stringify(defaultOf(f, entity))) continue;
+    if (f.kind === 'json' && v && typeof v === 'object') v = f.out ? f.out(v) : JSON.parse(JSON.stringify(v));
+    out[name] = v;
+  }
+  if (entity.extra && typeof entity.extra === 'object') {
+    for (const [k, v] of Object.entries(entity.extra)) if (!(k in out)) out[k] = v;
+  }
+  return out;
+}
+
+/**
+ * Read a saved entity. `target` supplies the values the defaults are computed from (for example a building's
+ * `maxIntegrity`) and is NOT modified. Returns `{ values, extra, issues }`:
+ *   values  every `saved` field, repaired or defaulted
+ *   extra   fields the schema does not know (kept so they are written back)
+ *   issues  strings describing what was repaired
+ * A field that is absent keeps `target[name]` if the target has one and `keep` is set (compact saves), else its default.
+ */
+function loadFields(schema, data, target = null, { keep = false, where = schema.name } = {}) {
+  const values = {};
+  const extra = {};
+  const issues = [];
+  const src = data && typeof data === 'object' ? data : {};
+  for (const [name, f] of Object.entries(schema.fields)) {
+    if (f.persist !== 'saved') continue;
+    if (!(name in src) || src[name] === undefined) {
+      values[name] = keep && target && name in target ? target[name] : defaultOf(f, target);
+      continue;
+    }
+    const ok = check(f, src[name], target);
+    if (ok === undefined) {
+      issues.push(`${where}.${name} was damaged and has been reset`);
+      values[name] = defaultOf(f, target);
+    } else {
+      if ((f.kind === 'number' || f.kind === 'int') && (src[name] < f.min || src[name] > f.max)) {
+        issues.push(`${where}.${name} was out of range and has been limited`);
+      }
+      values[name] = ok;
+    }
+  }
+  for (const k of Object.keys(src)) {
+    if (!(k in schema.fields)) extra[k] = src[k];
+  }
+  if (Object.keys(extra).length > 0) issues.push(`${where} has unknown fields: ${Object.keys(extra).join(', ')} (kept)`);
+  return { values, extra, issues };
+}
+
+/** Apply `loadFields` results onto an entity (and remember the extras). */
+function applyFields(entity, result) {
+  Object.assign(entity, result.values);
+  if (Object.keys(result.extra).length > 0) entity.extra = { ...(entity.extra ?? {}), ...result.extra };
+  return entity;
+}
+
+/**
+ * Drop entities that share an id (the first one wins) and entities with no usable id.
+ * Returns `{ list, issues }`.
+ */
+function uniqueById(list, where) {
+  const seen = new Set();
+  const out = [];
+  const issues = [];
+  for (const item of Array.isArray(list) ? list : []) {
+    const id = item && typeof item === 'object' ? item.id : null;
+    if (typeof id !== 'string' || id.length === 0 || id.length >= SHORT) {
+      issues.push(`${where}: an entry with no usable id was dropped`);
+      continue;
+    }
+    if (seen.has(id)) {
+      issues.push(`${where}: duplicate id ${id} — the later entry was dropped`);
+      continue;
+    }
+    seen.add(id);
+    out.push(item);
+  }
+  return { list: out, issues };
+}
+
+return { num, int, bool, str, optStr, oneOf, ref, json, derived, transient, BUILDING_STATES, SCHEMAS, fieldNames, declaredNames, saveFields, loadFields, applyFields, uniqueById };
+})();
+
 // ---- src/systems/grid.js ----
 __m["src/systems/grid.js"] = (function () {
 const { TILE } = __m["src/core/config.js"];
@@ -4024,6 +4580,7 @@ return { OFFROAD_COST, buildNav, buildLattice, index, passable, walkableAt, driv
 
 // ---- src/systems/economy.js ----
 __m["src/systems/economy.js"] = (function () {
+const { clone, registerPersistence } = __m["src/systems/persistence.js"];
 const { CONFIG } = __m["src/core/config.js"];
 const { clamp } = __m["src/core/math.js"];
 const { addEvent } = __m["src/systems/events.js"];
@@ -4037,6 +4594,7 @@ const { addEvent } = __m["src/systems/events.js"];
 //
 // Credits may go negative (the city never closes the station) but nothing can be
 // bought while they are below the price.
+
 
 
 
@@ -4241,6 +4799,15 @@ function updateEconomy(state, dt) {
 
 }
 
+registerPersistence({
+  key: 'ledger',
+  order: 36,
+  save: (state) => ({ ...state.ledger, lastCharges: state.ledger.lastCharges ? { ...state.ledger.lastCharges } : null, by: { ...(state.ledger.by ?? {}) } }),
+  load: (state, data) => {
+    if (data.ledger && typeof data.ledger === 'object') state.ledger = { ...createLedger(), ...clone(data.ledger) };
+  },
+});
+
 return { money, createLedger, earn, cityInGoodShape, missionDone, spend, valueFactor, speedBonus, lossShare, hourlyCharges, takeLoan, repayLoan, toggleInsurance, updateEconomy };
 })();
 
@@ -4251,6 +4818,8 @@ const { dist, distToRect } = __m["src/core/math.js"];
 const { addEvent } = __m["src/systems/events.js"];
 const { earn, money, spend } = __m["src/systems/economy.js"];
 const { standTileForRect, tileCenter } = __m["src/systems/grid.js"];
+const { nextId, registerPersistence } = __m["src/systems/persistence.js"];
+const { SCHEMAS, applyFields, loadFields, saveFields, uniqueById } = __m["src/systems/schema.js"];
 // Injured civilians and the paramedics who treat them.
 //
 // People hurt by a fire lie on the pavement near the building until an
@@ -4267,7 +4836,7 @@ const { standTileForRect, tileCenter } = __m["src/systems/grid.js"];
 
 
 
-let seq = 1;
+
 
 const isMedical = (engine) => Boolean(engine?.spec?.medical);
 
@@ -4290,7 +4859,7 @@ function spawnPatientAt(state, {
   const [lo, hi] = CONFIG.medical.survive;
   const survive = hi - (hi - lo) * sev;
   const patient = {
-    id: `patient${seq++}`,
+    id: nextId(state, 'patient'),
     kind: 'patient',
     name: 'Injured person',
     x,
@@ -4352,22 +4921,24 @@ function injureRescued(state, building) {
   return spawnPatient(state, building, state.rng.range(0.4, 1));
 }
 
-function restorePatients(state, list = []) {
-  state.patients = list.map((p) => ({
-    kind: 'patient',
-    name: 'Injured person',
-    treatTimer: 0,
-    claimedBy: null,
-    medicId: null,
-    leaveAt: 0,
-    ...p,
-  }));
-  for (const p of state.patients) {
-    const match = /(\d+)$/.exec(p.id ?? '');
-    if (match) seq = Math.max(seq, Number(match[1]) + 1);
-  }
+function restorePatients(state, list = [], issues = []) {
+  const unique = uniqueById(list, 'patients');
+  issues.push(...unique.issues);
+  state.patients = unique.list.map((entry) => {
+    const patient = { kind: 'patient', name: 'Injured person', id: entry.id };
+    const loaded = loadFields(SCHEMAS.patient, entry, patient, { where: `patient ${entry.id}` });
+    issues.push(...loaded.issues);
+    return applyFields(patient, loaded);
+  });
   return state.patients;
 }
+
+registerPersistence({
+  key: 'patients',
+  order: 60,
+  save: (state) => state.patients.map((p) => saveFields(SCHEMAS.patient, p)),
+  load: (state, data, ctx) => restorePatients(state, data.patients, ctx.issues),
+});
 
 const findPatient =(state, id) => state.patients.find((p) => p.id === id) ?? null;
 
@@ -4728,6 +5299,7 @@ return { trappedCount, evacuate, updateFleeing, rescuePerson };
 
 // ---- src/systems/wind.js ----
 __m["src/systems/wind.js"] = (function () {
+const { registerPersistence } = __m["src/systems/persistence.js"];
 const { TAU, clamp } = __m["src/core/math.js"];
 const { addEvent } = __m["src/systems/events.js"];
 // Wind: one direction and one strength for the whole city, drifting slowly.
@@ -4739,6 +5311,7 @@ const { addEvent } = __m["src/systems/events.js"];
 //
 // `dir` is the direction the wind blows TOWARD, in radians, 0 = east and
 // positive turning clockwise on screen (y grows downward).
+
 
 
 
@@ -4806,11 +5379,22 @@ function windLabel(wind) {
   return `${windFrom(wind.dir)} ${Math.round(wind.speed * KMH)} km/h`;
 }
 
+registerPersistence({
+  key: 'wind',
+  order: 37,
+  save: (state) => ({ ...state.wind }),
+  load: (state, data) => {
+    if (data.wind && typeof data.wind === 'object') state.wind = { ...state.wind, ...data.wind };
+  },
+});
+
 return { createWind, updateWind, windVector, downwindFactor, alignment, windFrom, windLabel };
 })();
 
 // ---- src/systems/fire.js ----
 __m["src/systems/fire.js"] = (function () {
+const { registerPersistence } = __m["src/systems/persistence.js"];
+const { SCHEMAS, applyFields, loadFields, saveFields, uniqueById } = __m["src/systems/schema.js"];
 const { CONFIG, TILE } = __m["src/core/config.js"];
 const { clamp, lerp, rectsTouch } = __m["src/core/math.js"];
 const { addEvent } = __m["src/systems/events.js"];
@@ -4818,6 +5402,8 @@ const { evacuate } = __m["src/systems/civilians.js"];
 const { downwindFactor } = __m["src/systems/wind.js"];
 const { earn, lossShare, money, spend, speedBonus, valueFactor } = __m["src/systems/economy.js"];
 // Fire, smoke and debris. Fire is the only thing in the game that can win.
+
+
 
 
 
@@ -5039,7 +5625,63 @@ function updateFire(state, dt) {
   }
 }
 
-return { buildingRect, activeFires, fireResistance, fireDifficulty, ignite, unattendedFactor, updateFire };
+// ------------------------------------------------------------------ saving ---
+
+// What each building looked like when the game was created: a building still like that is not saved, and
+// one missing from a save is left as the city seed made it.
+const startingLook = new WeakMap();
+
+/** Remember every building's starting state (called once, when the game is created). */
+function snapshotBuildings(state) {
+  for (const b of state.buildings) startingLook.set(b, JSON.stringify(saveFields(SCHEMAS.building, b)));
+}
+
+function serializeBuildings(state) {
+  const out = [];
+  for (const b of state.buildings) {
+    const entry = saveFields(SCHEMAS.building, b);
+    if (startingLook.get(b) !== JSON.stringify(entry)) out.push(entry);
+  }
+  return out;
+}
+
+/**
+ * Put the saved buildings back. A save from before 0.18 lists every building and keeps the leak, collapse,
+ * cut-utility and evacuation fields apart in `buildingExtras`; both forms are read.
+ */
+function restoreBuildings(state, list, extras, issues = []) {
+  const unique = uniqueById(list, 'buildings');
+  issues.push(...unique.issues);
+  const legacy = new Map((Array.isArray(extras) ? extras : []).filter((e) => e && typeof e.id === 'string').map((e) => [e.id, e]));
+  const byId = new Map(state.buildings.map((b) => [b.id, b]));
+  const seen = new Set();
+  for (const entry of unique.list) {
+    const b = byId.get(entry.id);
+    if (!b) {
+      issues.push(`building ${entry.id} is not in this city and was ignored`);
+      continue;
+    }
+    seen.add(entry.id);
+    const merged = legacy.has(entry.id) ? { ...legacy.get(entry.id), ...entry } : entry;
+    applyFields(b, loadFields(SCHEMAS.building, merged, b, { keep: true, where: `building ${entry.id}` }));
+    b.tookHold = b.neglect >= 0.5;
+  }
+  // Extras for a building the list does not mention (a hand-made save).
+  for (const [id, e] of legacy) {
+    const b = byId.get(id);
+    if (!b || seen.has(id)) continue;
+    applyFields(b, loadFields(SCHEMAS.building, e, b, { keep: true, where: `building ${id}` }));
+  }
+}
+
+registerPersistence({
+  key: 'buildings',
+  order: 20,
+  save: (state) => serializeBuildings(state),
+  load: (state, data, ctx) => restoreBuildings(state, data.buildings, data.buildingExtras, ctx.issues),
+});
+
+return { buildingRect, activeFires, fireResistance, fireDifficulty, ignite, unattendedFactor, updateFire, snapshotBuildings, serializeBuildings, restoreBuildings };
 })();
 
 // ---- src/data/transit.js ----
@@ -7486,6 +8128,8 @@ const { V_ROADS, H_ROADS } = __m["src/data/city.js"];
 const { addEvent } = __m["src/systems/events.js"];
 const { earn, money } = __m["src/systems/economy.js"];
 const { roadFactor } = __m["src/systems/weather.js"];
+const { nextId, registerPersistence } = __m["src/systems/persistence.js"];
+const { SCHEMAS, applyFields, loadFields, saveFields, uniqueById } = __m["src/systems/schema.js"];
 // Blocked roads and the traffic that fills the streets.
 //
 // A wreck or a pile of debris seals a stretch of road: those tiles stop being
@@ -7503,7 +8147,7 @@ const { roadFactor } = __m["src/systems/weather.js"];
 
 
 
-let seq = 1;
+
 
 // ---------------------------------------------------------- blockades ---
 
@@ -7564,7 +8208,7 @@ function addBlockade(state, rect, opts = {}) {
     }
   }
   const blockade = {
-    id: `wreck${seq++}`,
+    id: nextId(state, 'wreck'),
     kind: 'blockade',
     name: opts.name ?? 'Blocked road',
     place: opts.place ?? '',
@@ -7592,19 +8236,34 @@ function addBlockade(state, rect, opts = {}) {
 }
 
 /** Bring a blockade back from a save (the nav is rebuilt from the city, so re-seal it). */
-function restoreBlockades(state, list = []) {
+function restoreBlockades(state, list = [], issues = []) {
   state.blockades = [];
-  for (const saved of list) {
-    const b = addBlockade(state, saved, { ...saved });
-    b.id = saved.id ?? b.id;
-    b.progress = saved.progress ?? 0;
-    b.fuelAt = saved.fuelAt ?? null;
-    b.fuelDone = Boolean(saved.fuelDone);
-    const match = /(\d+)$/.exec(b.id);
-    if (match) seq = Math.max(seq, Number(match[1]) + 1);
+  // Re-sealing the streets must not re-plan every vehicle's route: the saved routes already avoid them.
+  const onChange = state.onBlockadeChange;
+  state.onBlockadeChange = null;
+  const unique = uniqueById(list, 'blockades');
+  issues.push(...unique.issues);
+  for (const entry of unique.list) {
+    const loaded = loadFields(SCHEMAS.blockade, entry, null, { where: `blockade ${entry.id}` });
+    issues.push(...loaded.issues);
+    const v = loaded.values;
+    if (v.tx + v.tw > state.nav.w || v.ty + v.th > state.nav.h) {
+      issues.push(`blockade ${entry.id} is outside the map and was dropped`);
+      continue;
+    }
+    const b = addBlockade(state, v, v);
+    applyFields(b, { values: { id: v.id, progress: v.progress, fuelAt: v.fuelAt, fuelDone: v.fuelDone, createdAt: v.createdAt }, extra: loaded.extra });
   }
+  state.onBlockadeChange = onChange;
   return state.blockades;
 }
+
+registerPersistence({
+  key: 'blockades',
+  order: 70,
+  save: (state) => state.blockades.map((b) => saveFields(SCHEMAS.blockade, b)),
+  load: (state, data, ctx) => restoreBlockades(state, data.blockades, ctx.issues),
+});
 
 const findBlockade = (state, id) => state.blockades.find((b) => b.id === id) ?? null;
 
@@ -7808,6 +8467,8 @@ const { CONFIG, TILE } = __m["src/core/config.js"];
 const { SEA_Y } = __m["src/data/city.js"];
 const { addEvent } = __m["src/systems/events.js"];
 const { earn, money, spend } = __m["src/systems/economy.js"];
+const { nextId, registerPersistence } = __m["src/systems/persistence.js"];
+const { SCHEMAS, applyFields, loadFields, saveFields, uniqueById } = __m["src/systems/schema.js"];
 const { nearestPassable, tileOf } = __m["src/systems/grid.js"];
 const { spawnPatientAt } = __m["src/systems/medical.js"];
 const { districtName } = __m["src/systems/places.js"];
@@ -7827,7 +8488,8 @@ const { districtName } = __m["src/systems/places.js"];
 
 
 
-let seq = 1;
+
+
 
 const findVictim = (state, id) => state.victims.find((v) => v.id === id) ?? null;
 
@@ -7836,7 +8498,7 @@ function spawnVictim(state, x, y, label) {
   const [lo, hi] = CONFIG.water.survive;
   const life = state.rng.range(lo, hi);
   const victim = {
-    id: `victim${seq++}`,
+    id: nextId(state, 'victim'),
     kind: 'victim',
     name: 'Person in the water',
     x,
@@ -7851,16 +8513,24 @@ function spawnVictim(state, x, y, label) {
   return victim;
 }
 
-function restoreVictims(state, list = []) {
-  state.victims = list.map((v) => ({
-    kind: 'victim', name: 'Person in the water', rescueTimer: 0, diverId: null, ...v,
-  }));
-  for (const v of state.victims) {
-    const m = /(\d+)$/.exec(v.id ?? '');
-    if (m) seq = Math.max(seq, Number(m[1]) + 1);
-  }
+function restoreVictims(state, list = [], issues = []) {
+  const unique = uniqueById(list, 'victims');
+  issues.push(...unique.issues);
+  state.victims = unique.list.map((entry) => {
+    const victim = { kind: 'victim', name: 'Person in the water', id: entry.id };
+    const loaded = loadFields(SCHEMAS.victim, entry, victim, { where: `victim ${entry.id}` });
+    issues.push(...loaded.issues);
+    return applyFields(victim, loaded);
+  });
   return state.victims;
 }
+
+registerPersistence({
+  key: 'victims',
+  order: 30,
+  save: (state) => state.victims.map((v) => saveFields(SCHEMAS.victim, v)),
+  load: (state, data, ctx) => restoreVictims(state, data.victims, ctx.issues),
+});
 
 /** The nearest victim a diver could still reach, optionally one nobody has claimed. */
 function nearestVictim(state, x, y, { unclaimed = false, maxDist = Infinity } = {}) {
@@ -7989,12 +8659,16 @@ const { estimate } = __m["src/systems/eta.js"];
 const { workOnBlockade } = __m["src/systems/blockades.js"];
 const { findVictim, rescueVictim } = __m["src/systems/water.js"];
 const { clearRate, diveRate, diveReach, isCareer, speedMod, upgradeLevel, workRate } = __m["src/systems/modifiers.js"];
+const { registerPersistence } = __m["src/systems/persistence.js"];
+const { SCHEMAS, applyFields, loadFields, saveFields, uniqueById } = __m["src/systems/schema.js"];
 // The engine companies and their crews: driving the road network, laying hose,
 // pulling people out and putting water on a fire.
 //
 // A shift starts with one engine and three firefighters. More engines can be
 // bought at the station; each one is independent — its own tank, hose, deck gun
 // and crew — and the selection tells the orders where to go.
+
+
 
 
 
@@ -8355,9 +9029,9 @@ function spawnVehicle(state, type, station = null) {
   return engine;
 }
 
-function spawnCrew(state, engine) {
-  const number = state.nextCrew++;
-  const crew = {
+/** A crew member with every field at its starting value (not yet in the lists). */
+function crewBase(engine, number) {
+  return {
     id: `crew${number}`,
     kind: 'crew',
     number,
@@ -8386,8 +9060,14 @@ function spawnCrew(state, engine) {
     fetchTimer: 0,
     cut: null,
     boarding: false,
+    contamination: 0,
+    warnedHazard: false,
     status: 'aboard',
   };
+}
+
+function spawnCrew(state, engine) {
+  const crew = crewBase(engine, state.nextCrew++);
   engine.crewIds.push(crew.id);
   state.crew.push(crew);
   return crew;
@@ -8519,106 +9199,62 @@ function vehicleBase(state, type, overrides = {}) {
   };
 }
 
-const finite = (n) => typeof n === 'number' && Number.isFinite(n);
-const idOrNull = (v) => (typeof v === 'string' && v.length > 0 && v.length < 64 ? v : null);
-
 /**
- * The part of a saved vehicle that is its current order: the route it is driving, where it is
- * going, what it was sent to, whether it has arrived. Anything missing or damaged means "no
- * order", which is what saves written before routes were kept look like.
+ * Rebuild the fleet from a save. Every field goes through the engine and crew schemas (schema.js): wrong types
+ * and out-of-range numbers are repaired, unknown fields are kept, duplicate ids are dropped, and a vehicle's
+ * route, orders and timers come back as they were. `issues` collects what was repaired.
  */
-function savedOrder(entry) {
-  const path = Array.isArray(entry.path)
-    ? entry.path.filter((p) => p && finite(p.x) && finite(p.y)).slice(0, 4000).map((p) => ({ x: p.x, y: p.y }))
-    : [];
-  const goal = entry.goal && Number.isInteger(entry.goal.x) && Number.isInteger(entry.goal.y) && path.length > 0
-    ? { x: entry.goal.x, y: entry.goal.y } : null;
-  const m = entry.mission;
-  const mission = m && finite(m.x) && finite(m.y) && (m.mode === 'attack' || m.mode === 'refill')
-    ? { x: m.x, y: m.y, tid: idOrNull(m.tid), wid: idOrNull(m.wid), mode: m.mode } : null;
-  const s = entry.standbyFor;
-  const standbyFor = s && idOrNull(s.id) && idOrNull(s.kind) ? { kind: s.kind, id: s.id } : null;
-  const hasOrder = path.length > 0 || mission != null;
-  return {
-    path,
-    goal,
-    arrived: hasOrder ? Boolean(entry.arrived) : entry.arrived === true,
-    packTimer: finite(entry.packTimer) && entry.packTimer > 0 ? Math.min(entry.packTimer, 10) : 0,
-    wildfireId: idOrNull(entry.wildfireId),
-    blockadeId: idOrNull(entry.blockadeId),
-    victimId: idOrNull(entry.victimId),
-    patientId: idOrNull(entry.patientId),
-    hospitalId: idOrNull(entry.hospitalId),
-    standbyFor,
-    mission,
-    status: typeof entry.status === 'string' && entry.status.length < 40 ? entry.status : 'in quarters',
-  };
-}
-
-/** Rebuild the fleet from a save file. */
-function restoreFleet(state, saved = {}) {
+function restoreFleet(state, saved = {}, issues = []) {
   state.engines = [];
   state.crew = [];
   state.vehicleCount = {};
   state.nextCrew = 1;
 
-  for (const entry of saved.engines ?? []) {
+  const engines = uniqueById(saved.engines, 'engines');
+  issues.push(...engines.issues);
+  for (const entry of engines.list) {
     const type = CONFIG.vehicles[entry.type] ? entry.type : 'engine';
     const engine = vehicleBase(state, type, {
       id: entry.id,
-      number: entry.number ?? 1,
-      name: entry.name ?? CONFIG.vehicles[type].label,
-      bayIndex: entry.bayIndex ?? 0,
-      hotkey: entry.hotkey ?? '',
-      x: entry.x ?? state.city.spawn.x,
-      y: entry.y ?? state.city.spawn.y,
-      angle: entry.angle ?? state.city.spawn.angle,
-      water: entry.water ?? CONFIG.vehicles[type].capacity,
-      targetId: entry.targetId ?? null,
-      supply: entry.supply ?? null,
-      kits: entry.kits ?? CONFIG.vehicles[type].kits ?? 0,
-      cargo: (entry.cargo ?? []).map((c) => ({ ...c })),
-      ...savedOrder(entry),
+      number: Math.max(1, Math.round(Number(entry.number) || 1)),
+      name: CONFIG.vehicles[type].label,
     });
+    const loaded = loadFields(SCHEMAS.engine, { ...entry, type }, engine, { keep: true, where: `engine ${entry.id}` });
+    issues.push(...loaded.issues);
+    applyFields(engine, loaded);
+    if (engine.name === '') engine.name = CONFIG.vehicles[type].label;
+    if (engine.path.length === 0) engine.goal = null; // a destination only means something with a route
     state.vehicleCount[type] = Math.max(state.vehicleCount[type] ?? 0, engine.number);
     state.engines.push(engine);
   }
 
-  for (const entry of saved.crews ?? []) {
+  const crews = uniqueById(saved.crews, 'crews');
+  issues.push(...crews.issues);
+  for (const entry of crews.list) {
     const engine = state.engines.find((e) => e.id === entry.engineId);
-    if (!engine) continue;
-    const number = entry.number ?? state.nextCrew;
-    const crew = {
-      id: entry.id ?? `crew${number}`,
-      kind: 'crew',
-      number,
-      name: entry.name ?? `Crew ${number}`,
-      engineId: engine.id,
-      personId: entry.personId ?? null,
-      x: entry.x ?? engine.x,
-      y: entry.y ?? engine.y,
-      angle: 0,
-      path: [],
-      riding: entry.riding !== false,
-      targetId: entry.targetId ?? null,
-      spraying: false,
-      think: 0,
-      warned: false,
-      rescueTimer: 0,
-      rescueId: null,
-      wildfireId: entry.wildfireId ?? null,
-      patientId: null,
-      treatTimer: 0,
-      idleFor: 0,
-      victimId: null,
-      medic: Boolean(engine.spec?.medical),
-      tool: entry.riding !== false ? defaultTool(engine) : entry.tool ?? defaultTool(engine),
-      fetch: null,
-      fetchTimer: 0,
-      cut: entry.riding !== false || !entry.cut ? null : { ...entry.cut, timer: 0 },
-      boarding: false,
-      status: entry.riding !== false ? 'aboard' : 'standing by',
-    };
+    if (!engine) {
+      issues.push(`crew ${entry.id} belongs to a vehicle that is not in the save and was dropped`);
+      continue;
+    }
+    const number = Number.isFinite(entry.number) && entry.number >= 1 ? Math.round(entry.number) : state.nextCrew;
+    const crew = crewBase(engine, number);
+    crew.id = entry.id;
+    crew.engineId = engine.id;
+    crew.medic = Boolean(engine.spec?.medical);
+    const loaded = loadFields(SCHEMAS.crew, entry, crew, { keep: true, where: `crew ${entry.id}` });
+    issues.push(...loaded.issues);
+    applyFields(crew, loaded);
+    if (!('name' in entry)) crew.name = `Crew ${number}`;
+    if (crew.riding) {
+      // Aboard: nobody is working, the gear is stowed (a damaged save cannot leave a rider with a job).
+      Object.assign(crew, {
+        path: [], rescueId: null, patientId: null, victimId: null, fetch: null, cut: null, boarding: false,
+        tool: defaultTool(engine), status: 'aboard',
+      });
+    } else {
+      if (!('tool' in entry) || crew.tool == null) crew.tool = defaultTool(engine);
+      if (!('status' in entry)) crew.status = 'standing by';
+    }
     state.nextCrew = Math.max(state.nextCrew, number + 1);
     engine.crewIds.push(crew.id);
     state.crew.push(crew);
@@ -8630,6 +9266,22 @@ function restoreFleet(state, saved = {}) {
   state.selected = null;
   return state.engines;
 }
+
+registerPersistence({
+  key: 'fleet',
+  keys: ['engines', 'crews', 'cut'],
+  fields: ['engines', 'crew', 'cut'],
+  order: 40,
+  save: (state) => ({
+    engines: state.engines.map((e) => saveFields(SCHEMAS.engine, e)),
+    crews: state.crew.map((c) => saveFields(SCHEMAS.crew, c)),
+    cut: cutList(state),
+  }),
+  load: (state, data, ctx) => {
+    restoreCuts(state, Array.isArray(data.cut) ? data.cut : []);
+    restoreFleet(state, { engines: data.engines, crews: data.crews }, ctx.issues);
+  },
+});
 
 function findUnit(state, id) {
   return state.units.find((u) => u.id === id) ?? null;
@@ -10684,6 +11336,7 @@ return { isFree, openJobs, cost, order, dispatchAll, returnAll };
 
 // ---- src/systems/presets.js ----
 __m["src/systems/presets.js"] = (function () {
+const { clone, registerPersistence } = __m["src/systems/persistence.js"];
 const { CONFIG, TILE } = __m["src/core/config.js"];
 const { dist } = __m["src/core/math.js"];
 const { addEvent } = __m["src/systems/events.js"];
@@ -10699,6 +11352,7 @@ const { findPatient } = __m["src/systems/medical.js"];
 //
 // Presets are data on `state.presets`, saved with the shift and (in a career) with
 // the campaign. Orders go through the same `order` the dispatch-all code uses.
+
 
 
 
@@ -11032,6 +11686,13 @@ function redirectDispatch(state, engineId, target) {
   return ok;
 }
 
+registerPersistence({
+  key: 'presets',
+  order: 81,
+  save: (state) => clone(state.presets),
+  load: (state, data) => { state.presets = restorePresets(data.presets); },
+});
+
 return { INCIDENT_KINDS, PRESET_ROLES, slotLabel, fitsSlot, defaultPresets, restorePresets, validatePreset, createPreset, updatePreset, deletePreset, findPreset, jobFor, presetKindFor, recommendedPresets, nearestStations, diverTotal, availableVehicles, planPreset, applyPreset, cancelDispatch, redirectDispatch };
 })();
 
@@ -11228,10 +11889,12 @@ return { incidentIntel };
 
 // ---- src/systems/evacuation.js ----
 __m["src/systems/evacuation.js"] = (function () {
+const { clone, registerPersistence } = __m["src/systems/persistence.js"];
 const { CONFIG, TILE } = __m["src/core/config.js"];
 const { findPath, smoothPath, standTileForRect, tileCenter } = __m["src/systems/grid.js"];
 const { addEvent } = __m["src/systems/events.js"];
 const { supportAt } = __m["src/systems/modifiers.js"];
+const { nextId } = __m["src/systems/persistence.js"];
 // Evacuation. The player orders an evacuation zone round an incident (a hazard
 // zone, a forest fire, a building about to explode). Buildings inside it are
 // emptied one after another, the residents walk to an emergency shelter, the
@@ -11244,12 +11907,13 @@ const { supportAt } = __m["src/systems/modifiers.js"];
 
 
 
+
+
 const SHELTER_TYPES = ['school', 'mall', 'hospital', 'hotel'];
 const MAX_ZONES = 4;
 const MIN_ZONE_TIME = 60; // seconds
 const COLORS = ['#3d6fb0', '#b0553d', '#4f7a45', '#8a5a9e', '#b08a3a', '#5e6b78'];
 
-let seq = 1;
 
 function createEvacuation() {
   return { zones: [], stats: { evacuated: 0, sheltered: 0, unsheltered: 0, zones: 0 } };
@@ -11260,10 +11924,6 @@ function restoreEvacuation(data) {
   if (!data || !Array.isArray(data.zones)) return e;
   e.zones = data.zones.map((z) => ({ ...z, queue: [...(z.queue ?? [])] }));
   e.stats = { ...e.stats, ...(data.stats ?? {}) };
-  for (const z of e.zones) {
-    const m = /(\d+)$/.exec(z.id ?? '');
-    if (m) seq = Math.max(seq, Number(m[1]) + 1);
-  }
   return e;
 }
 
@@ -11313,7 +11973,7 @@ function startEvacuation(state, target) {
     return dup;
   }
   const zone = {
-    id: `evac${seq++}`, x: target.x, y: target.y, radius, label: target.label ?? 'the area',
+    id: nextId(state, 'evac'), x: target.x, y: target.y, radius, label: target.label ?? 'the area',
     startedAt: state.time, acc: 0, queue: [], total: 0, evacuated: 0, closed: true, shelter: null, boosted: false,
   };
   const list = state.buildings
@@ -11444,12 +12104,19 @@ function evacuateIncident(state, kind, id) {
   return startEvacuation(state, target);
 }
 
+registerPersistence({
+  key: 'evac',
+  order: 84,
+  save: (state) => clone(state.evac),
+  load: (state, data) => { state.evac = restoreEvacuation(data.evac); },
+});
 
 return { createEvacuation, restoreEvacuation, startEvacuation, updateEvacuation, evacuationAdvice, evacuateIncident };
 })();
 
 // ---- src/systems/agencies.js ----
 __m["src/systems/agencies.js"] = (function () {
+const { clone, registerPersistence } = __m["src/systems/persistence.js"];
 const { CONFIG, TILE } = __m["src/core/config.js"];
 const { addEvent } = __m["src/systems/events.js"];
 const { spend, money } = __m["src/systems/economy.js"];
@@ -11468,6 +12135,7 @@ const { incidentPoint } = __m["src/systems/eta.js"];
 //   civil       a shelter and a faster evacuation of the area (evacuation.js)
 //   utility     cuts gas and power to a building: no explosion, slower fire
 //   coastguard  pulls people out of the water near the scene
+
 
 
 
@@ -11642,6 +12310,13 @@ function updateSupport(state) {
   s.active = s.active.filter((c) => state.time <= c.until || (c.cargo?.length ?? 0) > 0);
 }
 
+registerPersistence({
+  key: 'support',
+  order: 83,
+  save: (state) => clone(state.support),
+  load: (state, data) => { state.support = restoreSupport(data.support); },
+});
+
 return { UNLOCK, createSupport, restoreSupport, agencyStatus, allAgencies, callAgency, updateSupport };
 })();
 
@@ -11667,6 +12342,7 @@ return { on, emit };
 
 // ---- src/systems/report.js ----
 __m["src/systems/report.js"] = (function () {
+const { clone, registerPersistence } = __m["src/systems/persistence.js"];
 const { CONFIG, TILE } = __m["src/core/config.js"];
 const { clamp } = __m["src/core/math.js"];
 const { emit } = __m["src/systems/hooks.js"];
@@ -11679,6 +12355,7 @@ const { emit } = __m["src/systems/hooks.js"];
 //
 // The simulation never reads this module back; it is the same kind of observer
 // as the audio.
+
 
 
 
@@ -11970,6 +12647,13 @@ function formatDuration(seconds) {
   const s = Math.round(seconds);
   return s >= 60 ? `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s` : `${s}s`;
 }
+
+registerPersistence({
+  key: 'report',
+  order: 82,
+  save: (state) => clone(state.report),
+  load: (state, data) => { state.report = restoreReport(state, data.report); },
+});
 
 return { createReport, restoreReport, observe, GRADES, gradeOf, scoreShift, buildReport, formatDuration };
 })();
@@ -13211,13 +13895,14 @@ const { SCENARIOS_START } = __m["src/data/startScenarios.js"];
 
 
 
-const CAMPAIGN_VERSION = 1;
+const CAMPAIGN_VERSION = 2;
 
 function createCampaign({ name = 'Harbor City Fire Department', scenario = 'harbor', seed = null } = {}) {
   const start = SCENARIOS_START[scenario] ?? SCENARIOS_START.harbor;
   const useSeed = seed ?? start.seed;
   return {
     version: CAMPAIGN_VERSION,
+    meta: { migratedFrom: null },
     id: `career-${Date.now().toString(36)}`,
     name: String(name).trim().slice(0, 40) || 'Fire Department',
     scenario,
@@ -13433,6 +14118,7 @@ __m["src/systems/saves.js"] = (function () {
 const { CONFIG } = __m["src/core/config.js"];
 const { clamp } = __m["src/core/math.js"];
 const { CAMPAIGN_VERSION, createCampaign } = __m["src/systems/campaign.js"];
+const { OLDEST_SHIFT: OLDEST, SHIFT_VERSION: CURRENT_SHIFT } = __m["src/systems/persistence.js"];
 const { emptyTotals } = __m["src/systems/careerStats.js"];
 const { createFinance } = __m["src/systems/finance.js"];
 const { createObjectives } = __m["src/systems/objectives.js"];
@@ -13442,14 +14128,18 @@ const { SKILLS } = __m["src/data/personnel.js"];
 // Saving and loading, safely.
 //
 // A save slot holds an *envelope*: `{ format, kind, savedAt, shift, campaign? }`.
-// The shift is `serialize(state)` (version 17); the campaign is a career's
-// persistent data. Rules this module keeps:
+// The shift is `serialize(state)` (version 18); the campaign is a career's
+// persistent data (version 2). Rules this module keeps:
 //
 //   - an old Quick Response save (a bare shift, version 16) still loads, and is
 //     copied to `<key>.bak` before anything overwrites it;
-//   - a save from a newer game (higher format) is never read down or overwritten;
-//   - a save that cannot be parsed is copied to `<key>.corrupt`, never deleted;
-//   - missing or damaged fields get safe defaults instead of failing the load.
+//   - a save from a newer game (higher format or version) is never read down or overwritten;
+//   - a save that cannot be parsed is copied to `<key>.corrupt`, never deleted, and the newest
+//     readable backup generation is offered instead;
+//   - missing or damaged fields get safe defaults instead of failing the load (see schema.js);
+//   - the last three saves of a slot are kept (`<key>.gen1` newest ... `.gen3`), at least
+//     `BACKUP_EVERY_MS` apart; a write that fails (storage full, blocked, or not read back the way
+//     it was written) leaves the live save as it was, and frees older backups before giving up.
 //
 // Storage is passed in (the browser's localStorage, or a stub in the tests).
 
@@ -13463,9 +14153,15 @@ const { SKILLS } = __m["src/data/personnel.js"];
 
 
 
+
 const ENVELOPE_FORMAT = 2;
-const SHIFT_VERSION = 17;
-const OLDEST_SHIFT = 16;
+const SHIFT_VERSION = CURRENT_SHIFT;
+const OLDEST_SHIFT = OLDEST;
+
+/** How many earlier saves of a slot are kept, and how far apart (milliseconds) they are at least. */
+const GENERATIONS = 3;
+const BACKUP_EVERY_MS = 120000;
+const GEN_SUFFIXES = Array.from({ length: GENERATIONS }, (_, i) => `.gen${i + 1}`);
 
 const KEYS = {
   quick: 'firestation.save.v16', // kept: Quick Response saves written by earlier versions live here
@@ -13486,7 +14182,34 @@ const STEPS = {
     mode: 'quick', // everything before 17 was Quick Response
     presets: null, report: null, support: null, evac: null, disaster: null, scenario: null, rules: {},
   }),
+  // 18 adds: id counters per game (`ids`; the loader also derives them from the ids in use), the fields the
+  // entity schemas now keep (timers, crew routes and tasks, patient and victim state, building timers), and
+  // buildings saved only when they changed. All of it is additive: a version 17 shift lists every building and
+  // keeps its leak/collapse extras apart in `buildingExtras`, and the loaders still read that form.
+  17: (d) => ({ ...d, version: 18, ids: d.ids && typeof d.ids === 'object' ? d.ids : {} }),
 };
+
+/** One step per campaign version: each takes a campaign of version n and returns n + 1. */
+const CAMPAIGN_STEPS = {
+  // 2 adds `meta` (where the campaign came from). Nothing else changes; people gain their new fields in the
+  // release that uses them, through this same chain.
+  1: (c) => ({ ...c, version: 2, meta: { migratedFrom: 1 } }),
+};
+
+/** Bring a campaign up to the current version. `{ ok, data, from }`, `{ newer: true }` or `{ ok: false }`. */
+function migrateCampaign(input) {
+  if (!input || typeof input !== 'object') return { ok: false, error: 'Not a campaign' };
+  const from = Number(input.version ?? 1);
+  if (!Number.isFinite(from) || from < 1) return { ok: false, error: 'The campaign has no usable version' };
+  if (from > CAMPAIGN_VERSION) return { ok: false, newer: true, error: 'newer' };
+  let c = { ...input, version: from };
+  while (c.version < CAMPAIGN_VERSION) {
+    const step = CAMPAIGN_STEPS[c.version];
+    if (!step) return { ok: false, error: `No migration from campaign version ${c.version}` };
+    c = step(c);
+  }
+  return { ok: true, data: c, from };
+}
 
 /** Bring a shift save up to the current version. `{ ok, data, from }` or `{ ok: false, error }`. */
 function migrateShift(input) {
@@ -13533,9 +14256,11 @@ function normalizeShift(d) {
   return { ok: true, errors, data: out };
 }
 
-function normalizeCampaign(c) {
-  if (!c || typeof c !== 'object') return null;
-  if (Number(c.version) > CAMPAIGN_VERSION) return { newer: true };
+function normalizeCampaign(input) {
+  const m = migrateCampaign(input);
+  if (m.newer) return { newer: true };
+  if (!m.ok) return null;
+  const c = m.data;
   const base = createCampaign({ name: c.name, scenario: c.scenario in { harbor: 1, riverside: 1, lean: 1 } ? c.scenario : 'harbor', seed: fin(c.seed, null) });
   const out = {
     ...base,
@@ -13558,6 +14283,7 @@ function normalizeCampaign(c) {
     history: { months: arr(c.history?.months), shifts: arr(c.history?.shifts) },
     presets: restorePresets(c.presets),
     unlocked: arr(c.unlocked),
+    meta: c.meta && typeof c.meta === 'object' ? { ...c.meta } : { migratedFrom: null },
   };
   if (out.fleet.length === 0) out.fleet = base.fleet;
   out.objectives.completed = out.objectives.completed && typeof out.objectives.completed === 'object' ? out.objectives.completed : {};
@@ -13630,6 +14356,15 @@ function inspectRaw(raw) {
   }
   const n = normalizeShift(migrated.data);
   if (!n.ok) return { status: 'corrupt', error: n.errors[0] };
+  // The envelope records how many vehicles and buildings it was written with; fewer means a write was cut short.
+  const check = value.check;
+  if (check && typeof check === 'object') {
+    for (const k of ['engines', 'crews', 'patients']) {
+      if (Number.isFinite(check[k]) && Array.isArray(migrated.data[k]) && migrated.data[k].length !== check[k]) {
+        return { status: 'corrupt', error: `The save is incomplete (${k}: ${migrated.data[k].length} of ${check[k]})` };
+      }
+    }
+  }
 
   let campaign = null;
   if (value.kind === 'career') {
@@ -13663,6 +14398,18 @@ function readSlot(storage, key) {
   const result = inspectRaw(raw);
   if (result.status === 'corrupt') {
     keepCopy(storage, `${key}.corrupt`, raw);
+    // The live save is damaged (a write that was cut short, say): offer the newest backup that reads.
+    for (const suffix of GEN_SUFFIXES) {
+      let backup = null;
+      try {
+        backup = storage.getItem(key + suffix);
+      } catch { continue; }
+      if (backup == null) continue;
+      const info = inspectRaw(backup);
+      if (info.status === 'ok' || info.status === 'migrated') {
+        return { ...info, recoveredFrom: key + suffix, damaged: result.error, warnings: [...(info.warnings ?? []), `The latest save was damaged (${result.error}); the previous one was loaded`] };
+      }
+    }
     result.error = `${result.error}; a copy was kept`;
   }
   return result;
@@ -13671,6 +14418,9 @@ function readSlot(storage, key) {
 // ------------------------------------------------------------ recovery ---
 
 const BACKUP_SUFFIXES = {
+  '.gen1': 'the previous save',
+  '.gen2': 'the save before that',
+  '.gen3': 'the oldest kept save',
   '.bak': 'the Quick Response save from before it was upgraded',
   '.prev': 'the career that was replaced by a new one',
   '.replaced': 'the save that was replaced by a restore',
@@ -13728,13 +14478,44 @@ function keepCopy(storage, key, raw) {
   } catch { /* nothing more can be done */ }
 }
 
-/**
- * Write a slot. Refuses to overwrite a save from a newer game, and keeps a
- * copy of an old-format save the first time it is replaced.
- */
-function writeSlot(storage, key, { kind, shift, campaign = null }) {
+const savedAtOf = (raw) => {
+  const p = parse(raw);
+  return p.ok && p.value && Number.isFinite(p.value.savedAt) ? p.value.savedAt : 0;
+};
+
+/** Keep `existing` (the save about to be replaced) as generation 1 when it is old enough; shift the others down. */
+function rotate(storage, key, existing, now) {
   try {
-    const existing = storage.getItem(key);
+    const g1 = storage.getItem(key + GEN_SUFFIXES[0]);
+    const when = savedAtOf(existing) || now;
+    if (g1 != null && when - savedAtOf(g1) < BACKUP_EVERY_MS) return false;
+    for (let i = GENERATIONS - 1; i >= 1; i--) {
+      const older = storage.getItem(key + GEN_SUFFIXES[i - 1]);
+      if (older != null) storage.setItem(key + GEN_SUFFIXES[i], older);
+    }
+    storage.setItem(key + GEN_SUFFIXES[0], existing);
+    return true;
+  } catch {
+    return false; // no room for a backup is no reason to refuse the save itself
+  }
+}
+
+/** Backups that may be given up, oldest first, to make room for a live save. */
+const EXPENDABLE = [...GEN_SUFFIXES].reverse().concat(['.replaced', '.prev', '.bak']);
+
+/**
+ * Write a slot. Refuses to overwrite a save from a newer game, keeps a copy of an old-format save the first
+ * time it is replaced, keeps the last three saves, and never loses the live save to a failed write:
+ *   - the new text is built before anything is touched;
+ *   - if the browser refuses it (storage full), older backups are given up one at a time and the write is
+ *     tried again, and if it still fails the live save is exactly what it was;
+ *   - after the write the text is read back; if it is not what was written the previous save is put back.
+ * Returns `{ ok, ... }`; on failure `reason` is 'newer', 'quota', 'storage' or 'verify'.
+ */
+function writeSlot(storage, key, { kind, shift, campaign = null }, { now = Date.now() } = {}) {
+  let existing = null;
+  try {
+    existing = storage.getItem(key);
     if (existing != null) {
       const p = parse(existing);
       if (p.ok && p.value && typeof p.value === 'object') {
@@ -13745,12 +14526,61 @@ function writeSlot(storage, key, { kind, shift, campaign = null }) {
         if (p.value.format == null) keepCopy(storage, `${key}.bak`, existing);
       }
     }
-    const envelope = { format: ENVELOPE_FORMAT, kind, savedAt: Date.now(), shift, ...(campaign ? { campaign } : {}) };
-    storage.setItem(key, JSON.stringify(envelope));
-    return { ok: true };
-  } catch (e) {
+  } catch {
     return { ok: false, reason: 'storage', error: 'Could not save — the browser blocked storage' };
   }
+
+  let text;
+  try {
+    const check = { engines: shift.engines?.length ?? 0, crews: shift.crews?.length ?? 0, patients: shift.patients?.length ?? 0 };
+    text = JSON.stringify({ format: ENVELOPE_FORMAT, kind, savedAt: now, check, shift, ...(campaign ? { campaign } : {}) });
+  } catch {
+    return { ok: false, reason: 'storage', error: 'Could not save — the shift could not be written out' };
+  }
+
+  if (existing != null) rotate(storage, key, existing, now);
+
+  const freed = []; // [suffix, text] of the backups given up, so they can be put back if it was no use
+  const attempt = () => {
+    try {
+      storage.setItem(key, text);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  let wrote = attempt();
+  for (const suffix of EXPENDABLE) {
+    if (wrote) break;
+    try {
+      const old = storage.getItem(key + suffix);
+      if (old == null) continue;
+      storage.removeItem(key + suffix);
+      freed.push([suffix, old]);
+    } catch { continue; }
+    wrote = attempt();
+  }
+  if (!wrote) {
+    // Giving the backups up did not help (the save is simply too big): put them back.
+    for (const [suffix, old] of freed) {
+      try {
+        storage.setItem(key + suffix, old);
+      } catch { /* best effort */ }
+    }
+    return { ok: false, reason: 'quota', error: 'Could not save — the browser has no room left; the previous save is unchanged' };
+  }
+
+  let back = null;
+  try {
+    back = storage.getItem(key);
+  } catch { /* read-back is best-effort */ }
+  if (back !== text) {
+    try {
+      if (existing != null) storage.setItem(key, existing);
+    } catch { /* nothing more can be done */ }
+    return { ok: false, reason: 'verify', error: 'Could not save — what was stored did not match; the previous save was put back' };
+  }
+  return { ok: true, bytes: text.length, ...(freed.length ? { freed: freed.map(([suffix]) => suffix.slice(1)) } : {}) };
 }
 
 /**
@@ -13822,11 +14652,12 @@ function storeScenarioLibrary(storage, list) {
   }
 }
 
-return { ENVELOPE_FORMAT, SHIFT_VERSION, OLDEST_SHIFT, KEYS, migrateShift, normalizeShift, normalizeCampaign, inspectRaw, readSlot, listBackups, restoreBackup, writeSlot, archiveSlot, hasSlot, loadResults, recordResult, loadScenarioLibrary, storeScenarioLibrary };
+return { ENVELOPE_FORMAT, SHIFT_VERSION, OLDEST_SHIFT, GENERATIONS, BACKUP_EVERY_MS, KEYS, migrateCampaign, migrateShift, normalizeShift, normalizeCampaign, inspectRaw, readSlot, listBackups, restoreBackup, writeSlot, archiveSlot, hasSlot, loadResults, recordResult, loadScenarioLibrary, storeScenarioLibrary };
 })();
 
 // ---- src/systems/contracts.js ----
 __m["src/systems/contracts.js"] = (function () {
+const { clone, registerPersistence } = __m["src/systems/persistence.js"];
 const { CONFIG } = __m["src/core/config.js"];
 const { addEvent } = __m["src/systems/events.js"];
 const { earn, money, spend } = __m["src/systems/economy.js"];
@@ -13837,6 +14668,7 @@ const { earn, money, spend } = __m["src/systems/economy.js"];
 // two can be active at once. Finish in time and the sponsor pays; miss the
 // deadline and you forfeit a quarter of the fee. Progress is counted from the
 // moment you accept, off the same stats the rest of the game keeps.
+
 
 
 
@@ -13947,6 +14779,13 @@ function updateContracts(state) {
     }
   }
 }
+
+registerPersistence({
+  key: 'contracts',
+  order: 35,
+  save: (state) => clone(state.contracts),
+  load: (state, data) => { state.contracts = restoreContracts(data.contracts); },
+});
 
 return { createContracts, restoreContracts, acceptContract, contractProgress, updateContracts };
 })();
@@ -14215,6 +15054,8 @@ const { spawnSmoke } = __m["src/systems/effects.js"];
 const { placeNear } = __m["src/systems/places.js"];
 const { alignment } = __m["src/systems/wind.js"];
 const { emit } = __m["src/systems/hooks.js"];
+const { nextId, registerPersistence } = __m["src/systems/persistence.js"];
+const { SCHEMAS, applyFields, loadFields, saveFields, uniqueById } = __m["src/systems/schema.js"];
 // Forest fires. Unlike a building fire, a wildfire is an area: it grows, it
 // throws embers into whatever building it reaches, and it takes sustained water
 // on its edge to bring down.
@@ -14228,11 +15069,11 @@ const { emit } = __m["src/systems/hooks.js"];
 
 
 
-let seq = 1;
+
 
 function startWildfire(state, x, y, reward = 2200, opts = {}) {
   const wildfire = {
-    id: `wildfire${seq++}`,
+    id: nextId(state, 'wildfire'),
     kind: 'wildfire',
     name: opts.name ?? 'Forest fire',
     x,
@@ -14251,21 +15092,24 @@ function startWildfire(state, x, y, reward = 2200, opts = {}) {
   return wildfire;
 }
 
-function restoreWildfires(state, list = []) {
-  state.wildfires = list.map((w) => ({
-    ...w,
-    radius: w.radius ?? 2.5 * TILE,
-    maxRadius: w.maxRadius ?? 18 * TILE,
-    intensity: w.intensity ?? 0.55,
-    spreadTimer: w.spreadTimer ?? 5,
-    smokeAcc: 0,
-  }));
-  for (const wf of state.wildfires) {
-    const match = /(\d+)$/.exec(wf.id ?? '');
-    if (match) seq = Math.max(seq, Number(match[1]) + 1);
-  }
+function restoreWildfires(state, list = [], issues = []) {
+  const unique = uniqueById(list, 'wildfires');
+  issues.push(...unique.issues);
+  state.wildfires = unique.list.map((entry) => {
+    const wildfire = { kind: 'wildfire', id: entry.id, smokeAcc: 0 };
+    const loaded = loadFields(SCHEMAS.wildfire, entry, wildfire, { where: `wildfire ${entry.id}` });
+    issues.push(...loaded.issues);
+    return applyFields(wildfire, loaded);
+  });
   return state.wildfires;
 }
+
+registerPersistence({
+  key: 'wildfires',
+  order: 50,
+  save: (state) => (state.wildfires ?? []).map((w) => saveFields(SCHEMAS.wildfire, w)),
+  load: (state, data, ctx) => restoreWildfires(state, data.wildfires, ctx.issues),
+});
 
 function updateWildfires(state, dt) {
   if (!state.wildfires || state.wildfires.length === 0) return;
@@ -15158,6 +16002,7 @@ return { cyclePhase, coverageRadius, openLimit, openIncidents, playScene, bigInc
 
 // ---- src/systems/disasters.js ----
 __m["src/systems/disasters.js"] = (function () {
+const { clone, registerPersistence } = __m["src/systems/persistence.js"];
 const { addEvent } = __m["src/systems/events.js"];
 const { earn, money } = __m["src/systems/economy.js"];
 const { ignite } = __m["src/systems/fire.js"];
@@ -15172,6 +16017,7 @@ const { drowningCall } = __m["src/systems/water.js"];
 // storms) rather than a simulation of their own. A disaster is a list of stages;
 // each stage runs once, `at` seconds after the disaster begins. When every stage
 // has run and the district is quiet again the response is paid.
+
 
 
 
@@ -15383,12 +16229,19 @@ function maybeStart(state, dt) {
   startDisaster(state, state.rng.pick(DISASTER_IDS));
 }
 
+registerPersistence({
+  key: 'disaster',
+  order: 85,
+  save: (state) => clone(state.disaster ?? null),
+  load: (state, data) => { state.disaster = data.disaster ?? null; },
+});
 
 return { DISASTERS, DISASTER_IDS, startDisaster, updateDisaster };
 })();
 
 // ---- src/systems/challenges.js ----
 __m["src/systems/challenges.js"] = (function () {
+const { clone, registerPersistence } = __m["src/systems/persistence.js"];
 const { TILE } = __m["src/core/config.js"];
 const { addEvent } = __m["src/systems/events.js"];
 const { ignite } = __m["src/systems/fire.js"];
@@ -15408,6 +16261,7 @@ const { ensureHotkeys } = __m["src/core/hotkeys.js"];
 // conditions; `updateScenario` plays the scripted incidents at their times and
 // judges the result. It is a separate mode (`state.mode === 'challenge'`) with
 // its own save slot, so it can never touch a career.
+
 
 
 
@@ -15635,6 +16489,13 @@ function updateScenario(state, dt) {
   }
 }
 
+registerPersistence({
+  key: 'scenario',
+  order: 85,
+  save: (state) => clone(state.scenario ?? null),
+  load: (state, data) => { state.scenario = state.mode === 'challenge' ? data.scenario : null; },
+});
+
 return { attachScenario, scenarioScore, scenarioProgress, updateScenario };
 })();
 
@@ -15644,28 +16505,28 @@ const { CONFIG, TILE } = __m["src/core/config.js"];
 const { Rng, formatClock } = __m["src/core/math.js"];
 const { createCity } = __m["src/data/city.js"];
 const { buildNav } = __m["src/systems/grid.js"];
-const { activeEngine, buildingOf, buyVehicle, freeBay, createUnits, deployCrew, dispatchEngine, engineForUnit, orderAmbulanceToPatient, orderCrew, orderEngine, orderEngineToWildfire, orderEngineToBlockade, pickAmbulanceFor, pickEngineForBlockade, recallCrew, repathEngines, restoreFleet, sellVehicle, sendEngineHome, sendToHospital, sendToPharmacy, toggleHydrant, updateUnits, isFirefighter, unstaffed, boatCanReach, diveVehiclesFor, orderEngineToVictim, canDive, crewForTool, cutList, equipCrew, orderCut, restoreCuts } = __m["src/systems/units.js"];
-const { findVictim, nearestVictim, restoreVictims, updateVictims } = __m["src/systems/water.js"];
+const { activeEngine, buildingOf, buyVehicle, freeBay, createUnits, deployCrew, dispatchEngine, engineForUnit, orderAmbulanceToPatient, orderCrew, orderEngine, orderEngineToWildfire, orderEngineToBlockade, pickAmbulanceFor, pickEngineForBlockade, recallCrew, repathEngines, sellVehicle, sendEngineHome, sendToHospital, sendToPharmacy, toggleHydrant, updateUnits, isFirefighter, unstaffed, boatCanReach, diveVehiclesFor, orderEngineToVictim, canDive, crewForTool, equipCrew, orderCut } = __m["src/systems/units.js"];
+const { findVictim, nearestVictim, updateVictims } = __m["src/systems/water.js"];
 const { repayLoan, takeLoan, toggleInsurance } = __m["src/systems/economy.js"];
-const { acceptContract, createContracts, restoreContracts, updateContracts } = __m["src/systems/contracts.js"];
-const { createTraffic, findBlockade, restoreBlockades, updateTraffic } = __m["src/systems/blockades.js"];
+const { acceptContract, createContracts, updateContracts } = __m["src/systems/contracts.js"];
+const { createTraffic, findBlockade, updateTraffic } = __m["src/systems/blockades.js"];
 const { explode, updateChains } = __m["src/systems/chains.js"];
 const { dispatchAll, returnAll } = __m["src/systems/dispatch.js"];
 const { bindHotkey, engineByKey } = __m["src/core/hotkeys.js"];
 const { createWind, updateWind } = __m["src/systems/wind.js"];
 const { createLedger, spend, updateEconomy } = __m["src/systems/economy.js"];
-const { findPatient, isMedical, nearestPatient, restorePatients, updatePatients } = __m["src/systems/medical.js"];
-const { activeFires, ignite, updateFire } = __m["src/systems/fire.js"];
+const { findPatient, isMedical, nearestPatient, updatePatients } = __m["src/systems/medical.js"];
+const { activeFires, ignite, snapshotBuildings, updateFire } = __m["src/systems/fire.js"];
 const { addEvent } = __m["src/systems/events.js"];
 const { spawnDebris, updateEffects } = __m["src/systems/effects.js"];
 const { updateFleeing } = __m["src/systems/civilians.js"];
 const { updateIncidents } = __m["src/systems/incidents.js"];
-const { restoreWildfires, updateWildfires } = __m["src/systems/wildfire.js"];
+const { updateWildfires } = __m["src/systems/wildfire.js"];
 const { applyStationEffects, chargeStation, refundStation, stationBlock, stationBudgetBlock, vehicleBlock } = __m["src/systems/stations.js"];
-const { createReport, observe, restoreReport } = __m["src/systems/report.js"];
-const { defaultPresets, restorePresets } = __m["src/systems/presets.js"];
-const { createSupport, restoreSupport, updateSupport } = __m["src/systems/agencies.js"];
-const { createEvacuation, restoreEvacuation, updateEvacuation } = __m["src/systems/evacuation.js"];
+const { createReport, observe } = __m["src/systems/report.js"];
+const { defaultPresets } = __m["src/systems/presets.js"];
+const { createSupport, updateSupport } = __m["src/systems/agencies.js"];
+const { createEvacuation, updateEvacuation } = __m["src/systems/evacuation.js"];
 const { updateHazards } = __m["src/systems/hazmat.js"];
 const { updateCollapse } = __m["src/systems/collapse.js"];
 const { updateDisaster } = __m["src/systems/disasters.js"];
@@ -15674,7 +16535,7 @@ const { updateCareerFinance } = __m["src/systems/finance.js"];
 const { updateObjectives } = __m["src/systems/objectives.js"];
 const { updateScenario } = __m["src/systems/challenges.js"];
 const { isCareer, stationOfEngine } = __m["src/systems/modifiers.js"];
-const { setWeather } = __m["src/systems/weather.js"];
+const { SHIFT_VERSION, clone, loadSections, ownedKeys, registerPersistence, reserveIds, saveSections, LEGACY_KEYS } = __m["src/systems/persistence.js"];
 // The shift: one city, one engine, one crew, and a district that keeps catching
 // fire. This module owns the tick order (alarms, units, fire, effects), the
 // rating, and the small vocabulary of orders the UI can give.
@@ -15770,6 +16631,7 @@ function createGame(seed = CONFIG.city.seed) {
     disaster: null,
     // UI-only scratch space: pointer hover, minimap rect, last toast shown.
     ui: { hover: null, minimap: null, seenEvent: 0 },
+    ids: {}, // id counters per kind of entity, saved with the shift
   };
 
   state.report = createReport(state);
@@ -15778,6 +16640,7 @@ function createGame(seed = CONFIG.city.seed) {
   state.onDestroyed = (building) => spawnDebris(state, building);
   state.onExplosion = (building) => explode(state, building);
   state.onBlockadeChange = () => repathEngines(state);
+  snapshotBuildings(state);
   return state;
 }
 
@@ -16360,10 +17223,41 @@ function commandSellVehicle(state, id = null) {
 
 
 // ------------------------------------------------------------------- save ---
+//
+// The shift is saved by the persistence registry (persistence.js): every system registers the part it owns
+// (units.js the fleet, medical.js the patients, fire.js the buildings, and so on). What stays here is what
+// belongs to the shift as a whole: the clock, the money, the mode, the id counters, and the repair of
+// references between entities.
 
-function serialize(state) {
-  return {
-    version: 17,
+const fin = (v, fallback, min = -Infinity, max = Infinity) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : fallback);
+
+registerPersistence({
+  key: 'mode',
+  keys: ['mode', 'rules'],
+  fields: ['mode', 'rules', 'campaign'],
+  order: 5,
+  save: (state) => ({ mode: state.mode, rules: clone(state.rules) }),
+  load: (state, data, ctx) => {
+    const career = data.mode === 'career';
+    state.mode = career && ctx.campaign ? 'career' : data.mode === 'challenge' && data.scenario ? 'challenge' : 'quick';
+    if (career && !ctx.campaign) ctx.issues.push('this was a career save but its career data is missing: loaded as a Quick Response shift');
+    state.campaign = state.mode === 'career' ? ctx.campaign : null;
+    state.rules = data.rules && typeof data.rules === 'object' && !Array.isArray(data.rules) ? { ...data.rules } : {};
+  },
+});
+
+registerPersistence({
+  key: 'core',
+  keys: [
+    'seed', 'time', 'clock', 'credits', 'rating', 'stats', 'incidentsEnabled', 'nextCallAt', 'nextBigAt', 'eventSeq',
+    'events', 'loan', 'insured', 'ownedStations', 'shiftDue', 'incidentPace', 'rngSeed', 'cycleIndex',
+  ],
+  fields: [
+    'seed', 'time', 'clock', 'credits', 'rating', 'stats', 'incidentsEnabled', 'nextCallAt', 'nextBigAt', 'eventSeq',
+    'events', 'loan', 'insured', 'ownedStations', 'shiftDue', 'incidentPace', 'rngSeed', 'cycleIndex', 'saveExtras',
+  ],
+  order: 10,
+  save: (state) => ({
     seed: state.seed,
     time: state.time,
     clock: state.clock,
@@ -16375,197 +17269,143 @@ function serialize(state) {
     nextBigAt: state.nextBigAt,
     eventSeq: state.eventSeq,
     events: state.events.slice(0, 30).map((e) => ({ ...e })),
-    buildings: state.buildings.map((b) => ({
-      id: b.id,
-      state: b.state,
-      fire: b.fire,
-      integrity: b.integrity,
-      trapped: b.trapped ?? 0,
-      occupants: b.occupants ?? 0,
-      evacuated: Boolean(b.evacuated),
-      reward: b.reward ?? 0,
-      incidentType: b.incidentType ?? null,
-      incidentLabel: b.incidentLabel ?? null,
-      neglect: b.neglect ?? 0,
-      hazmat: Boolean(b.hazmat),
-      big: Boolean(b.big),
-    })),
-    engines: state.engines.map((e) => ({
-      id: e.id,
-      type: e.type,
-      number: e.number,
-      name: e.name,
-      bayIndex: e.bayIndex,
-      hotkey: e.hotkey ?? '',
-      x: e.x,
-      y: e.y,
-      angle: e.angle,
-      water: e.water,
-      targetId: e.targetId,
-      supply: e.supply,
-      kits: e.kits,
-      cargo: (e.cargo ?? []).map((c) => ({ ...c })),
-      // The current order, so a vehicle that is driving to a call keeps driving after a load.
-      path: e.path.map((p) => ({ x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10 })),
-      goal: e.goal ? { x: e.goal.x, y: e.goal.y } : null,
-      arrived: Boolean(e.arrived),
-      packTimer: e.packTimer ?? 0,
-      wildfireId: e.wildfireId ?? null,
-      blockadeId: e.blockadeId ?? null,
-      victimId: e.victimId ?? null,
-      patientId: e.patientId ?? null,
-      hospitalId: e.hospitalId ?? null,
-      standbyFor: e.standbyFor ? { kind: e.standbyFor.kind, id: e.standbyFor.id } : null,
-      mission: e.mission ? { ...e.mission } : null,
-      status: e.status,
-    })),
-    crews: state.crew.map((c) => ({
-      id: c.id,
-      number: c.number,
-      name: c.name,
-      engineId: c.engineId,
-      personId: c.personId ?? null,
-      x: c.x,
-      y: c.y,
-      riding: c.riding,
-      targetId: c.targetId,
-      wildfireId: c.wildfireId,
-      tool: c.fetch ?? c.tool,
-      cut: c.cut ? { ...c.cut } : null,
-    })),
-    cut: cutList(state),
-    wildfires: (state.wildfires ?? []).map((w) => ({ ...w })),
-    patients: state.patients.map((p) => ({
-      id: p.id,
-      x: p.x,
-      y: p.y,
-      buildingId: p.buildingId,
-      buildingName: p.buildingName,
-      severity: p.severity,
-      life: p.life,
-      maxLife: p.maxLife,
-      treated: p.treated,
-      critical: p.critical,
-      claimedBy: p.claimedBy ?? null,
-      medicId: p.medicId ?? null,
-    })),
-    blockades: state.blockades.map((b) => ({
-      id: b.id, name: b.name, place: b.place, tx: b.tx, ty: b.ty, tw: b.tw, th: b.th,
-      progress: b.progress, big: b.big, reward: b.reward, fuelAt: b.fuelAt,
-      fuelDone: b.fuelDone, debris: b.debris,
-    })),
-    wind: { ...state.wind },
-    ownedStations: [...state.ownedStations],
-    victims: state.victims.map((v) => ({
-      id: v.id, x: v.x, y: v.y, label: v.label, life: v.life, maxLife: v.maxLife,
-    })),
     loan: state.loan,
     insured: state.insured,
-    contracts: JSON.parse(JSON.stringify(state.contracts)),
-    ledger: { ...state.ledger, lastCharges: state.ledger.lastCharges ? { ...state.ledger.lastCharges } : null, by: { ...(state.ledger.by ?? {}) } },
-    ...serializeExtras(state),
-  };
-}
-
-/** The parts of a shift added after save version 16 (all JSON-safe copies). */
-function serializeExtras(state) {
-  const copy = (v) => (v == null ? v : JSON.parse(JSON.stringify(v)));
-  return {
-    mode: state.mode,
-    rules: copy(state.rules),
-    weather: copy(state.weather),
-    presets: copy(state.presets),
-    report: copy(state.report),
-    support: copy(state.support),
-    evac: copy(state.evac),
-    disaster: copy(state.disaster),
-    scenario: copy(state.scenario),
+    ownedStations: [...state.ownedStations],
     shiftDue: Boolean(state.shiftDue),
     incidentPace: state.incidentPace ?? 1,
     rngSeed: state.rngSeed,
-    buildingExtras: state.buildings
-      .filter((b) => b.leak || b.collapse || b.utilityCut || b.evacZone)
-      .map((b) => ({ id: b.id, leak: b.leak ?? 0, collapse: copy(b.collapse ?? null), utilityCut: Boolean(b.utilityCut), evacZone: b.evacZone ?? null, evacOccupants: b.evacOccupants ?? null })),
+    cycleIndex: Number.isFinite(state.cycleIndex) ? state.cycleIndex : null,
+  }),
+  load: (state, data, ctx) => {
+    state.time = fin(data.time, 0, 0);
+    state.clock = fin(data.clock, CONFIG.clockStart);
+    state.credits = fin(data.credits, CONFIG.economy.start);
+    state.rating = fin(data.rating, CONFIG.rating.start, 0, 100);
+    const stats = data.stats && typeof data.stats === 'object' && !Array.isArray(data.stats) ? data.stats : {};
+    for (const [k, v] of Object.entries(stats)) {
+      if (typeof v === 'number' && Number.isFinite(v)) state.stats[k] = v;
+      else ctx.issues.push(`stat ${k} was damaged and was ignored`);
+    }
+    state.events = (Array.isArray(data.events) ? data.events : [])
+      .filter((e) => e && typeof e === 'object' && typeof e.text === 'string').slice(0, 60).map((e) => ({ ...e }));
+    state.eventSeq = fin(data.eventSeq, state.events.length, 0);
+    state.incidentsEnabled = data.incidentsEnabled !== false;
+    state.nextCallAt = fin(data.nextCallAt, CONFIG.incidents.firstCall);
+    state.nextBigAt = fin(data.nextBigAt, CONFIG.incidents.bigAfter + 30);
+    state.ownedStations = state.city.stations.map((_, i) => Boolean(data.ownedStations?.[i] ?? i === 0));
+    state.loan = fin(data.loan, 0, 0);
+    state.insured = Boolean(data.insured);
+    state.shiftDue = Boolean(data.shiftDue);
+    state.incidentPace = fin(data.incidentPace, 1, 0, 100);
+    if (Number.isFinite(data.rngSeed)) state.rngSeed = data.rngSeed;
+    if (Number.isFinite(data.cycleIndex)) state.cycleIndex = data.cycleIndex;
+  },
+});
+
+/**
+ * Every reference from one entity to another must point at something that exists; one that does not (a
+ * damaged or hand-edited save, or a vehicle sent to something that ended in the same tick) is cleared, and
+ * the repair is reported.
+ */
+function repairReferences(state, issues) {
+  const ids = (list) => new Set((list ?? []).map((x) => x.id));
+  const buildings = ids(state.buildings);
+  const engines = ids(state.engines);
+  const crew = ids(state.crew);
+  const patients = ids(state.patients);
+  const victims = ids(state.victims);
+  const wildfires = ids(state.wildfires);
+  const blockades = ids(state.blockades);
+  const hospitals = ids(state.city.hospitals);
+  const fix = (owner, field, set, label) => {
+    if (owner[field] != null && !set.has(owner[field])) {
+      issues.push(`${label} pointed at a ${field} that does not exist; cleared`);
+      owner[field] = null;
+    }
   };
+  for (const e of state.engines) {
+    const L = `vehicle ${e.id}`;
+    fix(e, 'targetId', buildings, L);
+    fix(e, 'wildfireId', wildfires, L);
+    fix(e, 'blockadeId', blockades, L);
+    fix(e, 'victimId', victims, L);
+    fix(e, 'patientId', patients, L);
+    fix(e, 'hospitalId', hospitals, L);
+    if (e.standbyFor) {
+      const pool = { building: buildings, wildfire: wildfires, patient: patients, victim: victims, blockade: blockades }[e.standbyFor.kind];
+      if (!pool || !pool.has(e.standbyFor.id)) e.standbyFor = null;
+    }
+  }
+  for (const c of state.crew) {
+    const L = `crew ${c.id}`;
+    fix(c, 'targetId', buildings, L);
+    fix(c, 'rescueId', buildings, L);
+    fix(c, 'wildfireId', wildfires, L);
+    fix(c, 'patientId', patients, L);
+    fix(c, 'victimId', victims, L);
+  }
+  for (const p of state.patients) {
+    fix(p, 'claimedBy', engines, `patient ${p.id}`);
+    fix(p, 'medicId', crew, `patient ${p.id}`);
+  }
+  for (const v of state.victims) fix(v, 'diverId', crew, `victim ${v.id}`);
 }
 
-/** Put the extras back. Missing parts (a save from an older version) keep the defaults createGame gave. */
-function restoreExtras(state, data, campaign) {
-  state.mode = data.mode === 'career' && campaign ? 'career' : data.mode === 'challenge' && data.scenario ? 'challenge' : 'quick';
-  state.campaign = state.mode === 'career' ? campaign : null;
-  state.rules = data.rules && typeof data.rules === 'object' ? { ...data.rules } : {};
-  state.presets = restorePresets(data.presets);
-  state.report = restoreReport(state, data.report);
-  state.support = restoreSupport(data.support);
-  state.evac = restoreEvacuation(data.evac);
-  state.disaster = data.disaster ?? null;
-  state.scenario = state.mode === 'challenge' ? data.scenario : null;
-  state.shiftDue = Boolean(data.shiftDue);
-  state.incidentPace = data.incidentPace ?? 1;
+registerPersistence({
+  key: 'references',
+  keys: [],
+  order: 95,
+  save: () => ({}),
+  load: (state, data, ctx) => repairReferences(state, ctx.issues),
+});
+
+registerPersistence({
+  key: 'luck',
+  keys: [],
+  order: 96,
+  save: () => ({}),
   // A loaded shift carries on with fresh luck instead of replaying the calls it started with.
-  if (Number.isFinite(data.rngSeed)) state.rngSeed = data.rngSeed;
-  state.rng = new Rng(state.rngSeed + Math.floor(state.time) * 31 + 1);
-  if (data.weather?.kind) setWeather(state, data.weather.kind);
-  const byId = new Map(state.buildings.map((b) => [b.id, b]));
-  for (const e of data.buildingExtras ?? []) {
-    const b = byId.get(e.id);
-    if (!b) continue;
-    b.leak = e.leak ?? 0;
-    b.collapse = e.collapse ?? null;
-    b.utilityCut = Boolean(e.utilityCut);
-    b.evacZone = e.evacZone ?? null;
-    b.evacOccupants = e.evacOccupants ?? null;
-  }
+  load: (state) => { state.rng = new Rng(state.rngSeed + Math.floor(state.time) * 31 + 1); },
+});
+
+registerPersistence({
+  key: 'ids',
+  order: 99,
+  save: (state) => ({ ...state.ids }),
+  load: (state, data) => {
+    reserveIds(state, data.ids, {
+      patient: state.patients, victim: state.victims, wreck: state.blockades, wildfire: state.wildfires, evac: state.evac?.zones,
+    });
+  },
+});
+
+/**
+ * The shift as plain JSON. Whatever a save carried that no section knows (a field from a newer build, a
+ * hand-added one) is kept in `state.saveExtras` when it is loaded and written back here.
+ */
+function serialize(state) {
+  return { version: SHIFT_VERSION, ...saveSections(state), ...(state.saveExtras ?? {}) };
 }
 
 function loadState(data, campaign = null) {
-  const state = createGame(data.seed ?? CONFIG.city.seed);
-  state.time = data.time ?? 0;
-  state.clock = data.clock ?? CONFIG.clockStart;
-  state.credits = data.credits ?? CONFIG.economy.start;
-  state.rating = data.rating ?? CONFIG.rating.start;
-  state.stats = { ...state.stats, ...(data.stats ?? {}) };
-  state.events = (data.events ?? []).map((e) => ({ ...e }));
-  state.eventSeq = data.eventSeq ?? state.events.length;
-  state.incidentsEnabled = data.incidentsEnabled !== false;
-  state.nextCallAt = data.nextCallAt ?? CONFIG.incidents.firstCall;
-  state.nextBigAt = data.nextBigAt ?? CONFIG.incidents.bigAfter + 30;
-
-  const byId = new Map(state.buildings.map((b) => [b.id, b]));
-  for (const saved of data.buildings ?? []) {
-    const b = byId.get(saved.id);
-    if (!b) continue;
-    b.state = saved.state ?? 'ok';
-    b.fire = saved.fire ?? 0;
-    b.integrity = saved.integrity ?? b.maxIntegrity;
-    b.trapped = saved.trapped ?? 0;
-    b.occupants = saved.occupants ?? 0;
-    b.evacuated = Boolean(saved.evacuated);
-    b.reward = saved.reward ?? 0;
-    b.incidentType = saved.incidentType ?? null;
-    b.incidentLabel = saved.incidentLabel ?? null;
-    b.neglect = saved.neglect ?? 0;
-    b.tookHold = (saved.neglect ?? 0) >= 0.5;
-    b.hazmat = Boolean(saved.hazmat);
-    b.big = Boolean(saved.big);
+  const input = data && typeof data === 'object' ? data : {};
+  const state = createGame(Number.isFinite(input.seed) ? input.seed : CONFIG.city.seed);
+  const issues = [];
+  loadSections(state, input, { campaign, issues });
+  const known = ownedKeys();
+  const extras = {};
+  for (const [k, v] of Object.entries(input)) {
+    if (k !== 'version' && !known.has(k) && !LEGACY_KEYS.includes(k)) extras[k] = v;
   }
-
-  state.ownedStations = state.city.stations.map((_, i) => Boolean(data.ownedStations?.[i] ?? i === 0));
-  restoreVictims(state, data.victims ?? []);
-  state.loan = data.loan ?? 0;
-  state.insured = Boolean(data.insured);
-  state.contracts = restoreContracts(data.contracts);
-  restoreCuts(state, data.cut ?? []);
-  restoreFleet(state, { engines: data.engines ?? [], crews: data.crews ?? [] });
-  restoreWildfires(state, data.wildfires ?? []);
-  restorePatients(state, data.patients ?? []);
-  restoreBlockades(state, data.blockades ?? []);
-  if (data.wind) state.wind = { ...state.wind, ...data.wind };
-  if (data.ledger) state.ledger = { ...createLedger(), ...data.ledger };
-  restoreExtras(state, data, campaign);
+  if (Object.keys(extras).length > 0) {
+    state.saveExtras = extras;
+    issues.push(`the save has fields this version does not know (${Object.keys(extras).join(', ')}); they are kept`);
+  }
   if (isCareer(state)) applyStationEffects(state);
   state.running = true;
   state.paused = false;
+  state.loadReport = { issues };
   return state;
 }
 
@@ -25729,6 +26569,12 @@ function loadGame(mode = state.mode) {
   }
   switchTo(next, { start: false });
   if (slot.status === 'migrated') addEvent(state, 'An older save was upgraded; a backup copy is kept', 'info');
+  if (slot.recoveredFrom) addEvent(state, 'The latest save was damaged, so the one before it was loaded; the damaged text is kept', 'warn');
+  const repaired = state.loadReport?.issues ?? [];
+  if (repaired.length > 0) {
+    console.info('[load] repaired:', repaired);
+    addEvent(state, `${repaired.length} value${repaired.length === 1 ? '' : 's'} in the save had to be repaired (see the console)`, 'info');
+  }
   return true;
 }
 

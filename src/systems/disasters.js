@@ -4,6 +4,7 @@
 // each stage runs once, `at` seconds after the disaster begins. When every stage
 // has run and the district is quiet again the response is paid.
 
+import { clone, registerPersistence } from './persistence.js';
 import { addEvent } from './events.js';
 import { earn, money } from './economy.js';
 import { ignite } from './fire.js';
@@ -214,3 +215,9 @@ function maybeStart(state, dt) {
   startDisaster(state, state.rng.pick(DISASTER_IDS));
 }
 
+registerPersistence({
+  key: 'disaster',
+  order: 85,
+  save: (state) => clone(state.disaster ?? null),
+  load: (state, data) => { state.disaster = data.disaster ?? null; },
+});

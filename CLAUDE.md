@@ -64,8 +64,13 @@ unless `isCareer(state)` (from `systems/modifiers.js`), so Quick Response must k
   commands. A career has people in `state.campaign.personnel`; crew units carry `personId`.
 - **Report** (`report.js`) is an observer: it scans the map ~4×/s and records incident start, first
   arrival and outcome; career XP and reputation come off its `incident:done` hook.
-- **Saves** (`saves.js`): envelope `{ format, kind, shift, campaign }`, shift version 17, migration steps
-  in `STEPS`. When you change the shift format add a step and bump `SHIFT_VERSION` and `serialize`'s version.
+- **Saves** (`saves.js`): envelope `{ format, kind, check, shift, campaign }`, shift version 18 (`SHIFT_VERSION` lives in
+  `persistence.js`), campaign version 2, migration steps in `STEPS` / `CAMPAIGN_STEPS`. The shift is written by the
+  **persistence registry** (`persistence.js`: each system calls `registerPersistence({ key, save, load, order })` for
+  what it owns) and entities by the declarative **schemas** (`schema.js`: every field is saved, derived or
+  transient-with-a-reason). New field on an entity → declare it in its schema; `test/schema.test.js` fails until you
+  do. Ids come from `nextId(state, name)` (per game, saved), never a module counter. `writeSlot` keeps three
+  generations and survives full or lying storage. Legacy fixtures (genuine old saves) are in `test/fixtures/legacy`.
 - **Scenarios** are plain data (`data/scenarios.js`): the eight challenges and the custom ones share a
   format and `validateScenario`. `challenges.js` runs them; `?challenge=<id>` starts one.
 - **UI**: `ui/command.js` renders the Headquarters tabs and the incident-card extras and handles their

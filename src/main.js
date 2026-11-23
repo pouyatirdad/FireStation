@@ -762,6 +762,12 @@ function loadGame(mode = state.mode) {
   }
   switchTo(next, { start: false });
   if (slot.status === 'migrated') addEvent(state, 'An older save was upgraded; a backup copy is kept', 'info');
+  if (slot.recoveredFrom) addEvent(state, 'The latest save was damaged, so the one before it was loaded; the damaged text is kept', 'warn');
+  const repaired = state.loadReport?.issues ?? [];
+  if (repaired.length > 0) {
+    console.info('[load] repaired:', repaired);
+    addEvent(state, `${repaired.length} value${repaired.length === 1 ? '' : 's'} in the save had to be repaired (see the console)`, 'info');
+  }
   return true;
 }
 

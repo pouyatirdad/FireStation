@@ -8,6 +8,7 @@
 // The simulation never reads this module back; it is the same kind of observer
 // as the audio.
 
+import { clone, registerPersistence } from './persistence.js';
 import { CONFIG, TILE } from '../core/config.js';
 import { clamp } from '../core/math.js';
 import { emit } from './hooks.js';
@@ -298,3 +299,10 @@ export function formatDuration(seconds) {
   const s = Math.round(seconds);
   return s >= 60 ? `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s` : `${s}s`;
 }
+
+registerPersistence({
+  key: 'report',
+  order: 82,
+  save: (state) => clone(state.report),
+  load: (state, data) => { state.report = restoreReport(state, data.report); },
+});

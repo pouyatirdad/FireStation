@@ -20,13 +20,14 @@ import { wireStations } from './stations.js';
 import { isCareer, personOf } from './modifiers.js';
 import { SCENARIOS_START } from '../data/startScenarios.js';
 
-export const CAMPAIGN_VERSION = 1;
+export const CAMPAIGN_VERSION = 2;
 
 export function createCampaign({ name = 'Harbor City Fire Department', scenario = 'harbor', seed = null } = {}) {
   const start = SCENARIOS_START[scenario] ?? SCENARIOS_START.harbor;
   const useSeed = seed ?? start.seed;
   return {
     version: CAMPAIGN_VERSION,
+    meta: { migratedFrom: null },
     id: `career-${Date.now().toString(36)}`,
     name: String(name).trim().slice(0, 40) || 'Fire Department',
     scenario,
