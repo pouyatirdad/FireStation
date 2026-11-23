@@ -47,3 +47,28 @@ Per-frame transient lists on `state` (`streams`, `hoses`) are cleared at the sta
 Fire difficulty is `fireResistance(b)` in `fire.js` (size from `b.w*b.h*floors`, a `stage` term so early fires in big buildings stay easy, and `b.neglect` that builds while nobody sprays); `city.js` types include tower/mall/factory/school/villa/tankfarm, `building.sizeClass` and `rebalanceSizes` (aim 50/30/12/8, `SIZE_TARGET`).
 
 Game rules worth knowing: there is no lose state (rating is just a score, credits may go negative); units are "engines" (apparatus of types engine/ladder/tanker/rescue/ambulance, sixteen bays per station, bases — Station 1, Station 2, the Harbour Dock (index 2), then six regional stations and the airport station (index 3 up, `station.kind` is `'region'` or `'airport'`, bought with `commandBuyStation`), `city.stations`, `city.bays[i].station`, ownership in `state.ownedStations` (one entry per station); boats berth only at the dock, `freeBay(state, station, sea)`) with attached "crew" units. Each engine has an immutable `base` spec and a per-engine copy `spec` — never mutate `CONFIG.vehicles`. There are no wages and no vehicle upgrades. Helicopters (`spec.flying`) and air tankers (`spec.plane`, which orbit a target and skim the sea, `updatePlane`) have no crew and ignore the nav layer; boats (`spec.boat`) use the `sail` nav mode and divers (`crew.tool === 'diving'`) the `swim` mode (`nav.walk` excludes open water); equipment is `spec.tools` (counts in the lockers) and `crew.tool` / `crew.fetch` (hose, chainsaw, diving, cutter, medkit) — use `toolsFree`/`equipCrew`, and the rescue boat (`spec.diver`) is the only vehicle whose crew start as divers; forests have no roads inside (`city.roadRuns` holds what is left of each avenue and street), and chainsaw crews cut tracks into `state.cut`, which also sets `nav.drive`; use `isFirefighter` when choosing a vehicle for a fire; an ambulance has `spec.medical`, no water, kits instead of a tank, and paramedic crews (`crew.medic`) that walk to patients within `medRange`; critical patients (`patient.critical`) go on `engine.cargo` and are delivered to the base hospitals in `city.hospitals` (one per station), and an ambulance that has `worked` returns to its base by itself; people in the water are `state.victims`; vehicles drive on any open ground (`nav.drive`: not buildings, water or woods) at `OFFROAD_COST` extra off the road (`nav.driveCost`), and `city.curves` are curvy roads stamped into `city.road`; wrecks (`state.blockades`) seal the street's whole width (pavement too) and are cleared by deployed fire crews, and `repathEngines` re-plans every moving vehicle when one appears; finance (loan, insurance, contracts) lives on `state` and is saved; money comes from incident rewards (speed bonus), value-scaled knockdown fees, treatment fees and donations, and goes on loan interest, the insurance premium, kits and penalties (there is no budget, no upkeep and no crew training). `README.md` documents gameplay, controls and economy in detail.
+
+## Modes, career and the command layer (added in 0.10–0.16)
+
+`state.mode` is `'quick'` (the original game), `'career'` or `'challenge'`. Every career rule is a no-op
+unless `isCareer(state)` (from `systems/modifiers.js`), so Quick Response must keep behaving as before.
+
+- **Tick order** (end of `update()` in `game.js`): hazards → collapse → evacuation → support agencies →
+  disasters → personnel → career finance → objectives → scenario → report observer.
+- **Leaf modules**: `modifiers.js` (skill rates, speed, support lookups, hazmat protection), `hooks.js`
+  (`on`/`emit`), `weather.js`. Units, fire and medical code may import these; they must import nothing of
+  career code. **The bundler cannot handle import cycles** — never make a new module import its importer.
+- **Campaign vs shift**: `campaign.js` (data, levels, reputation, `endShift`) is separate from the shift;
+  `modes.js` builds a shift from a campaign (`buildCareerShift`) or a scenario and holds the UI-facing
+  commands. A career has people in `state.campaign.personnel`; crew units carry `personId`.
+- **Report** (`report.js`) is an observer: it scans the map ~4×/s and records incident start, first
+  arrival and outcome; career XP and reputation come off its `incident:done` hook.
+- **Saves** (`saves.js`): envelope `{ format, kind, shift, campaign }`, shift version 17, migration steps
+  in `STEPS`. When you change the shift format add a step and bump `SHIFT_VERSION` and `serialize`'s version.
+- **Scenarios** are plain data (`data/scenarios.js`): the eight challenges and the custom ones share a
+  format and `validateScenario`. `challenges.js` runs them; `?challenge=<id>` starts one.
+- **UI**: `ui/command.js` renders the Headquarters tabs and the incident-card extras and handles their
+  actions; `hud.js` only hosts them. Do not rebuild the panel while someone is typing (`isEditing`).
+- **Editing tips**: many source files are CRLF. When patching with a script, use a *function* replacer
+  (`s.replace(a, () => b)`); a string replacer treats `$'` and `$&` specially and corrupts the file.
+- `DEVELOPMENT_PROGRESS.md` is the honest status; update it and `CHANGELOG.md` with each release.

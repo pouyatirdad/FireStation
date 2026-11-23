@@ -13,6 +13,7 @@ import { CONFIG, TILE } from '../core/config.js';
 import { V_ROADS, H_ROADS } from '../data/city.js';
 import { addEvent } from './events.js';
 import { earn, money } from './economy.js';
+import { roadFactor } from './weather.js';
 
 let seq = 1;
 
@@ -257,14 +258,15 @@ export function updateTraffic(state, dt) {
   const traffic = state.traffic;
   if (!traffic) return;
   const factor = rushFactor(state.clock);
-  if (factor !== state.trafficFactor) {
-    state.trafficFactor = factor;
+  if (factor !== state.rushNow) {
+    state.rushNow = factor;
     addEvent(
       state,
       factor < 1 ? 'Rush hour — the roads are congested, response times are longer' : 'Rush hour is over — the roads are clearing',
       'info',
     );
   }
+  state.trafficFactor = factor * roadFactor(state);
   const blockades = state.blockades;
 
   for (const lane of traffic.lanes) {

@@ -7,11 +7,11 @@ import { Rng, formatClock } from '../core/math.js';
 import { createCity } from '../data/city.js';
 import { buildNav } from './grid.js';
 import {
-  activeEngine, buildingOf, buyVehicle, createUnits, deployCrew, dispatchEngine,
+  activeEngine, buildingOf, buyVehicle, freeBay, createUnits, deployCrew, dispatchEngine,
   engineForUnit, orderAmbulanceToPatient, orderCrew, orderEngine, orderEngineToWildfire,
   orderEngineToBlockade, pickAmbulanceFor, pickEngineForBlockade, recallCrew, repathEngines,
   restoreFleet, sellVehicle, sendEngineHome, sendToHospital, sendToPharmacy,
-  toggleHydrant, updateUnits, isFirefighter,
+  toggleHydrant, updateUnits, isFirefighter, unstaffed,
   boatCanReach, diveVehiclesFor, orderEngineToVictim,
   canDive, crewForTool, cutList, equipCrew, orderCut, restoreCuts,
 } from './units.js';
@@ -41,6 +41,20 @@ import { spawnDebris, updateEffects } from './effects.js';
 import { updateFleeing } from './civilians.js';
 import { updateIncidents } from './incidents.js';
 import { restoreWildfires, updateWildfires } from './wildfire.js';
+import { applyStationEffects, chargeStation, refundStation, stationBlock, stationBudgetBlock, vehicleBlock } from './stations.js';
+import { createReport, observe, restoreReport } from './report.js';
+import { defaultPresets, restorePresets } from './presets.js';
+import { createSupport, restoreSupport, updateSupport } from './agencies.js';
+import { createEvacuation, restoreEvacuation, updateEvacuation } from './evacuation.js';
+import { updateHazards } from './hazmat.js';
+import { updateCollapse } from './collapse.js';
+import { updateDisaster } from './disasters.js';
+import { updatePersonnel, releaseVehicle, staffVehicle } from './personnel.js';
+import { updateCareerFinance } from './finance.js';
+import { updateObjectives } from './objectives.js';
+import { updateScenario } from './challenges.js';
+import { isCareer, stationOfEngine } from './modifiers.js';
+import { setWeather } from './weather.js';
 
 export function createGame(seed = CONFIG.city.seed) {
   const city = createCity(seed);
@@ -58,6 +72,7 @@ export function createGame(seed = CONFIG.city.seed) {
     over: false,
     speed: 1,
     incidentsEnabled: true,
+    rngSeed: seed * 7919 + 13, // the seed of this shift's calls; a career gives every shift its own
     rng: new Rng(seed * 7919 + 13),
     rating: CONFIG.rating.start,
     credits: CONFIG.economy.start,
@@ -84,10 +99,21 @@ export function createGame(seed = CONFIG.city.seed) {
     nextCallAt: CONFIG.incidents.firstCall,
     nextBigAt: CONFIG.incidents.bigAfter + 30,
     selected: null,
+    mode: 'quick', // 'quick' | 'career' | 'challenge'
+    campaign: null,
+    scenario: null,
+    rules: {},
+    weather: { kind: 'clear', label: 'Clear', roadFactor: 1 },
+    presets: defaultPresets(),
+    support: createSupport(),
+    evac: createEvacuation(),
+    hazards: [],
+    disaster: null,
     // UI-only scratch space: pointer hover, minimap rect, last toast shown.
     ui: { hover: null, minimap: null, seenEvent: 0 },
   };
 
+  state.report = createReport(state);
   createUnits(state);
   createTraffic(state);
   state.onDestroyed = (building) => spawnDebris(state, building);
@@ -129,6 +155,23 @@ export function update(state, dt) {
   updateWildfires(state, dt);
   updateFleeing(state, dt);
   updateEffects(state, dt);
+
+  // Operations, people and money (each is a no-op where it does not apply).
+  updateHazards(state, dt);
+  updateCollapse(state, dt);
+  updateEvacuation(state, dt);
+  updateSupport(state);
+  updateDisaster(state, dt);
+  updatePersonnel(state, dt);
+  updateCareerFinance(state, dt);
+  updateObjectives(state, dt);
+  updateScenario(state, dt);
+  observe(state, dt);
+
+  if (isCareer(state) && !state.shiftDue && state.time >= CONFIG.career.shiftLength) {
+    state.shiftDue = true;
+    addEvent(state, 'The shift is over — open the Career tab to file the shift report', 'big');
+  }
 }
 
 // ------------------------------------------------------------- selection ---
@@ -276,7 +319,7 @@ function closestIdleEngine(state, x, y, radiusTiles = 0) {
   let near = null;
   let nearD = Infinity;
   for (const engine of state.engines) {
-    if (!isFirefighter(engine) || engine.spec.hydrantOnly) continue;
+    if (!isFirefighter(engine) || engine.spec.hydrantOnly || unstaffed(state, engine)) continue;
     // A fireboat only helps where there is water in reach of the fire.
     if (engine.spec.boat && !boatCanReach(state, engine, x, y, radiusTiles)) continue;
     // Aircraft are the right tool for a forest fire, wherever they are parked.
@@ -569,8 +612,34 @@ export function commandHydrant(state) {
 
 /** Buy a vehicle of any type, optionally for a particular station (0 or 1). */
 export function commandBuyVehicle(state, type = 'engine', station = null) {
+  const block = vehicleBlock(state, type);
+  if (block) {
+    addEvent(state, `${CONFIG.vehicles[type]?.label ?? type}: ${block}`, 'warn');
+    return null;
+  }
+  // A career station only buys what its monthly budget allows.
+  const spec = CONFIG.vehicles[type];
+  if (spec && isCareer(state)) {
+    const bay = freeBay(state, spec.boat ? 2 : station, Boolean(spec.boat));
+    const home = bay >= 0 ? state.city.bays[bay].station : null;
+    const over = home != null ? stationBudgetBlock(state, home, spec.cost) : null;
+    if (over) {
+      addEvent(state, `${spec.label}: ${over}`, 'warn');
+      return null;
+    }
+  }
   const engine = buyVehicle(state, type, station);
-  if (engine) selectUnit(state, engine.id);
+  if (engine) {
+    if (isCareer(state)) {
+      chargeStation(state, stationOfEngine(state, engine), engine.spec.cost);
+      staffVehicle(state, engine);
+      applyStationEffects(state);
+      if (engine.spec.crew > 0 && engine.crewIds.length < engine.spec.crew) {
+        addEvent(state, `${engine.name} is short of crew — hire more firefighters`, 'warn');
+      }
+    }
+    selectUnit(state, engine.id);
+  }
   return engine;
 }
 
@@ -580,6 +649,11 @@ export function commandBuyStation(state, index = 1) {
   if (!station || index === 0) return false;
   if (state.ownedStations[index]) {
     addEvent(state, `${station.name} is already open`, 'info');
+    return false;
+  }
+  const blocked = index === 2 ? null : stationBlock(state);
+  if (blocked) {
+    addEvent(state, blocked, 'warn');
     return false;
   }
   const price = index === 2 ? CONFIG.economy.dockPrice
@@ -616,7 +690,11 @@ export function commandSellVehicle(state, id = null) {
   const engine = id
     ? state.engines.find((e) => e.id === id)
     : engineForUnit(state, getSelected(state)) ?? activeEngine(state);
-  return sellVehicle(state, engine);
+  if (engine) releaseVehicle(state, engine);
+  const home = engine ? stationOfEngine(state, engine) : null;
+  const refund = sellVehicle(state, engine);
+  if (refund && home != null) refundStation(state, home, refund);
+  return refund;
 }
 
 // Re-exported so the UI has one module to talk to for orders.
@@ -626,7 +704,7 @@ export { orderEngine, orderCrew };
 
 export function serialize(state) {
   return {
-    version: 16,
+    version: 17,
     seed: state.seed,
     time: state.time,
     clock: state.clock,
@@ -668,12 +746,25 @@ export function serialize(state) {
       supply: e.supply,
       kits: e.kits,
       cargo: (e.cargo ?? []).map((c) => ({ ...c })),
+      // The current order, so a vehicle that is driving to a call keeps driving after a load.
+      path: e.path.map((p) => ({ x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10 })),
+      goal: e.goal ? { x: e.goal.x, y: e.goal.y } : null,
+      arrived: Boolean(e.arrived),
+      packTimer: e.packTimer ?? 0,
+      wildfireId: e.wildfireId ?? null,
+      blockadeId: e.blockadeId ?? null,
+      victimId: e.victimId ?? null,
+      patientId: e.patientId ?? null,
+      standbyFor: e.standbyFor ? { kind: e.standbyFor.kind, id: e.standbyFor.id } : null,
+      mission: e.mission ? { ...e.mission } : null,
+      status: e.status,
     })),
     crews: state.crew.map((c) => ({
       id: c.id,
       number: c.number,
       name: c.name,
       engineId: c.engineId,
+      personId: c.personId ?? null,
       x: c.x,
       y: c.y,
       riding: c.riding,
@@ -695,6 +786,8 @@ export function serialize(state) {
       maxLife: p.maxLife,
       treated: p.treated,
       critical: p.critical,
+      claimedBy: p.claimedBy ?? null,
+      medicId: p.medicId ?? null,
     })),
     blockades: state.blockades.map((b) => ({
       id: b.id, name: b.name, place: b.place, tx: b.tx, ty: b.ty, tw: b.tw, th: b.th,
@@ -710,10 +803,62 @@ export function serialize(state) {
     insured: state.insured,
     contracts: JSON.parse(JSON.stringify(state.contracts)),
     ledger: { ...state.ledger, lastCharges: state.ledger.lastCharges ? { ...state.ledger.lastCharges } : null, by: { ...(state.ledger.by ?? {}) } },
+    ...serializeExtras(state),
   };
 }
 
-export function loadState(data) {
+/** The parts of a shift added after save version 16 (all JSON-safe copies). */
+function serializeExtras(state) {
+  const copy = (v) => (v == null ? v : JSON.parse(JSON.stringify(v)));
+  return {
+    mode: state.mode,
+    rules: copy(state.rules),
+    weather: copy(state.weather),
+    presets: copy(state.presets),
+    report: copy(state.report),
+    support: copy(state.support),
+    evac: copy(state.evac),
+    disaster: copy(state.disaster),
+    scenario: copy(state.scenario),
+    shiftDue: Boolean(state.shiftDue),
+    incidentPace: state.incidentPace ?? 1,
+    rngSeed: state.rngSeed,
+    buildingExtras: state.buildings
+      .filter((b) => b.leak || b.collapse || b.utilityCut || b.evacZone)
+      .map((b) => ({ id: b.id, leak: b.leak ?? 0, collapse: copy(b.collapse ?? null), utilityCut: Boolean(b.utilityCut), evacZone: b.evacZone ?? null, evacOccupants: b.evacOccupants ?? null })),
+  };
+}
+
+/** Put the extras back. Missing parts (a save from an older version) keep the defaults createGame gave. */
+function restoreExtras(state, data, campaign) {
+  state.mode = data.mode === 'career' && campaign ? 'career' : data.mode === 'challenge' && data.scenario ? 'challenge' : 'quick';
+  state.campaign = state.mode === 'career' ? campaign : null;
+  state.rules = data.rules && typeof data.rules === 'object' ? { ...data.rules } : {};
+  state.presets = restorePresets(data.presets);
+  state.report = restoreReport(state, data.report);
+  state.support = restoreSupport(data.support);
+  state.evac = restoreEvacuation(data.evac);
+  state.disaster = data.disaster ?? null;
+  state.scenario = state.mode === 'challenge' ? data.scenario : null;
+  state.shiftDue = Boolean(data.shiftDue);
+  state.incidentPace = data.incidentPace ?? 1;
+  // A loaded shift carries on with fresh luck instead of replaying the calls it started with.
+  if (Number.isFinite(data.rngSeed)) state.rngSeed = data.rngSeed;
+  state.rng = new Rng(state.rngSeed + Math.floor(state.time) * 31 + 1);
+  if (data.weather?.kind) setWeather(state, data.weather.kind);
+  const byId = new Map(state.buildings.map((b) => [b.id, b]));
+  for (const e of data.buildingExtras ?? []) {
+    const b = byId.get(e.id);
+    if (!b) continue;
+    b.leak = e.leak ?? 0;
+    b.collapse = e.collapse ?? null;
+    b.utilityCut = Boolean(e.utilityCut);
+    b.evacZone = e.evacZone ?? null;
+    b.evacOccupants = e.evacOccupants ?? null;
+  }
+}
+
+export function loadState(data, campaign = null) {
   const state = createGame(data.seed ?? CONFIG.city.seed);
   state.time = data.time ?? 0;
   state.clock = data.clock ?? CONFIG.clockStart;
@@ -757,6 +902,8 @@ export function loadState(data) {
   restoreBlockades(state, data.blockades ?? []);
   if (data.wind) state.wind = { ...state.wind, ...data.wind };
   if (data.ledger) state.ledger = { ...createLedger(), ...data.ledger };
+  restoreExtras(state, data, campaign);
+  if (isCareer(state)) applyStationEffects(state);
   state.running = true;
   state.paused = false;
   return state;

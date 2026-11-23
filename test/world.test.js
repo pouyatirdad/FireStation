@@ -56,10 +56,11 @@ test('early calls come from near the station and the covered area grows', () => 
   state.nextBigAt = 99999;
   const st = state.city.station;
   const seen = [];
-  for (let i = 0; i < 4000 && seen.length < 12; i++) {
+  // Not every call is a fire (leaks, collapses and rescues are not alight), so give it time.
+  for (let i = 0; i < 16000 && seen.length < 12; i++) {
     update(state, 1 / 30);
     for (const b of state.buildings) {
-      if (b.state === 'burning' && !seen.includes(b.id)) seen.push(b.id);
+      if ((b.state === 'burning' || (b.trapped ?? 0) > 0 || (b.leak ?? 0) > 0) && !seen.includes(b.id)) seen.push(b.id);
     }
     // Keep the clock early so the radius stays small.
     state.time = Math.min(state.time, 60);

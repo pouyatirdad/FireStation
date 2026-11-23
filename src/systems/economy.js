@@ -120,6 +120,10 @@ export function hourlyCharges(state) {
 /** Borrow one step. The loan accrues interest every game hour until repaid. */
 export function takeLoan(state, amount = CONFIG.economy.loan.step) {
   const { max } = CONFIG.economy.loan;
+  if (state.rules?.noLoan) {
+    addEvent(state, 'The bank will not lend in this scenario', 'warn');
+    return false;
+  }
   if ((state.loan ?? 0) + amount > max) {
     addEvent(state, `The bank will not lend more than ${money(max)}`, 'warn');
     return false;

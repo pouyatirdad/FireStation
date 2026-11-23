@@ -14,6 +14,8 @@ import { pileUp, trafficAccident } from './chains.js';
 import { drowningCall } from './water.js';
 import { placeNear } from './places.js';
 import { SCENES, sceneFits } from './scenes.js';
+import { collapseBuilding } from './collapse.js';
+import { startLeak } from './hazmat.js';
 
 const SMALL = () => ['structure', 'structure', 'structure', 'rescue', 'block'];
 const BIG = ['industrial', 'tower', 'bigBlock', 'forest', 'pileup'];
@@ -392,6 +394,7 @@ function runBuildingScene(state, scene, b) {
   b.incidentLabel = scene.label;
   b.incidentType = scene.big ? 'big' : scene.fire != null ? 'structure' : n > 0 ? 'rescue' : null;
   if (scene.hazmat) b.hazmat = true;
+  if (scene.leak) startLeak(state, b, 1);
   if (scene.big) b.big = true;
   if (scene.fire != null) {
     ignite(state, b, 'call'); // (this also works out who got out and who did not)
@@ -399,6 +402,7 @@ function runBuildingScene(state, scene, b) {
   }
   // The scene says how many are cut off, whatever the evacuation worked out.
   if (n > 0) b.trapped = Math.max(b.trapped ?? 0, n);
+  if (scene.collapse) collapseBuilding(state, b, Math.max(n, 1));
   addEvent(state, scene.text({ b, n, where }), scene.big ? 'big' : scene.fire != null ? 'fire' : 'warn');
   for (const [lo, hi, reason] of scene.hurt ?? []) spawnPatient(state, b, rng.range(lo, hi), reason);
   if (scene.blast) state.onExplosion?.(b);
@@ -530,7 +534,7 @@ export function updateIncidents(state, dt) {
   if (state.nextCallAt <= 0) {
     const [lo, hi] = cfg.callEvery;
     const pace = 1 + (cfg.callScale - 1) * phase.level; // calls come faster as the cycle builds
-    state.nextCallAt = state.rng.range(lo, hi) * pace * (bigIncidentActive(state) ? 1.35 : 1);
+    state.nextCallAt = state.rng.range(lo, hi) * pace * (bigIncidentActive(state) ? 1.35 : 1) * (state.incidentPace ?? 1);
     if (open < openLimit(state)) spawnSmall(state);
   }
 
@@ -546,4 +550,28 @@ export function updateIncidents(state, dt) {
   const [lo, hi] = cfg.bigEvery;
   state.nextBigAt = state.rng.range(lo, hi);
   spawnBig(state);
+}
+
+/**
+ * Start one kind of incident on demand: scripted scenarios, challenges and the
+ * disasters build on this instead of re-implementing the generators.
+ * kinds: structure, block, rescue, industrial, tower, bigBlock, forest, pileup,
+ * crash, medical, water, scene:<id>.
+ */
+export function spawnIncidentKind(state, kind) {
+  if (kind.startsWith('scene:')) return playScene(state, kind.slice(6));
+  switch (kind) {
+    case 'structure': return structureFire(state);
+    case 'block': return blockFire(state, 2);
+    case 'rescue': return rescueJob(state);
+    case 'industrial': return industrialFire(state);
+    case 'tower': return towerFire(state);
+    case 'bigBlock': return bigBlockFire(state);
+    case 'forest': return forestFire(state);
+    case 'pileup': return pileUp(state, (x, y) => inCoverage(state, x, y, 1.2));
+    case 'crash': return trafficAccident(state, roadAllowed(state));
+    case 'medical': return medicalCall(state);
+    case 'water': return drowningCall(state, (x, y) => inCoverage(state, x, y));
+    default: return null;
+  }
 }

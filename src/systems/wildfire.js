@@ -9,6 +9,7 @@ import { buildingRect, ignite } from './fire.js';
 import { spawnSmoke } from './effects.js';
 import { placeNear } from './places.js';
 import { alignment } from './wind.js';
+import { emit } from './hooks.js';
 
 let seq = 1;
 
@@ -28,6 +29,7 @@ export function startWildfire(state, x, y, reward = 2200, opts = {}) {
     big: true,
   };
   state.wildfires.push(wildfire);
+  emit(state, 'wildfire:start', wildfire);
   addEvent(state, opts.text ?? `MAJOR INCIDENT — forest fire in ${placeNear(state, x, y)}`, 'big');
   return wildfire;
 }
