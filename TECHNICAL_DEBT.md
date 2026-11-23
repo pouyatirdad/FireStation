@@ -24,6 +24,9 @@ should only be extended.
 - The EMS call stores `cargo`, `hospitalId`, `deliverAt`, `waiting` on the support record; saves keep them
   through `restoreSupport`'s spread, which is another unvalidated path.
 
+- Deferred from M1: the patient release order (design in DEVELOPMENT_PROGRESS.md, "Architecture decisions").
+  It needs a `stabilised` patient state so a released patient is neither dropped nor paid for twice.
+
 ## B. Structural (do when a feature touches it; do not rewrite what works)
 
 | # | Debt | Evidence | Fix | Size |

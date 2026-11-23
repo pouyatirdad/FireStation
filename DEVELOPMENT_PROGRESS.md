@@ -132,7 +132,7 @@ the game runs and almost never while it is paused.
 
 - 0.18 M1: hospitals have no **capacity** yet, so a "full hospital" cannot divert an ambulance (milestone 3);
   the EMS service's ambulance is an abstraction (a timer from the straight-line distance, not a vehicle on the
-  map); with no hospital standing, patients wait aboard indefinitely (there is no release order); the new hospital
+  map); with no hospital standing, patients wait aboard indefinitely (the release order is deferred, see the decision below); the new hospital
   rules also apply in Quick Response, where they change who is taken where by a small amount (parity run: same
   fires, calls and fleet, a few patients differently treated).
 
@@ -149,6 +149,16 @@ the game runs and almost never while it is paused.
 - Balance has been reviewed with bots and arithmetic, not with many hours of human play.
 
 ## Architecture decisions
+
+- **0.18 M1: release order for patients deferred.** If every hospital is unavailable, an ambulance keeps its
+  patients aboard (they are stabilised, so there is no survival clock) and retries every few seconds, with one
+  warning. A manual "release" was left out because a released patient must become a street patient again, and
+  with today's data that either loses them or pays the treatment fee twice. Intended handling, with milestone 3
+  (hospital capacity): a released patient returns to the street as a *stabilised* patient (`stabilised: true`,
+  severity kept, no second treatment fee, a fresh clock equal to the remaining critical time), claimable by any
+  ambulance with room; they count as a casualty only if that clock runs out; and the same path is used when a
+  vehicle is lost with patients aboard. Until then waiting aboard is the safe behaviour: nobody disappears and
+  nobody is paid twice.
 
 - **No new engine.** New systems are modules called from `update()` in `game.js`. State is plain data.
 - **Observer for the report.** `report.js` watches the map instead of being called from every incident

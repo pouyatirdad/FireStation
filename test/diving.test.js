@@ -9,10 +9,10 @@ import {
   applyPreset, defaultPresets, planPreset, restorePresets, validatePreset, fitsSlot, availableVehicles, diverTotal,
 } from '../src/systems/presets.js';
 import { createCareer } from '../src/systems/modes.js';
-import { diveRate } from '../src/systems/modifiers.js';
+import { diveRate, diveReach } from '../src/systems/modifiers.js';
 import { startTraining, updatePersonnel } from '../src/systems/personnel.js';
 import { Rng } from '../src/core/math.js';
-import { CONFIG } from '../src/core/config.js';
+import { CONFIG, TILE } from '../src/core/config.js';
 
 function shift(seed = 17) {
   const state = createGame(7);
@@ -134,14 +134,60 @@ test('save and load while divers are working loses nobody', () => {
 test('diving skill is career only: Quick Response is unchanged', () => {
   const quick = shift();
   assert.equal(diveRate(quick, { personId: 'p1' }), 1);
+  assert.equal(diveReach(quick, { personId: 'p1' }), 1);
   const crew = { personId: 'p1' };
   const career = {
     mode: 'career',
     campaign: { personnel: [{ id: 'p1', certs: ['diving'] }, { id: 'p2', certs: [] }] },
   };
-  assert.equal(diveRate(career, crew), CONFIG.water.dive.certified);
-  assert.equal(diveRate(career, { personId: 'p2' }), CONFIG.water.dive.uncertified);
-  assert.ok(CONFIG.water.dive.certified > 1 && CONFIG.water.dive.uncertified < 1);
+  const d = CONFIG.water.dive;
+  assert.equal(diveRate(career, crew), 1.2, 'certified: +20 % rescue speed');
+  assert.equal(diveReach(career, crew), 1.25, 'certified: +25 % range');
+  assert.equal(diveRate(career, { personId: 'p2' }), d.uncertified.rescue);
+  assert.equal(diveReach(career, { personId: 'p2' }), d.uncertified.range);
+  assert.ok(d.uncertified.rescue < 1 && d.uncertified.range < 1, 'uncertified divers are slower and reach less far');
+});
+
+/**
+ * Does a diver from the starting engine take a casualty placed `factor` times the dive range from the vehicle?
+ * (The casualty is moved after the divers are out, so only the range decides.)
+ */
+function takesCasualty(mode, certified, factor) {
+  const state = mode === 'career' ? createCareer({ name: 'x' }) : shift();
+  startShift(state);
+  state.incidentsEnabled = false;
+  state.rng = new Rng(17);
+  const engine = state.engines[0];
+  if (mode === 'career') {
+    for (const c of state.crew.filter((x) => x.engineId === engine.id)) {
+      state.campaign.personnel.find((p) => p.id === c.personId).certs = certified ? ['diving'] : [];
+    }
+  }
+  drowningCall(state, () => true);
+  const victim = state.victims[0];
+  state.selected = { kind: 'victim', id: victim.id };
+  commandDispatch(state);
+  const out = run(state, 150, (s) => s.crew.some((c) => c.engineId === engine.id && !c.riding && c.tool === 'diving'));
+  assert.notEqual(out, null, 'divers are out');
+  for (const c of state.crew) c.victimId = null;
+  victim.diverId = null;
+  victim.life = 1e6;
+  victim.x = engine.x + factor * CONFIG.tools.diving.range * TILE;
+  victim.y = engine.y;
+  update(state, 1 / 60);
+  return state.crew.some((c) => c.engineId === engine.id && c.victimId === victim.id);
+}
+
+test('in a career a certified diver swims 25 % further and an uncertified one 20 % less far', () => {
+  assert.equal(takesCasualty('career', true, 1.2), true, 'certified reaches 1.2 x the base range');
+  assert.equal(takesCasualty('career', true, 1.3), false, 'but not 1.3 x');
+  assert.equal(takesCasualty('career', false, 1.0), false, 'uncertified does not reach the base range');
+  assert.equal(takesCasualty('career', false, 0.75), true, 'only 0.8 x of it');
+});
+
+test('in Quick Response the dive range is exactly the vehicle\'s own', () => {
+  assert.equal(takesCasualty('quick', false, 0.95), true);
+  assert.equal(takesCasualty('quick', false, 1.05), false);
 });
 
 function careerRescueSeconds(certified, seed) {
@@ -163,7 +209,7 @@ function careerRescueSeconds(certified, seed) {
   return t;
 }
 
-test('in a career a certified diver is quicker than one without the certificate', () => {
+test('in a career a certified diver brings someone out sooner than one without the certificate', () => {
   for (const seed of [17, 34]) {
     const slow = careerRescueSeconds(false, seed);
     const fast = careerRescueSeconds(true, seed);

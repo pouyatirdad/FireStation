@@ -187,9 +187,10 @@ export const CONFIG = {
     survive: [80, 130], // seconds a person lasts in the water
     reward: 420, // per person brought out
     maxVictims: 6,
-    // Career only: how fast a diver brings someone out. A crew member with the Dive Rescue certificate is
-    // quicker, one without is slower; in Quick Response everybody works at 1.
-    dive: { certified: 1.25, uncertified: 0.75 },
+    // Career only. A crew member with the Dive Rescue certificate swims further from the vehicle and brings
+    // someone out faster; one without the certificate does both less well. `range` multiplies the vehicle's dive
+    // range, `rescue` the speed of the rescue. In Quick Response everybody works at 1.
+    dive: { certified: { range: 1.25, rescue: 1.2 }, uncertified: { range: 0.8, rescue: 0.8 } },
   },
 
   // Roads blocked by wrecks and debris, and the traffic that queues behind them.

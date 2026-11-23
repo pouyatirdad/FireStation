@@ -23,12 +23,19 @@ All notable changes to FireStation. The game is one self-contained `index.html`;
 - **Water rescue preset.** It asked for "a rescue boat" by name, so a city without a boat could never answer a
   drowning call from it. Presets have a new **Diving unit** slot (anything that can put divers in the water);
   the built-in water preset uses it, an untouched old one is migrated on load, an edited one is kept.
-- **Dive Rescue Training (career).** A new course and certificate: a certified diver brings someone out
-  25 % faster, one without it 25 % slower (`CONFIG.water.dive`). Quick Response is unchanged.
+- **Dive Rescue Training (career).** A new course and certificate (`diving`). A certified diver swims **25 %
+  further** from the vehicle and brings someone out **20 % faster**; one without the certificate swims 20 %
+  less far and works 20 % slower (`CONFIG.water.dive`; the approved scope named only the certified bonuses and
+  "reduced" for the rest, so 0.8 for both is a choice made here). Quick Response is unchanged: everyone is 1.
+  An earlier commit of this milestone applied only the speed, at 25 % and 75 %; the range was missing.
 - Tests: `hospital.test.js` (14), `diving.test.js` (11), `parity.test.js` (2); one existing test changed
   because it asserted the old owned-bases-only rule. `tools/parity-run.mjs` and
   `test/fixtures/parity-quick.json` hold four deterministic Quick Response shifts recorded on 0.17.1 before any
   change: with the old hospital rules the new code reproduces them exactly.
+- **Deferred on purpose: the patient release order.** With every hospital destroyed, patients stay aboard and the
+  ambulance retries every few seconds (one warning). A "release" button was planned but is not built: a released
+  patient has to go back to the street, and doing that today would either drop them (a patient that vanishes) or
+  pay the treatment fee a second time. See the future handling in DEVELOPMENT_PROGRESS.md.
 - Not in this milestone: a hospital's **capacity** and diversion when it is full (milestone 3), and the save
   schema (milestone 2).
 

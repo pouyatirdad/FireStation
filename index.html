@@ -2530,9 +2530,10 @@ const CONFIG = {
     survive: [80, 130], // seconds a person lasts in the water
     reward: 420, // per person brought out
     maxVictims: 6,
-    // Career only: how fast a diver brings someone out. A crew member with the Dive Rescue certificate is
-    // quicker, one without is slower; in Quick Response everybody works at 1.
-    dive: { certified: 1.25, uncertified: 0.75 },
+    // Career only. A crew member with the Dive Rescue certificate swims further from the vehicle and brings
+    // someone out faster; one without the certificate does both less well. `range` multiplies the vehicle's dive
+    // range, `rescue` the speed of the rescue. In Quick Response everybody works at 1.
+    dive: { certified: { range: 1.25, rescue: 1.2 }, uncertified: { range: 0.8, rescue: 0.8 } },
   },
 
   // Roads blocked by wrecks and debris, and the traffic that queues behind them.
@@ -7316,13 +7317,18 @@ function clearRate(state, x, y) {
   return supportAt(state, 'police', x, y) ? 1.5 : 1;
 }
 
-/** Career only: a diver with the Dive Rescue certificate brings someone out faster than one without. */
-function diveRate(state, crew) {
+const diveMods = (state, crew) => {
   const person = personOf(state, crew);
-  if (!person) return 1;
+  if (!person) return null;
   const d = CONFIG.water.dive;
   return person.certs?.includes('diving') ? d.certified : d.uncertified;
-}
+};
+
+/** Career only: how fast a diver brings someone out (the certificate speeds it up, its absence slows it). */
+const diveRate = (state, crew) => diveMods(state, crew)?.rescue ?? 1;
+
+/** Career only: how far from its vehicle a diver swims, as a multiple of the vehicle's dive range. */
+const diveReach = (state, crew) => diveMods(state, crew)?.range ?? 1;
 
 /** Is this crew member protected against hazardous materials? */
 function hazmatProtected(state, crew, engine) {
@@ -7332,7 +7338,7 @@ function hazmatProtected(state, crew, engine) {
 }
 
 
-return { isCareer, personOf, fatigueFactor, skillBonus, workRate, upgradeLevel, stationOfEngine, supportAt, speedMod, clearRate, diveRate, hazmatProtected };
+return { isCareer, personOf, fatigueFactor, skillBonus, workRate, upgradeLevel, stationOfEngine, supportAt, speedMod, clearRate, diveRate, diveReach, hazmatProtected };
 })();
 
 // ---- src/systems/eta.js ----
@@ -7982,7 +7988,7 @@ const { findPatient, hospitalAvailable, hospitalById, hospitalInReach, isMedical
 const { estimate } = __m["src/systems/eta.js"];
 const { workOnBlockade } = __m["src/systems/blockades.js"];
 const { findVictim, rescueVictim } = __m["src/systems/water.js"];
-const { clearRate, diveRate, isCareer, speedMod, upgradeLevel, workRate } = __m["src/systems/modifiers.js"];
+const { clearRate, diveRate, diveReach, isCareer, speedMod, upgradeLevel, workRate } = __m["src/systems/modifiers.js"];
 // The engine companies and their crews: driving the road network, laying hose,
 // pulling people out and putting water on a fire.
 //
@@ -9834,7 +9840,7 @@ function updateAmbulance(state, engine, dt) {
 }
 
 function updateDiver(state, crew, engine, dt) {
-  const range = (engine.spec.diveRange ?? CONFIG.tools.diving.range) * TILE;
+  const range = (engine.spec.diveRange ?? CONFIG.tools.diving.range) * TILE * diveReach(state, crew);
   let victim = crew.victimId ? findVictim(state, crew.victimId) : null;
   if (!victim) {
     crew.victimId = null;

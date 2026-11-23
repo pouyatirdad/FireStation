@@ -25,7 +25,7 @@ import {
 import { estimate } from './eta.js';
 import { workOnBlockade } from './blockades.js';
 import { findVictim, rescueVictim } from './water.js';
-import { clearRate, diveRate, isCareer, speedMod, upgradeLevel, workRate } from './modifiers.js';
+import { clearRate, diveRate, diveReach, isCareer, speedMod, upgradeLevel, workRate } from './modifiers.js';
 
 const CREW_OFFSETS = [
   { a: 0.85, r: 26 },
@@ -1854,7 +1854,7 @@ function updateAmbulance(state, engine, dt) {
 }
 
 function updateDiver(state, crew, engine, dt) {
-  const range = (engine.spec.diveRange ?? CONFIG.tools.diving.range) * TILE;
+  const range = (engine.spec.diveRange ?? CONFIG.tools.diving.range) * TILE * diveReach(state, crew);
   let victim = crew.victimId ? findVictim(state, crew.victimId) : null;
   if (!victim) {
     crew.victimId = null;

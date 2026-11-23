@@ -150,7 +150,7 @@ The **Finance** tab holds the levers:
 
 The south of the map is the **harbour** and a **river** runs down through the east, crossed by every street on a bridge. People go into the water (a car off a bridge, someone off the quay) and have about 80–130 seconds.
 
-- **Presets can ask for a *Diving unit*** (any vehicle that can put divers in the water), which is what the built-in *Water rescue* preset does. In a career, **Dive Rescue Training** gives a crew member a certificate: a certified diver brings someone out 25 % faster, an uncertified one 25 % slower.
+- **Presets can ask for a *Diving unit*** (any vehicle that can put divers in the water), which is what the built-in *Water rescue* preset does. In a career, **Dive Rescue Training** gives a crew member a certificate: a certified diver swims 25 % further from the vehicle and brings someone out 20 % faster; an uncertified one swims 20 % less far and works 20 % slower.
 - **No special vehicle is needed to dive.** An engine or rescue unit drives to the bank, the firefighters it has diving gear for suit up and swim out, and the others stay aboard; the **rescue boat** sails to the casualty and puts its divers over the side. Right-click the person, or give a firefighter diving gear (<kbd>V</kbd>) yourself. Someone brought out is a critical patient: the ambulances and the hospital take over.
 - **Fireboat** pumps river or harbour water without limit from 18 tiles out, but only works fires near the water. **Air tanker** circles a fire dropping water and skims the sea to refill. Both are strong, and neither is any use inland.
 - Boats berth at the **Harbour Dock** ($6,500, sixteen berths on the quay), which has to be bought first.

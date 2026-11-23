@@ -86,13 +86,18 @@ export function clearRate(state, x, y) {
   return supportAt(state, 'police', x, y) ? 1.5 : 1;
 }
 
-/** Career only: a diver with the Dive Rescue certificate brings someone out faster than one without. */
-export function diveRate(state, crew) {
+const diveMods = (state, crew) => {
   const person = personOf(state, crew);
-  if (!person) return 1;
+  if (!person) return null;
   const d = CONFIG.water.dive;
   return person.certs?.includes('diving') ? d.certified : d.uncertified;
-}
+};
+
+/** Career only: how fast a diver brings someone out (the certificate speeds it up, its absence slows it). */
+export const diveRate = (state, crew) => diveMods(state, crew)?.rescue ?? 1;
+
+/** Career only: how far from its vehicle a diver swims, as a multiple of the vehicle's dive range. */
+export const diveReach = (state, crew) => diveMods(state, crew)?.range ?? 1;
 
 /** Is this crew member protected against hazardous materials? */
 export function hazmatProtected(state, crew, engine) {
